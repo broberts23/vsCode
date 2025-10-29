@@ -1,0 +1,30 @@
+name: PIM Elevate Demo
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'main' ]
+
+jobs:
+  request-elevation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PowerShell
+        uses: PowerShell/PowerShell@v3
+
+      - name: Azure Login using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }} # optional when using federated credential
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          oidc-provider: 'github'
+
+      - name: Run activation request (CI non-interactive)
+        shell: pwsh
+        env:
+          # These would be populated from Bicep outputs or GitHub secrets in a real run
+          ASSIGNEE_OBJECT_ID: ${{ secrets.ASSIGNEE_OBJECT_ID }}
+          VAULT_RESOURCE_ID: ${{ secrets.VAULT_RESOURCE_ID }}
+        run: |
+          pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId 'role-demo' -ResourceId 'res-demo' -Justification 'CI test' -VaultName 'demo-vault' -SecretName 'demo-secret'
