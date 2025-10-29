@@ -273,7 +273,7 @@ function Remove-TemporaryKeyVaultRoleAssignment {
     }
 }
 
-function Rotate-KeyVaultSecretWithPim {
+function Invoke-PimKeyVaultSecretRotation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $VaultName,
@@ -328,4 +328,4 @@ function Rotate-KeyVaultSecretWithPim {
     }
 }
 
-Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Connect-AzManagedIdentity, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Rotate-KeyVaultSecretWithPim
+Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Connect-AzManagedIdentity, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation

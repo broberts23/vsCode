@@ -39,7 +39,7 @@ if ($VaultName -and $SecretName) {
         Write-Verbose 'VAULT_RESOURCE_ID env var not set; supply the Key Vault resource id as VAULT_RESOURCE_ID in CI.'
     }
 
-    $rotation = Rotate-KeyVaultSecretWithPim -VaultName $VaultName -SecretName $SecretName -RequestId $req.requestId -AssigneeObjectId $env:ASSIGNEE_OBJECT_ID -VaultResourceId $env:VAULT_RESOURCE_ID
+    $rotation = Invoke-PimKeyVaultSecretRotation -VaultName $VaultName -SecretName $SecretName -RequestId $req.requestId -AssigneeObjectId $env:ASSIGNEE_OBJECT_ID -VaultResourceId $env:VAULT_RESOURCE_ID
     $out = [pscustomobject]@{
         request = $req
         rotation = $rotation
