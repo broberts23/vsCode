@@ -56,8 +56,6 @@ Below are practical scenarios where a CI runner (or other automation) would requ
 
 Each scenario benefits from: scoped, time-limited access; machine-readable justification and metadata (PR/build IDs); and an auditable activation lifecycle that can be retained in CI artifacts or forwarded to SIEM and compliance tooling.
 
-
-
 ## Benefits vs Permanent assignments
 
 - Minimized attack surface (short TTL)
@@ -136,38 +134,37 @@ High-level steps for the demo
 	- Run integration smoke tests that verify the rotated secret works for consumers (use a test consumer identity and avoid printing secrets to logs).
 	- If validation fails, run an automated rollback plan (store previous secret version reference and use it to restore if necessary).
 
+## Implementation plan (detailed TODOs)
 
-Guidance and TODOs
+Below is a prioritized checklist to finish the project. I've grouped items by priority and included links/commands where helpful.
 
-- Done: `infra/main.bicep` now creates a Key Vault with `enableRbacAuthorization: true` (RBAC model).
-- TODO: Implement Microsoft Graph PIM calls in `scripts/PimAutomation.psm1` to create activation requests, poll status, and (when available) programmatically activate roles. These APIs live in Microsoft Graph under the privilegedAccess/azureResources surface (may require beta APIs for some operations). See: https://learn.microsoft.com/graph/api/resources/privilegedaccess?view=graph-rest-1.0
-- TODO: Replace the interactive Graph auth with non-interactive CI patterns — prefer GitHub Actions OIDC federation to a service principal or use an Azure-hosted runner with managed identity. Document required Graph scopes and admin consent steps.
-- Done: The PowerShell module now attempts to call Microsoft Graph PIM endpoints (beta) when a Graph access token is available. The module obtains tokens from the Azure CLI (which the workflow gets by logging in via Azure OIDC) or falls back to interactive Connect-MgGraph.
+### High priority
+- [ ] Implement Microsoft Graph PIM integration
+  - Replace module stubbed flows in `scripts/PimAutomation.psm1` with Graph calls (privilegedAccess/azureResources endpoints). Research which endpoints are beta and add a compatibility note.
+- [ ] Add CI wiring and automated tests
+  - Extend `.github/workflows/pim-elevate.yml` to install pwsh, modules, run PSScriptAnalyzer, and Invoke-Pester.
+  - Configure unit test job to set `PIM_AUTOMATION_SKIP_GRAPH=1` and an optional integration job that uses GitHub OIDC and a test subscription.
+- [ ] Security & auth
+  - Document required Graph permissions and least-privilege roles.
+  - Provide a GitHub OIDC federated credential example and a service principal with minimal permissions for integration tests.
 
-- Required Graph permissions (examples):
-	- Role Management: "RoleManagement.ReadWrite.Directory" (application or delegated depending on flow). See: https://learn.microsoft.com/graph/permissions-reference
-	- Privileged Access / PIM surfaces: may require the PrivilegedAccess Graph permissions which are often under beta and require admin consent.
+### Medium priority
+- [ ] Module hygiene and developer ergonomics
+  - Add `scripts/PimAutomation.psd1` (module manifest) with `PowerShellVersion = '7.4'` and `FunctionsToExport`.
+  - Add PSScriptAnalyzer config and CI linter step.
+  - Rename any remaining commands using unapproved verbs (we renamed one already). Run `Get-Verb` and address warnings.
+- [ ] Tests and mocks
+  - Add unit tests that `Mock` external calls (Connect-MgGraph, Invoke-RestMethod, Set-AzKeyVaultSecret, New-AzRoleAssignment).
+  - Add an integration test harness that runs in a disposable subscription (optional; require cleanup).
+- [ ] Operational runbook and docs
+  - Add playbooks for emergency activation, manual revoke, and approval escalation.
+  - Add developer `README.md` with how to run tests locally, required env vars, and how to use OIDC in Actions.
 
-- GitHub Actions OIDC: the example workflow shows use of `azure/login` with OIDC; in production you should configure a federated credential on your Azure AD app registration and avoid long-lived client secrets. See: https://learn.microsoft.com/azure/developer/github/connect-from-azure
+### Low priority / extras
+- [ ] Optional automation extras
+  - Implement an Azure Function or Logic App approver stub for conditional approvals.
+  - Provide a small dashboard (Power BI / Static site) for activation metrics.
 
-- Quick CI wiring example (what to set in your repo secrets or pipeline):
-	- `ASSIGNEE_OBJECT_ID` — objectId of the automation principal (the service principal / managed identity performing the rotation)
-	- `VAULT_RESOURCE_ID` — full resource id of the Key Vault (e.g. `/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/<name>`)
-
-Notes on stability: Microsoft Graph PIM APIs often live in the beta surface and may change; test in a non-production tenant and consider mocking for unit tests. See: https://learn.microsoft.com/graph/overview
-- TODO: Add robust error handling and retry logic around role assignment creation and removal to handle propagation delays.
-- TODO: Add Pester integration tests that mock Graph and Az role assignment calls, plus an integration test that runs against a disposable test subscription and cleans up role assignments.
-
-Notes on Key Vault RBAC and role IDs
-
-- The demo uses the built-in "Key Vault Secrets Officer" role for data-plane secret writes. Its role definition id is: `b86a8fe4-44ce-4948-aee5-eccb2c155cd7` (see https://learn.microsoft.com/azure/key-vault/general/rbac-guide).
-- To create/remove role assignments programmatically the caller needs `Microsoft.Authorization/roleAssignments/write` and `Microsoft.Authorization/roleAssignments/delete` (for example Owner, User Access Administrator, or Key Vault Data Access Administrator).
-
-Security note
-
-- Switching the Key Vault to the RBAC model invalidates access policies defined on the vault. Don't enable RBAC without ensuring equivalent role assignments exist for required actors; otherwise you can cause outages.
-
-The repository includes a demo stub for the rotation flow (see `scripts/run-activation.ps1` and `scripts/PimAutomation.psm1`) which the following CI workflow can exercise in demo mode. Replace the stubs with real Graph/Key Vault calls according to your environment before using in production.
 
 ## Operational runbook
 
@@ -180,6 +177,10 @@ TODO: List incremental improvements and stretch goals such as:
 - Add GitHub OIDC federated credential example
 - Implement automated approver with conditional logic
 - Create a dashboard to surface activation metrics and audit summaries
+
+## Conclusion
+
+TODO: Summarize the benefits of JIT PIM activations for CI/CD, reinforce the security and governance advantages, and encourage readers to explore the repository and adapt the patterns to their own environments.
 
 ## References
 

@@ -74,6 +74,48 @@ function Connect-PimGraph {
     Connect-MgGraph -Scopes $Scopes -ErrorAction Stop | Out-Null
 }
 
+function Invoke-PimGraphRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [ValidateSet('Get','Post','Patch','Delete','Put')] [string] $Method,
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter()] [string] $Body,
+        [Parameter()] [string] $AccessToken
+    )
+
+    # Try v1.0 first, then beta. Return parsed JSON object or $null.
+    $baseUris = @('https://graph.microsoft.com/v1.0/', 'https://graph.microsoft.com/beta/')
+    foreach ($base in $baseUris) {
+        $uri = ($base.TrimEnd('/') + '/' + $Path.TrimStart('/'))
+        try {
+            Write-Verbose ("Invoke-PimGraphRequest: {0} {1}" -f $Method, $uri)
+            $headers = @{}
+            if ($AccessToken) { $headers['Authorization'] = "Bearer $AccessToken" }
+            if ($Method -eq 'Get') {
+                $res = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -ErrorAction Stop
+            } elseif ($Method -eq 'Post') {
+                $headers['Content-Type'] = 'application/json'
+                $res = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $Body -ErrorAction Stop
+            } elseif ($Method -eq 'Patch') {
+                $headers['Content-Type'] = 'application/json'
+                $res = Invoke-RestMethod -Method Patch -Uri $uri -Headers $headers -Body $Body -ErrorAction Stop
+            } elseif ($Method -eq 'Delete') {
+                $res = Invoke-RestMethod -Method Delete -Uri $uri -Headers $headers -ErrorAction Stop
+            } elseif ($Method -eq 'Put') {
+                $headers['Content-Type'] = 'application/json'
+                $res = Invoke-RestMethod -Method Put -Uri $uri -Headers $headers -Body $Body -ErrorAction Stop
+            }
+
+            if ($res -ne $null) { return $res }
+        } catch {
+            Write-Verbose ("Invoke-PimGraphRequest to {0} failed: {1}" -f $uri, $_)
+            # try next base (v1.0 -> beta)
+        }
+    }
+
+    return $null
+}
+
 function New-PimActivationRequest {
     [CmdletBinding()]
     param(
@@ -85,11 +127,10 @@ function New-PimActivationRequest {
 
     $token = Get-GraphAccessToken
     if ($token) {
-        $uri = 'https://graph.microsoft.com/beta/privilegedAccess/azureResources/roleAssignmentRequests'
         $body = @{ roleDefinitionId = $RoleId; resourceId = $ResourceId; justification = $Justification; duration = "PT${DurationMinutes}M" } | ConvertTo-Json -Depth 6
         try {
-            Write-Verbose ("Submitting PIM activation request to {0}" -f $uri)
-            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' } -Body $body -ErrorAction Stop
+            Write-Verbose 'Submitting PIM activation request via Graph (v1.0 then beta)'
+            $response = Invoke-PimGraphRequest -Method Post -Path 'privilegedAccess/azureResources/roleAssignmentRequests' -Body $body -AccessToken $token
             if ($response) {
                 return [pscustomobject]@{
                     roleId          = $RoleId
@@ -102,7 +143,7 @@ function New-PimActivationRequest {
                 }
             }
         } catch {
-            Write-Verbose ("Graph PIM POST failed for {0}: {1}" -f $uri, $_)
+            Write-Verbose ("Graph PIM POST failed: {0}" -f $_)
         }
     }
 
@@ -125,25 +166,19 @@ function Get-PimRequest {
 
     $token = Get-GraphAccessToken
     if ($token) {
-        $uris = @(
-            "https://graph.microsoft.com/beta/privilegedAccess/azureResources/roleAssignmentRequests/$RequestId",
-            "https://graph.microsoft.com/v1.0/privilegedAccess/azureResources/roleAssignmentRequests/$RequestId"
-        )
-
-        foreach ($uri in $uris) {
-            try {
-                $response = Invoke-RestMethod -Method Get -Uri $uri -Headers @{ Authorization = "Bearer $token" } -ErrorAction Stop
-                if ($response) {
-                    return [pscustomobject]@{
-                        requestId   = $RequestId
-                        status      = ($response.status -or 'Unknown')
-                        activatedAt = ($response.activatedDateTime -as [datetime])
-                        raw         = $response
-                    }
+        try {
+            Write-Verbose 'Retrieving PIM request via Graph (v1.0 then beta)'
+            $response = Invoke-PimGraphRequest -Method Get -Path ("privilegedAccess/azureResources/roleAssignmentRequests/$RequestId") -AccessToken $token
+            if ($response) {
+                return [pscustomobject]@{
+                    requestId   = $RequestId
+                    status      = ($response.status -or 'Unknown')
+                    activatedAt = ($response.activatedDateTime -as [datetime])
+                    raw         = $response
                 }
-            } catch {
-                Write-Verbose ("Graph PIM GET failed for {0}: {1}" -f $uri, $_)
             }
+        } catch {
+            Write-Verbose ("Graph PIM GET failed: {0}" -f $_)
         }
     }
 
