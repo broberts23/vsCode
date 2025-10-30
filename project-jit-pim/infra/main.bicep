@@ -9,7 +9,7 @@ param storageAccountName string = 'pimdemosa${uniqueString(resourceGroup().id)}'
 param userAssignedIdentityName string = 'pimDemoIdentity${uniqueString(resourceGroup().id)}'
 
 @description('Name of the Key Vault to create for the demo')
-param keyVaultName string = 'pim-demo-kv-${uniqueString(resourceGroup().id)}'
+param keyVaultName string = toLower(substring('kv${uniqueString(resourceGroup().id)}', 0, 15))
 
 resource storage 'Microsoft.Storage/storageAccounts@2025-01-01' = {
   name: toLower(storageAccountName)
@@ -47,6 +47,22 @@ resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
     enabledForDiskEncryption: false
     enabledForTemplateDeployment: false
     enableSoftDelete: true
+  }
+}
+
+// Assign the built-in 'Key Vault Secrets Officer' role to the user-assigned managed identity
+// scoped to the Key Vault resource. This allows the identity to set secrets in the vault.
+// Role definition id for Key Vault Secrets Officer: b86a8fe4-44ce-4948-aee5-eccb2c155cd7
+var keyVaultSecretsOfficerRoleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
+
+resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
+  // Use stable values for role assignment name GUID: subscriptionId, keyVault.id, and userIdentity.id
+  name: guid(subscription().subscriptionId, keyVault.id, userIdentity.id, keyVaultSecretsOfficerRoleId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsOfficerRoleId)
+    principalId: userIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 

@@ -8,6 +8,13 @@ assignment, and secret rotation. All functions are defined once in this file.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Module-level preference: prefer beta Graph endpoints when set (env or default false)
+$PimAutomation_UseBeta = $true
+if ($env:PIM_AUTOMATION_USE_BETA) {
+    $val = $env:PIM_AUTOMATION_USE_BETA.ToString().ToLowerInvariant()
+    if ($val -in @('1','true','yes','beta')) { $PimAutomation_UseBeta = $true }
+}
+
 function Get-GraphAccessToken {
     [CmdletBinding()]
     param(
@@ -83,8 +90,19 @@ function Invoke-PimGraphRequest {
         [Parameter()] [string] $AccessToken
     )
 
-    # Try v1.0 first, then beta. Return parsed JSON object or $null.
-    $baseUris = @('https://graph.microsoft.com/v1.0/', 'https://graph.microsoft.com/beta/')
+    # Decide endpoint preference: default to module-level flag unless overridden by parameter
+    if ($PSBoundParameters.ContainsKey('UseBeta')) {
+        $preferBeta = $UseBeta
+    } else {
+        $preferBeta = $PimAutomation_UseBeta
+    }
+
+    # Try v1.0 then beta by default, or beta then v1.0 when preferring beta.
+    if ($preferBeta) {
+        $baseUris = @('https://graph.microsoft.com/beta/', 'https://graph.microsoft.com/v1.0/')
+    } else {
+        $baseUris = @('https://graph.microsoft.com/v1.0/', 'https://graph.microsoft.com/beta/')
+    }
     foreach ($base in $baseUris) {
         $uri = ($base.TrimEnd('/') + '/' + $Path.TrimStart('/'))
         try {
@@ -122,22 +140,39 @@ function New-PimActivationRequest {
         [Parameter(Mandatory)][string] $RoleId,
         [Parameter(Mandatory)][string] $ResourceId,
         [Parameter()][string] $Justification,
-        [Parameter()][ValidateRange(15, 1440)][int] $DurationMinutes = 60
+        [Parameter()][ValidateRange(15, 1440)][int] $DurationMinutes = 60,
+        [Parameter()][switch] $UseBeta
     )
 
     $token = Get-GraphAccessToken
     if ($token) {
-        $body = @{ roleDefinitionId = $RoleId; resourceId = $ResourceId; justification = $Justification; duration = "PT${DurationMinutes}M" } | ConvertTo-Json -Depth 6
+        # Build Graph payload according to documented fields (best-effort):
+        $payload = [ordered]@{
+            roleDefinitionId = $RoleId
+            resourceId       = $ResourceId
+            justification    = $Justification
+            duration         = "PT${DurationMinutes}M"
+        }
+        $body = $payload | ConvertTo-Json -Depth 6
         try {
             Write-Verbose 'Submitting PIM activation request via Graph (v1.0 then beta)'
-            $response = Invoke-PimGraphRequest -Method Post -Path 'privilegedAccess/azureResources/roleAssignmentRequests' -Body $body -AccessToken $token
+            $response = Invoke-PimGraphRequest -Method Post -Path 'privilegedAccess/azureResources/roleAssignmentRequests' -Body $body -AccessToken $token -UseBeta:$UseBeta
+            # Normalize response: prefer id/status/createdDateTime/activatedDateTime
+            if ($response -is [System.Management.Automation.PSCustomObject] -or $response -is [System.Object]) {
+                $respId = $null
+                if ($response.PSObject.Properties.Match('id').Count -gt 0) { $respId = $response.id }
+                elseif ($response.PSObject.Properties.Match('requestId').Count -gt 0) { $respId = $response.requestId }
+                elseif ($response.'@odata.id') { $respId = $response.'@odata.id' }
+                $respStatus = $response.status -or $response.state -or $null
+                $respCreated = $response.createdDateTime -or $response.createdDateTimeUtc -or $null
+            }
             if ($response) {
                 return [pscustomobject]@{
                     roleId          = $RoleId
                     resourceId      = $ResourceId
-                    requestId       = $response.id
-                    status          = ($response.status -or 'Pending')
-                    createdDateTime = ($response.createdDateTime -as [datetime])
+                    requestId       = ($respId -or $response.id -or ([guid]::NewGuid()).Guid)
+                    status          = ($respStatus -or ($response.status) -or 'Pending')
+                    createdDateTime = (($respCreated -or $response.createdDateTime) -as [datetime])
                     justification   = $Justification
                     raw             = $response
                 }
@@ -161,19 +196,23 @@ function New-PimActivationRequest {
 function Get-PimRequest {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string] $RequestId
+        [Parameter(Mandatory)][string] $RequestId,
+        [Parameter()][switch] $UseBeta
     )
 
     $token = Get-GraphAccessToken
     if ($token) {
         try {
             Write-Verbose 'Retrieving PIM request via Graph (v1.0 then beta)'
-            $response = Invoke-PimGraphRequest -Method Get -Path ("privilegedAccess/azureResources/roleAssignmentRequests/$RequestId") -AccessToken $token
+            $response = Invoke-PimGraphRequest -Method Get -Path ("privilegedAccess/azureResources/roleAssignmentRequests/$RequestId") -AccessToken $token -UseBeta:$UseBeta
             if ($response) {
+                # Normalize response
+                $respStatus = $response.status -or $response.state -or $null
+                $respActivated = $response.activatedDateTime -or $response.activatedDateTimeUtc -or $null
                 return [pscustomobject]@{
-                    requestId   = $RequestId
-                    status      = ($response.status -or 'Unknown')
-                    activatedAt = ($response.activatedDateTime -as [datetime])
+                    requestId   = ($response.id -or $RequestId)
+                    status      = ($respStatus -or 'Unknown')
+                    activatedAt = ($respActivated -as [datetime])
                     raw         = $response
                 }
             }
