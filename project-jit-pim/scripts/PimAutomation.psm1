@@ -402,4 +402,62 @@ function Invoke-PimKeyVaultSecretRotation {
     }
 }
 
+
+function Invoke-TempKeyVaultRotationLifecycle {
+    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultName,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $SecretName,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $AssigneeObjectId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultResourceId,
+        [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300
+    )
+
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference = 'Stop'
+
+    if (-not $PSCmdlet.ShouldProcess("Assign role to $AssigneeObjectId on $VaultResourceId and rotate secret")) { return }
+
+    $roleAssignment = $null
+    try {
+        # Create a temporary Key Vault role assignment
+        Write-Verbose "Creating temporary Key Vault role assignment for $AssigneeObjectId"
+        $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId
+        Write-Verbose ("Created role assignment: {0}" -f ($roleAssignment.Id -or $roleAssignment.Name))
+
+        # Perform the secret rotation under the granted role
+        Write-Verbose "Rotating secret $SecretName in vault $VaultName"
+        $rotation = Set-PimKeyVaultSecret -VaultName $VaultName -SecretName $SecretName -RequestId ([guid]::NewGuid()).Guid
+
+        # Remove the role assignment
+        Write-Verbose "Removing temporary role assignment for $AssigneeObjectId"
+        $removed = Remove-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId
+
+        # Validate removal: attempt to find any role assignment matching principal and scope
+        try {
+            Import-Module Az.Resources -ErrorAction Stop
+            $existing = Get-AzRoleAssignment -ObjectId $AssigneeObjectId -Scope $VaultResourceId -ErrorAction SilentlyContinue
+        } catch {
+            Write-Verbose "Az.Resources not available for validation: $_"
+            $existing = $null
+        }
+
+        $validation = @{ removed = $true; assignmentsFound = 0 }
+        if ($existing) { $validation.assignmentsFound = ($existing | Measure-Object).Count; if ($validation.assignmentsFound -gt 0) { $validation.removed = $false } }
+
+        return [pscustomobject]@{
+            rotation        = $rotation
+            roleAssignment  = ($roleAssignment | Select-Object Id,Name)
+            removed         = $removed
+            validation      = $validation
+            timestamp       = (Get-Date).ToUniversalTime()
+        }
+    } catch {
+        Write-Error ("Invoke-TempKeyVaultRotationLifecycle failed: {0}" -f $_)
+        throw
+    }
+}
+
+Export-ModuleMember -Function Invoke-TempKeyVaultRotationLifecycle
+
 Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Connect-AzManagedIdentity, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation

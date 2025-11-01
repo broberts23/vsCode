@@ -39,10 +39,12 @@ if ($VaultName -and $SecretName) {
         Write-Verbose 'VAULT_RESOURCE_ID env var not set; supply the Key Vault resource id as VAULT_RESOURCE_ID in CI.'
     }
 
-    $rotation = Invoke-PimKeyVaultSecretRotation -VaultName $VaultName -SecretName $SecretName -RequestId $req.requestId -AssigneeObjectId $env:ASSIGNEE_OBJECT_ID -VaultResourceId $env:VAULT_RESOURCE_ID
+    # Use the lifecycle helper that creates the role assignment, rotates the secret, and removes the role
+    $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $VaultName -SecretName $SecretName -AssigneeObjectId $env:ASSIGNEE_OBJECT_ID -VaultResourceId $env:VAULT_RESOURCE_ID -Verbose
+
     $out = [pscustomobject]@{
         request = $req
-        rotation = $rotation
+        lifecycle = $lifecycleResult
     }
 } else {
     $out = $req

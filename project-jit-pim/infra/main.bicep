@@ -50,22 +50,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
   }
 }
 
-// Assign the built-in 'Key Vault Secrets Officer' role to the user-assigned managed identity
-// scoped to the Key Vault resource. This allows the identity to set secrets in the vault.
-// Role definition id for Key Vault Secrets Officer: b86a8fe4-44ce-4948-aee5-eccb2c155cd7
-var keyVaultSecretsOfficerRoleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
-
-resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  // Use stable values for role assignment name GUID: subscriptionId, keyVault.id, and userIdentity.id
-  name: guid(subscription().subscriptionId, keyVault.id, userIdentity.id, keyVaultSecretsOfficerRoleId)
-  scope: keyVault
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsOfficerRoleId)
-    principalId: userIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 // Outputs for wiring into CI and scripts
 output keyVaultName string = keyVault.name
 output keyVaultId string = keyVault.id

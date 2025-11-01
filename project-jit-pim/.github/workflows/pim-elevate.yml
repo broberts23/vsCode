@@ -2,12 +2,48 @@ name: PIM Elevate Demo
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ 'main' ]
+  schedule:
+    - cron: '0 2 * * 0' # weekly at 02:00 UTC (example)
+  workflow_call: {}
 
 jobs:
   request-elevation:
+    name: Request elevation and notify
     runs-on: ubuntu-latest
+    outputs:
+      assignee: ${{ steps.set-vars.outputs.assignee }}
+      vault: ${{ steps.set-vars.outputs.vault }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PowerShell
+        uses: PowerShell/PowerShell@v3
+
+      - name: Create activation request
+        id: set-vars
+        shell: pwsh
+        env:
+          ASSIGNEE_OBJECT_ID: ${{ secrets.ASSIGNEE_OBJECT_ID }}
+          VAULT_RESOURCE_ID: ${{ secrets.VAULT_RESOURCE_ID }}
+        run: |
+          $out = pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId 'role-demo' -ResourceId 'res-demo' -Justification 'CI test' -VaultName 'demo-vault' -SecretName 'demo-secret' | ConvertFrom-Json
+          # Emit outputs for downstream jobs
+          Write-Output "::set-output name=assignee::${env:ASSIGNEE_OBJECT_ID}"
+          Write-Output "::set-output name=vault::${env:VAULT_RESOURCE_ID}"
+          # Post a short notification comment to the PR/commit (if available)
+      - name: Notify approvers via workflow comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const body = `PIM rotation request created. Please review and approve in the Environments/Approvals gate to proceed.`
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number || 1, body })
+
+  approve-and-rotate:
+    name: Approve and rotate (requires manual approval)
+    needs: request-elevation
+    runs-on: ubuntu-latest
+    environment:
+      name: pim-rotation-approval
     steps:
       - uses: actions/checkout@v4
       - name: Set up PowerShell
@@ -16,15 +52,14 @@ jobs:
       - name: Azure Login using OIDC
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }} # optional when using federated credential
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           oidc-provider: 'github'
 
-      - name: Run activation request (CI non-interactive)
+      - name: Run rotation under approved gate
         shell: pwsh
         env:
-          # These would be populated from Bicep outputs or GitHub secrets in a real run
           ASSIGNEE_OBJECT_ID: ${{ secrets.ASSIGNEE_OBJECT_ID }}
           VAULT_RESOURCE_ID: ${{ secrets.VAULT_RESOURCE_ID }}
         run: |
-          pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId 'role-demo' -ResourceId 'res-demo' -Justification 'CI test' -VaultName 'demo-vault' -SecretName 'demo-secret'
+          pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId 'role-demo' -ResourceId 'res-demo' -Justification 'Approved by approver' -VaultName 'demo-vault' -SecretName 'demo-secret'
