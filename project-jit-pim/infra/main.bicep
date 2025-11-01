@@ -24,7 +24,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2025-01-01' = {
 }
 
 // Create a user-assigned managed identity that can be used by automation.
-resource userIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2018-11-30' = {
+resource userIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: toLower(userAssignedIdentityName)
   location: location
 }
@@ -55,7 +55,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
 // Role definition id for Key Vault Secrets Officer: b86a8fe4-44ce-4948-aee5-eccb2c155cd7
 var keyVaultSecretsOfficerRoleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
 
-resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2020-04-01-preview' = {
+resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   // Use stable values for role assignment name GUID: subscriptionId, keyVault.id, and userIdentity.id
   name: guid(subscription().subscriptionId, keyVault.id, userIdentity.id, keyVaultSecretsOfficerRoleId)
   scope: keyVault
