@@ -1,0 +1,18 @@
+name: PIM Elevate Demo - Usage Example
+
+# This workflow demonstrates calling the reusable template `pim-elevate.yml`.
+# Trigger it manually (Actions → PIM Elevate Demo - Usage Example → Run workflow) and
+
+on:
+  workflow_dispatch:
+
+jobs:
+  call-pim-template:
+    name: Call reusable PIM template (demo)
+    uses: ./.github/workflows/pim-elevate.yml
+    with:
+      # Example single-role / single-resource pairing. Replace with real IDs in your tenant.
+      roleIds: '["b86a8fe4-44ce-4948-aee5-eccb2c155cd7"]'
+      resourceIds: '["/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/demo-rg/providers/Microsoft.KeyVault/vaults/demo-kv"]'
+    # Inherit repository secrets so the called reusable workflow can use them.
+    secrets: inherit

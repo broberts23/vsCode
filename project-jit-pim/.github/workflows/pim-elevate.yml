@@ -2,9 +2,39 @@ name: PIM Elevate Demo
 
 on:
   workflow_dispatch:
+    inputs:
+      roleIds:
+        description: 'JSON array of role IDs (e.g. ["guid1","guid2"])'
+        required: false
+        default: '[]'
+      resourceIds:
+        description: 'JSON array of Azure resource IDs (e.g. ["/subscriptions/...","/subscriptions/..."])'
+        required: false
+        default: '[]'
+      vaultName:
+        description: 'Key Vault name (optional)'
+        required: false
+      secretName:
+        description: 'Secret name to rotate (optional)'
+        required: false
   schedule:
     - cron: '0 2 * * 0' # weekly at 02:00 UTC (example)
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      roleIds:
+        required: false
+        type: string
+        default: '[]'
+      resourceIds:
+        required: false
+        type: string
+        default: '[]'
+      vaultName:
+        required: false
+        type: string
+      secretName:
+        required: false
+        type: string
 
 jobs:
   request-elevation:
@@ -18,25 +48,88 @@ jobs:
       - name: Set up PowerShell
         uses: PowerShell/PowerShell@v3
 
-      - name: Create activation request
+      - name: Azure Login using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          oidc-provider: 'github'
+
+      - name: Create activation requests and build approval table
         id: set-vars
         shell: pwsh
         env:
           ASSIGNEE_OBJECT_ID: ${{ secrets.ASSIGNEE_OBJECT_ID }}
           VAULT_RESOURCE_ID: ${{ secrets.VAULT_RESOURCE_ID }}
+          ROLE_IDS: ${{ inputs.roleIds || github.event.inputs.roleIds || '[]' }}
+          RESOURCE_IDS: ${{ inputs.resourceIds || github.event.inputs.resourceIds || '[]' }}
+          VAULT_NAME: ${{ inputs.vaultName || github.event.inputs.vaultName || '' }}
+          SECRET_NAME: ${{ inputs.secretName || github.event.inputs.secretName || '' }}
         run: |
-          $out = pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId 'role-demo' -ResourceId 'res-demo' -Justification 'CI test' -VaultName 'demo-vault' -SecretName 'demo-secret' | ConvertFrom-Json
-          # Emit outputs for downstream jobs
-          Write-Output "::set-output name=assignee::${env:ASSIGNEE_OBJECT_ID}"
-          Write-Output "::set-output name=vault::${env:VAULT_RESOURCE_ID}"
-          # Post a short notification comment to the PR/commit (if available)
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          # Parse inputs (JSON arrays)
+          try {
+            $roles = ConvertFrom-Json $env:ROLE_IDS
+          } catch { $roles = @() }
+          try {
+            $resources = ConvertFrom-Json $env:RESOURCE_IDS
+          } catch { $resources = @() }
+
+          $count = [Math]::Min($roles.Count, $resources.Count)
+          if ($count -eq 0) { $count = [Math]::Max($roles.Count, $resources.Count) }
+
+          # Ensure Azure CLI is available for reverse lookups; login not performed here (approval job will re-login)
+          $table = "| RoleId | RoleName | ResourceId | ResourceName | ResourceType |`n|---|---|---|---|---|`n"
+          $requests = @()
+          for ($i = 0; $i -lt $count; $i++) {
+            $roleId = $null; $resourceId = $null
+            if ($i -lt $roles.Count) { $roleId = $roles[$i] }
+            if ($i -lt $resources.Count) { $resourceId = $resources[$i] }
+
+            # Create PIM activation request (no secret rotation yet)
+            Import-Module -Name (Join-Path $PSScriptRoot 'PimAutomation.psm1')
+            $req = New-PimActivationRequest -RoleId $roleId -ResourceId $resourceId -Justification 'CI requested activation'
+            $requests += $req
+
+            # Try to resolve role name and resource info via az CLI; if unavailable, fallback to ids
+            $roleName = $roleId
+            try {
+              $rj = az role definition show --id $roleId -o json 2>$null | ConvertFrom-Json
+              if ($rj -and $rj.roleName) { $roleName = $rj.roleName } elseif ($rj -and $rj.properties -and $rj.properties.roleName) { $roleName = $rj.properties.roleName }
+            } catch { }
+
+            $resName = $resourceId; $resType = ''
+            try {
+              $resj = az resource show --ids $resourceId -o json 2>$null | ConvertFrom-Json
+              if ($resj) { $resName = $resj.name; $resType = $resj.type }
+            } catch { }
+
+            $table += "| $roleId | $roleName | $resourceId | $resName | $resType |`n"
+          }
+
+          # Export outputs: assignee, vault, and the approval markdown table
+          if ($env:GITHUB_OUTPUT) {
+            "approvalTable<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            $table | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "assignee=${env:ASSIGNEE_OBJECT_ID}" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "vault=${env:VAULT_RESOURCE_ID}" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Output "approvalTable:"; Write-Output $table
+            Write-Output "assignee: $env:ASSIGNEE_OBJECT_ID"; Write-Output "vault: $env:VAULT_RESOURCE_ID"
+          }
       - name: Notify approvers via workflow comment
         uses: actions/github-script@v7
+        env:
+          APPROVAL_TABLE: ${{ steps.set-vars.outputs.approvalTable }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const body = `PIM rotation request created. Please review and approve in the Environments/Approvals gate to proceed.`
-            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number || 1, body })
+            const table = process.env.APPROVAL_TABLE || '';
+            const body = `PIM rotation request created. Please review and approve in the Environments/Approvals gate to proceed.\n\nRequested activations:\n${table}`;
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number || 1, body });
 
   approve-and-rotate:
     name: Approve and rotate (requires manual approval)
