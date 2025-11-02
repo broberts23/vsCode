@@ -77,23 +77,34 @@ jobs:
             $resources = ConvertFrom-Json $env:RESOURCE_IDS
           } catch { $resources = @() }
 
-          $count = [Math]::Min($roles.Count, $resources.Count)
-          if ($count -eq 0) { $count = [Math]::Max($roles.Count, $resources.Count) }
+          # Build pairing logic:
+          # - If single role and multiple resources: apply that role to all resources (one-to-many)
+          # - If single resource and multiple roles: apply each role to that resource (many-to-one)
+          # - If equal-length arrays: pair by index
+          # - Else (multiple roles and multiple resources with unequal counts): create cartesian product
+          $pairs = @()
+          if (($roles.Count -eq 1) -and ($resources.Count -ge 1)) {
+            foreach ($res in $resources) { $pairs += [pscustomobject]@{ RoleId = $roles[0]; ResourceId = $res } }
+          } elseif (($resources.Count -eq 1) -and ($roles.Count -ge 1)) {
+            foreach ($r in $roles) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $resources[0] } }
+          } elseif ($roles.Count -eq $resources.Count) {
+            for ($i = 0; $i -lt $roles.Count; $i++) { $pairs += [pscustomobject]@{ RoleId = $roles[$i]; ResourceId = $resources[$i] } }
+          } else {
+            # Cartesian product fallback
+            foreach ($r in $roles) { foreach ($res in $resources) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $res } } }
+          }
 
-          # Ensure Azure CLI is available for reverse lookups; login not performed here (approval job will re-login)
-          $table = "| RoleId | RoleName | ResourceId | ResourceName | ResourceType |`n|---|---|---|---|---|`n"
+          # Build a markdown table header and requests list
+          $table = "| RoleId | RoleName | ResourceId | ResourceName | ResourceType | RequestId |`n|---|---|---|---|---|---|`n"
           $requests = @()
-          for ($i = 0; $i -lt $count; $i++) {
-            $roleId = $null; $resourceId = $null
-            if ($i -lt $roles.Count) { $roleId = $roles[$i] }
-            if ($i -lt $resources.Count) { $resourceId = $resources[$i] }
-
+          Import-Module -Name (Join-Path $PSScriptRoot 'PimAutomation.psm1')
+          foreach ($pair in $pairs) {
+            $roleId = $pair.RoleId; $resourceId = $pair.ResourceId
             # Create PIM activation request (no secret rotation yet)
-            Import-Module -Name (Join-Path $PSScriptRoot 'PimAutomation.psm1')
             $req = New-PimActivationRequest -RoleId $roleId -ResourceId $resourceId -Justification 'CI requested activation'
             $requests += $req
 
-            # Try to resolve role name and resource info via az CLI; if unavailable, fallback to ids
+            # Resolve role name and resource details (best-effort)
             $roleName = $roleId
             try {
               $rj = az role definition show --id $roleId -o json 2>$null | ConvertFrom-Json
@@ -106,7 +117,17 @@ jobs:
               if ($resj) { $resName = $resj.name; $resType = $resj.type }
             } catch { }
 
-            $table += "| $roleId | $roleName | $resourceId | $resName | $resType |`n"
+            # Escape pipes in markdown and wrap ids/names in inline code ticks for clarity
+            $escape = { param($s) if ($null -eq $s) { return '``' } else { return ('`' + ($s -replace '\|', '\\|') + '`') } }
+            $rIdCell = & $escape $roleId
+            $rNameCell = & $escape $roleName
+            $resIdCell = & $escape $resourceId
+            $resNameCell = & $escape $resName
+            $resTypeCell = & $escape $resType
+
+            $reqId = $req.requestId -or $req.id -or ([guid]::NewGuid()).Guid
+            $reqIdCell = & $escape $reqId
+            $table += "| $rIdCell | $rNameCell | $resIdCell | $resNameCell | $resTypeCell | $reqIdCell |`n"
           }
 
           # Export outputs: assignee, vault, and the approval markdown table
