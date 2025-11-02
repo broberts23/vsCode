@@ -129,9 +129,31 @@ jobs:
             # Resolve role name and resource details (best-effort)
             $roleName = $roleId
             try {
-              $rj = az role definition show --id $roleId -o json 2>$null | ConvertFrom-Json
+              # roleId may be a GUID, a full resource id, or a human name. Try to resolve each form.
+              $rj = $null
+              if ($roleId -match '^/') {
+                # already a fully-qualified resource id
+                $rjJson = az role definition show --id $roleId -o json 2>$null
+              } elseif ($roleId -match '^[0-9a-fA-F\-]{36}$') {
+                # a GUID - prefer subscription-scoped resource id if subscriptionId is available
+                if (-not [string]::IsNullOrEmpty($subscriptionId)) {
+                  $fqId = "/subscriptions/$subscriptionId/providers/Microsoft.Authorization/roleDefinitions/$roleId"
+                  $rjJson = az role definition show --id $fqId -o json 2>$null
+                } else {
+                  # fallback to searching role definitions by id/name
+                  $rjJson = az role definition list --query "[?roleName=='$roleId' || name=='$roleId'] | [0]" -o json 2>$null
+                }
+              } else {
+                # treat as a role name - try list by name
+                $rjJson = az role definition list --name "$roleId" -o json 2>$null
+                if (-not $rjJson) {
+                  $rjJson = az role definition list --query "[?contains(roleName, '$roleId')] | [0]" -o json 2>$null
+                }
+              }
+
+              if ($rjJson) { $rj = $rjJson | ConvertFrom-Json } else { $rj = $null }
               if ($rj -and $rj.roleName) { $roleName = $rj.roleName } elseif ($rj -and $rj.properties -and $rj.properties.roleName) { $roleName = $rj.properties.roleName }
-            } catch { }
+            } catch { $rj = $null }
 
             $resName = $resourceId; $resType = ''
             try {
