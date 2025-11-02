@@ -5,9 +5,15 @@
 param location string = resourceGroup().location
 param storageAccountName string = 'pimdemosa${uniqueString(resourceGroup().id)}'
 
+// Import the Microsoft Graph Bicep extension so `Microsoft.Graph/*` resource types
+// are recognized. This requires a recent Bicep CLI and the `extensibility` experimental
+// feature enabled in bicepconfig.json (see bicep docs / issue discussion).
+extension graphV1
+extension graphBeta
+
 @description('Name of the user-assigned managed identity to create for demo automation')
 param userAssignedIdentityName string = 'pimDemoIdentity${uniqueString(resourceGroup().id)}'
-
+ 
 @description('Name of the Key Vault to create for the demo')
 param keyVaultName string = toLower(substring('kv${uniqueString(resourceGroup().id)}', 0, 15))
 
@@ -29,8 +35,41 @@ resource userIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
   location: location
 }
 
+// Assumption: the built-in User Access Administrator role definition ID used here grants permission
+// to create/remove role assignments. Adjust roleDefinitionId and scope as required for your security model.
+var userAccessAdminRoleId = 'fdd7a751-b60b-444a-984c-02652fe8fa1c' // User Access Administrator (assumed)
+
+// Use Microsoft.Graph Bicep resources. These use the Graph provider and expose
+// application and servicePrincipal properties at the top level in the template.
+// See: https://learn.microsoft.com/graph/templates/bicep/reference/serviceprincipals?view=graph-bicep-beta
+resource ghApp 'Microsoft.Graph/applications@beta' = {
+  uniqueName: toLower('pim-github-app-${uniqueString(resourceGroup().id)}')
+  displayName: 'pim-github-oidc-app-${uniqueString(resourceGroup().id)}'
+  signInAudience: 'AzureADMyOrg'
+}
+
+resource ghSp 'Microsoft.Graph/servicePrincipals@beta' = {
+  appId: ghApp.appId
+  displayName: ghApp.displayName
+}
+
+// Resource-group scoped role assignment to allow the SP to create/remove RBAC assignments at this RG level.
+// Using the resource group scope keeps the template deployable without cross-scope modules. Adjust scope
+// if you need subscription-wide permissions (then deploy a separate subscription-scoped module).
+resource ghSpRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(subscription().id, resourceGroup().id, 'ghSpRole', userAccessAdminRoleId)
+  scope: resourceGroup()
+  properties: {
+    // roleDefinitionId expects the full resource id for the role definition. Role definitions live under
+    // the subscription scope, so build the subscription-level resource id for the role definition.
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', userAccessAdminRoleId)
+    principalId: ghSp.id
+    principalType: 'ServicePrincipal'
+  }
+}
+
 // Key Vault for storing secrets used in the demo. We grant the managed identity secret permissions.
-resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
+resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
   name: toLower(keyVaultName)
   location: location
   properties: {
@@ -56,6 +95,11 @@ output keyVaultId string = keyVault.id
 output userIdentityClientId string = userIdentity.properties.clientId
 output userIdentityPrincipalId string = userIdentity.properties.principalId
 output userIdentityResourceId string = userIdentity.id
+
+// Outputs for the GitHub OIDC app/service-principal created in this template.
+output githubAppId string = ghApp.appId
+output githubServicePrincipalId string = ghSp.id
+output githubServicePrincipalResourceId string = ghSp.id
 
 // Outputs to help wiring up automation. In a production demo you'd create
 // the assignable group and app registration via Graph / portal and record the IDs.
