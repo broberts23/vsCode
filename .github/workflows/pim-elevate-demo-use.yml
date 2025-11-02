@@ -3,6 +3,10 @@ name: PIM Elevate Demo - Usage Example
 # This workflow demonstrates calling the reusable template `pim-elevate.yml`.
 # Trigger it manually (Actions → PIM Elevate Demo - Usage Example → Run workflow) and
 
+permissions:
+  id-token: write
+  contents: read
+
 on:
   workflow_dispatch:
 
