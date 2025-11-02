@@ -83,9 +83,9 @@ jobs:
           } catch { $resources = @() }
 
           # Ensure parsed values are arrays so .Count and enumeration work reliably.
-          # Using @() + value guarantees an array even for $null or a single scalar/object.
-          $roles = @() + @($roles)
-          $resources = @() + @($resources)
+          # Create explicit array views; even if $roles/$resources are scalars, @($var) yields a 1-item array.
+          $rolesArr = @($roles)
+          $resourcesArr = @($resources)
 
           # Replace placeholder <AZURE_SUBSCRIPTION_ID> in resource IDs when a subscriptionId input is provided
           $subscriptionId = $env:SUBSCRIPTION_ID
@@ -93,23 +93,26 @@ jobs:
             $resources = $resources | ForEach-Object { $_ -replace '<AZURE_SUBSCRIPTION_ID>', $subscriptionId }
           }
 
+          # Refresh array view after any substitution
+          $resourcesArr = @($resources)
+
           # Build pairing logic:
           # - If single role and multiple resources: apply that role to all resources (one-to-many)
           # - If single resource and multiple roles: apply each role to that resource (many-to-one)
           # - If equal-length arrays: pair by index
           # - Else (multiple roles and multiple resources with unequal counts): create cartesian product
           $pairs = @()
-          $rolesCount = $roles.Count
-          $resourcesCount = $resources.Count
+          $rolesCount = @($rolesArr).Count
+          $resourcesCount = @($resourcesArr).Count
           if (($rolesCount -eq 1) -and ($resourcesCount -ge 1)) {
-            foreach ($res in $resources) { $pairs += [pscustomobject]@{ RoleId = $roles[0]; ResourceId = $res } }
+            foreach ($res in @($resourcesArr)) { $pairs += [pscustomobject]@{ RoleId = $rolesArr[0]; ResourceId = $res } }
           } elseif (($resourcesCount -eq 1) -and ($rolesCount -ge 1)) {
-            foreach ($r in $roles) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $resources[0] } }
+            foreach ($r in @($rolesArr)) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $resourcesArr[0] } }
           } elseif ($rolesCount -eq $resourcesCount) {
-            for ($i = 0; $i -lt $rolesCount; $i++) { $pairs += [pscustomobject]@{ RoleId = $roles[$i]; ResourceId = $resources[$i] } }
+            for ($i = 0; $i -lt $rolesCount; $i++) { $pairs += [pscustomobject]@{ RoleId = $rolesArr[$i]; ResourceId = $resourcesArr[$i] } }
           } else {
             # Cartesian product fallback
-            foreach ($r in $roles) { foreach ($res in $resources) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $res } } }
+            foreach ($r in @($rolesArr)) { foreach ($res in @($resourcesArr)) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $res } } }
           }
 
           # Build a markdown table header and requests list
