@@ -17,8 +17,7 @@ on:
       secretName:
         description: 'Secret name to rotate (optional)'
         required: false
-  schedule:
-    - cron: '0 2 * * 0' # weekly at 02:00 UTC (example)
+
   workflow_call:
     inputs:
       roleIds:
