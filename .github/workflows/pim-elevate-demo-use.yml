@@ -15,8 +15,6 @@ jobs:
     with:
       # Example single-role / single-resource pairing. Replace with real IDs in your tenant.
       roleIds: '["b86a8fe4-44ce-4948-aee5-eccb2c155cd7"]'
-      # Build the resource ID at runtime using the AZURE_SUBSCRIPTION_ID secret and
-      # convert to JSON so the called workflow receives a JSON array string.
-      resourceIds: ${{ format('["/subscriptions/{0}/resourceGroups/{1}/providers/Microsoft.KeyVault/vaults/{2}"]', secrets.AZURE_SUBSCRIPTION_ID, 'my-rg', 'kvozvlgqf3cdcia') }}
-    # Pass repository secrets through to the called workflow (inherit all repo secrets).
+      resourceIds: '["/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/my-rg/providers/Microsoft.KeyVault/vaults/kvozvlgqf3cdcia"]'
     secrets: inherit
+ 

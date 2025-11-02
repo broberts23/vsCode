@@ -29,6 +29,11 @@ on:
         required: false
         type: string
         default: '[]'
+      subscriptionId:
+        required: false
+        type: string
+        description: 'Optional subscription id; if provided the template will replace <AZURE_SUBSCRIPTION_ID> placeholders in resourceIds.'
+        default: ''
       vaultName:
         required: false
         type: string
@@ -61,6 +66,7 @@ jobs:
         env:
           ROLE_IDS: ${{ inputs.roleIds || github.event.inputs.roleIds || '[]' }}
           RESOURCE_IDS: ${{ inputs.resourceIds || github.event.inputs.resourceIds || '[]' }}
+          SUBSCRIPTION_ID: ${{ inputs.subscriptionId || github.event.inputs.subscriptionId || secrets.AZURE_SUBSCRIPTION_ID || '' }}
           VAULT_NAME: ${{ inputs.vaultName || github.event.inputs.vaultName || '' }}
         run: |
           Set-StrictMode -Version Latest
@@ -73,6 +79,12 @@ jobs:
           try {
             $resources = ConvertFrom-Json $env:RESOURCE_IDS
           } catch { $resources = @() }
+
+          # Replace placeholder <AZURE_SUBSCRIPTION_ID> in resource IDs when a subscriptionId input is provided
+          $subscriptionId = $env:SUBSCRIPTION_ID
+          if (($null -ne $subscriptionId) -and ($subscriptionId -ne '')) {
+            $resources = $resources | ForEach-Object { $_ -replace '<AZURE_SUBSCRIPTION_ID>', $subscriptionId }
+          }
 
           # Build pairing logic:
           # - If single role and multiple resources: apply that role to all resources (one-to-many)
