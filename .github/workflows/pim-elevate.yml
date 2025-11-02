@@ -118,7 +118,8 @@ jobs:
           # Build a markdown table header and requests list
           $table = "| RoleId | RoleName | ResourceId | ResourceName | ResourceType | RequestId |`n|---|---|---|---|---|---|`n"
           $requests = @()
-          Import-Module -Name (Join-Path $PSScriptRoot 'PimAutomation.psm1')
+          # Import the module from the checked-out repository path
+          Import-Module -Name (Join-Path $env:GITHUB_WORKSPACE 'project-jit-pim/scripts/PimAutomation.psm1')
           foreach ($pair in $pairs) {
             $roleId = $pair.RoleId; $resourceId = $pair.ResourceId
             # Create PIM activation request (no secret rotation yet)
