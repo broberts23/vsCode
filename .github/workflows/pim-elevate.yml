@@ -82,10 +82,10 @@ jobs:
             $resources = ConvertFrom-Json $env:RESOURCE_IDS
           } catch { $resources = @() }
 
-          # Ensure parsed values are arrays so .Count and enumeration work reliably
-          # Convert scalars or single objects into single-element arrays.
-          if ($null -eq $roles) { $roles = @() } else { $roles = @($roles) }
-          if ($null -eq $resources) { $resources = @() } else { $resources = @($resources) }
+          # Ensure parsed values are arrays so .Count and enumeration work reliably.
+          # Using @() + value guarantees an array even for $null or a single scalar/object.
+          $roles = @() + @($roles)
+          $resources = @() + @($resources)
 
           # Replace placeholder <AZURE_SUBSCRIPTION_ID> in resource IDs when a subscriptionId input is provided
           $subscriptionId = $env:SUBSCRIPTION_ID
@@ -99,12 +99,14 @@ jobs:
           # - If equal-length arrays: pair by index
           # - Else (multiple roles and multiple resources with unequal counts): create cartesian product
           $pairs = @()
-          if (($roles.Count -eq 1) -and ($resources.Count -ge 1)) {
+          $rolesCount = $roles.Count
+          $resourcesCount = $resources.Count
+          if (($rolesCount -eq 1) -and ($resourcesCount -ge 1)) {
             foreach ($res in $resources) { $pairs += [pscustomobject]@{ RoleId = $roles[0]; ResourceId = $res } }
-          } elseif (($resources.Count -eq 1) -and ($roles.Count -ge 1)) {
+          } elseif (($resourcesCount -eq 1) -and ($rolesCount -ge 1)) {
             foreach ($r in $roles) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $resources[0] } }
-          } elseif ($roles.Count -eq $resources.Count) {
-            for ($i = 0; $i -lt $roles.Count; $i++) { $pairs += [pscustomobject]@{ RoleId = $roles[$i]; ResourceId = $resources[$i] } }
+          } elseif ($rolesCount -eq $resourcesCount) {
+            for ($i = 0; $i -lt $rolesCount; $i++) { $pairs += [pscustomobject]@{ RoleId = $roles[$i]; ResourceId = $resources[$i] } }
           } else {
             # Cartesian product fallback
             foreach ($r in $roles) { foreach ($res in $resources) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $res } } }
