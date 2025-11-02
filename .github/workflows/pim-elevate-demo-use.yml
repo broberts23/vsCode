@@ -9,7 +9,7 @@ on:
 jobs:
   call-pim-template:
     name: Call reusable PIM template (demo)
-    uses: ./.github/workflows/pim-elevate.yml
+    uses: ./project-jit-pim/.github/workflows/pim-elevate.yml
     with:
       # Example single-role / single-resource pairing. Replace with real IDs in your tenant.
       roleIds: '["b86a8fe4-44ce-4948-aee5-eccb2c155cd7"]'
