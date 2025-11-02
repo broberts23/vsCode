@@ -82,6 +82,11 @@ jobs:
             $resources = ConvertFrom-Json $env:RESOURCE_IDS
           } catch { $resources = @() }
 
+          # Ensure parsed values are arrays so .Count and enumeration work reliably
+          # Convert scalars or single objects into single-element arrays.
+          if ($null -eq $roles) { $roles = @() } else { $roles = @($roles) }
+          if ($null -eq $resources) { $resources = @() } else { $resources = @($resources) }
+
           # Replace placeholder <AZURE_SUBSCRIPTION_ID> in resource IDs when a subscriptionId input is provided
           $subscriptionId = $env:SUBSCRIPTION_ID
           if (($null -ne $subscriptionId) -and ($subscriptionId -ne '')) {
