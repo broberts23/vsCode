@@ -190,6 +190,10 @@ jobs:
     name: Approve and rotate (requires manual approval)
     needs: request-elevation
     runs-on: ubuntu-latest
+    # Environment gate: configure this environment in repo settings with required reviewers
+    # to enforce a manual "Approve" click before this job executes.
+    environment:
+      name: pim-rotation-approval
     steps:
       - uses: actions/checkout@v4
 
