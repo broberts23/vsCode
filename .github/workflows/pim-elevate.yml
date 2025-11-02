@@ -163,7 +163,8 @@ jobs:
             Write-Output "approvalTable:"; Write-Output $table
             Write-Output "assignee: $env:ASSIGNEE_OBJECT_ID"; Write-Output "vault: $env:VAULT_RESOURCE_ID"
           }
-      - name: Notify approvers via workflow comment
+      - name: Notify approvers via PR comment (only on pull_request)
+        if: ${{ github.event_name == 'pull_request' }}
         uses: actions/github-script@v7
         env:
           APPROVAL_TABLE: ${{ steps.set-vars.outputs.approvalTable }}
@@ -172,7 +173,18 @@ jobs:
           script: |
             const table = process.env.APPROVAL_TABLE || '';
             const body = `PIM rotation request created. Please review and approve in the Environments/Approvals gate to proceed.\n\nRequested activations:\n${table}`;
-            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number || 1, body });
+            const prNumber = context.payload.pull_request.number;
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, body });
+
+      - name: Add approval table to job summary (non-PR events)
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: pwsh
+        env:
+          APPROVAL_TABLE: ${{ steps.set-vars.outputs.approvalTable }}
+        run: |
+          "### PIM rotation request" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          $env:APPROVAL_TABLE | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
   approve-and-rotate:
     name: Approve and rotate (requires manual approval)
