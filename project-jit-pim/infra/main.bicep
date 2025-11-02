@@ -37,7 +37,7 @@ resource userIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-
 
 // Assumption: the built-in User Access Administrator role definition ID used here grants permission
 // to create/remove role assignments. Adjust roleDefinitionId and scope as required for your security model.
-var userAccessAdminRoleId = 'fdd7a751-b60b-444a-984c-02652fe8fa1c' // User Access Administrator (assumed)
+var userAccessAdminRoleId = '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9' // User Access Administrator (assumed)
 
 // Use Microsoft.Graph Bicep resources. These use the Graph provider and expose
 // application and servicePrincipal properties at the top level in the template.

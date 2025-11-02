@@ -59,12 +59,9 @@ jobs:
         id: set-vars
         shell: pwsh
         env:
-          ASSIGNEE_OBJECT_ID: ${{ secrets.ASSIGNEE_OBJECT_ID }}
-          VAULT_RESOURCE_ID: ${{ secrets.VAULT_RESOURCE_ID }}
           ROLE_IDS: ${{ inputs.roleIds || github.event.inputs.roleIds || '[]' }}
           RESOURCE_IDS: ${{ inputs.resourceIds || github.event.inputs.resourceIds || '[]' }}
           VAULT_NAME: ${{ inputs.vaultName || github.event.inputs.vaultName || '' }}
-          SECRET_NAME: ${{ inputs.secretName || github.event.inputs.secretName || '' }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
@@ -172,8 +169,5 @@ jobs:
 
       - name: Run rotation under approved gate
         shell: pwsh
-        env:
-          ASSIGNEE_OBJECT_ID: ${{ secrets.ASSIGNEE_OBJECT_ID }}
-          VAULT_RESOURCE_ID: ${{ secrets.VAULT_RESOURCE_ID }}
         run: |
-          pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId 'role-demo' -ResourceId 'res-demo' -Justification 'Approved by approver' -VaultName 'demo-vault' -SecretName 'demo-secret'
+          pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId 'role-demo' -ResourceId 'res-demo' -Justification 'Approved by approver'

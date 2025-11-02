@@ -1,4 +1,4 @@
-# Just‑In‑Time DevOps Admins: PIM + GitHub Actions for JIT role elevation
+# Just‑In‑Time RBAC for Workload Identities: PIM + GitHub Actions for JIT role elevation
 
 ## Introduction
 
