@@ -146,40 +146,37 @@ Planned docs: step-by-step command pages, payload examples, and troubleshooting 
 
 ## Using Microsoft Graph resources in Bicep (beta)
 
-You can author Entra resources (applications/service principals) directly in Bicep using the Microsoft Graph Bicep templates. This is currently a preview experience and requires enabling Bicep extensibility plus importing the Graph extension.
+You can author Entra resources (applications / service principals) directly from Bicep using the Microsoft Graph Bicep templates. This is a preview extensibility feature in Bicep and requires two things:
+
+- enabling Bicep extensibility in your repo-level `bicepconfig.json`, and
+- importing the Microsoft Graph extension in any Bicep file that declares `Microsoft.Graph/*` resources.
 
 What you need
-- A recent Bicep CLI and VS Code Bicep extension
-- A repo-level `bicepconfig.json` enabling extensibility
-- An extension import line in your Bicep file
-
-1) Enable extensibility in `bicepconfig.json`
-
-Place `bicepconfig.json` in the same folder (or a parent folder) as your Bicep files.
+- A recent Bicep CLI (or Azure CLI with the Bicep command) and the VS Code Bicep extension.
+- A repo-level `bicepconfig.json` that enables the extensibility feature and (optionally) maps extension aliases to the registry artifacts. Our repo includes a `bicepconfig.json` that looks like this:
 
 ```json
 {
-	"experimentalFeaturesEnabled": {
-		"extensibility": true
+	"experimentalFeaturesEnabled": {},
+	"extensions": {
+		"graphV1": "br:mcr.microsoft.com/bicep/extensions/microsoftgraph/v1.0:1.0.0",
+		"graphBeta": "br:mcr.microsoft.com/bicep/extensions/microsoftgraph/beta:1.0.0"
 	}
 }
 ```
 
-References:
-- Configure Bicep: https://learn.microsoft.com/azure/azure-resource-manager/bicep/bicep-config
-- Experimental features list: https://github.com/Azure/bicep/blob/main/docs/experimental-features.md
+See the Bicep configuration docs for details: https://learn.microsoft.com/azure/azure-resource-manager/bicep/bicep-config
+and the experimental features overview: https://github.com/Azure/bicep/blob/main/docs/experimental-features.md
 
-2) Import the Microsoft Graph Bicep extension
+Importing the Graph extension
 
-Add this near the top of your Bicep file before declaring `Microsoft.Graph/*` resources:
+Once `bicepconfig.json` is present and extensibility is enabled, you can import the Graph extension at the top of your Bicep file. You can import by the full module reference (the "br:" path) or by the alias you defined in `bicepconfig.json`:
 
 ```bicep
-extension 'br:mcr.microsoft.com/bicep/extensions/microsoftgraph/v1.0:0.1.8-preview'
-```
+// import by alias (preferred when you've mapped the extension in bicepconfig.json)
+extension 'graphV1'
 
-3) Use Graph resource types (beta)
-
-Example resource declarations (see Microsoft Learn for full schemas):
+After the extension import, you can declare Microsoft Graph types in Bicep. Example (beta) — consult the Graph Bicep reference for available properties and schema:
 
 ```bicep
 resource ghApp 'Microsoft.Graph/applications@beta' = {
@@ -194,9 +191,11 @@ resource ghSp 'Microsoft.Graph/servicePrincipals@beta' = {
 }
 ```
 
-Reference: Microsoft Graph Bicep servicePrincipals — https://learn.microsoft.com/graph/templates/bicep/reference/serviceprincipals?view=graph-bicep-beta
+Reference: Microsoft Graph Bicep templates — https://learn.microsoft.com/graph/templates/bicep/reference/serviceprincipals?view=graph-bicep-beta
 
-4) Validate and deploy
+Validate and deploy
+
+Update your local Bicep tooling and then build/validate the template before deploying:
 
 ```bash
 az bicep upgrade
@@ -209,13 +208,19 @@ az deployment group validate \
 	--parameters location='eastus'
 ```
 
-Troubleshooting
-- If you see “resource type is not valid” in local builds, ensure:
-	- You’ve updated the Bicep CLI and VS Code Bicep extension.
-	- `bicepconfig.json` contains `experimentalFeaturesEnabled.extensibility = true` and is in the nearest parent folder.
-	- The `extension 'br:...'` import line is present before Graph resources.
-- Some environments may still lack provider metadata for Graph resources. As a fallback, create the app/service principal with Azure CLI or Graph, then pass `appId` and `principalId` into the template as parameters.
-- Related discussion: https://github.com/Azure/bicep/issues/16447
+Troubleshooting and fallback strategy
+
+- If you get "resource type is not valid" or similar validation errors, ensure:
+	- Bicep CLI and the VS Code Bicep extension are up to date.
+	- `bicepconfig.json` is in the repository root (or a parent folder) and contains `"experimentalFeaturesEnabled": { "extensibility": true }`.
+	- The `extension` import line appears before any `Microsoft.Graph/*` resource declarations.
+
+- Some developer or CI environments may still lack the provider metadata required to author Graph types (the extensibility path is still evolving). For portability, this repo's `infra/main.bicep` includes a safe fallback pattern: instead of creating the app/servicePrincipal inline, accept `githubAppId` and `githubServicePrincipalId` as parameters and conditionally create the role assignment only when the service principal id is supplied. This lets teams either:
+	1. Create the app/service principal ahead of time (via CLI or Graph APIs) and pass the returned `appId`/`principalId` into the Bicep deployment, or
+	2. Enable Bicep extensibility in their dev/CI images and let the template create the app/SP directly.
+
+Related discussion and issues: https://github.com/Azure/bicep/issues/16447
+
 
 ## GitHub Actions workflow: `pim-elevate.yml`
 
