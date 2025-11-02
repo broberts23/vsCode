@@ -49,15 +49,12 @@ jobs:
       vault: ${{ steps.set-vars.outputs.vault }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set up PowerShell
-        uses: PowerShell/PowerShell@v3
 
       - name: Azure Login using OIDC
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          oidc-provider: 'github'
 
       - name: Create activation requests and build approval table
         id: set-vars
@@ -164,19 +161,14 @@ jobs:
     name: Approve and rotate (requires manual approval)
     needs: request-elevation
     runs-on: ubuntu-latest
-    environment:
-      name: pim-rotation-approval
     steps:
       - uses: actions/checkout@v4
-      - name: Set up PowerShell
-        uses: PowerShell/PowerShell@v3
 
       - name: Azure Login using OIDC
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          oidc-provider: 'github'
 
       - name: Run rotation under approved gate
         shell: pwsh
