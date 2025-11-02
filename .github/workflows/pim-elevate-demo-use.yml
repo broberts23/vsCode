@@ -9,9 +9,8 @@ on:
 jobs:
   call-pim-template:
     name: Call reusable PIM template (demo)
-    # Call the reusable workflow by repository path and ref. The path points to the
-    # workflow file inside the `project-jit-pim` folder in this repo.
-    uses: broberts23/vsCode/project-jit-pim/workflows/pim-elevate.yml@main
+    # Call the reusable workflow
+    uses: ./.github/workflows/pim-elevate.yml
     with:
       # Example single-role / single-resource pairing. Replace with real IDs in your tenant.
       roleIds: '["b86a8fe4-44ce-4948-aee5-eccb2c155cd7"]'
