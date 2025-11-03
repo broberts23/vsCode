@@ -37,21 +37,34 @@ if ($vaultName) {
     if (-not $assignee -or $assignee.Trim() -eq '') {
         Write-Verbose 'ASSIGNEE_OBJECT_ID not provided; attempting to derive from environment (Azure CLI or Az modules).'
 
-        # Try Azure CLI: if AZURE_CLIENT_ID exists, the login may be a service principal
+        $clientId = $env:AZURE_CLIENT_ID
+        $tenantId = $env:AZURE_TENANT_ID
+
+        # Try Azure CLI: resolve service principal by application id (requires Graph Application.Read.All)
         try {
             if (Get-Command az -ErrorAction SilentlyContinue) {
-                if ($env:AZURE_CLIENT_ID) {
+                if ($clientId) {
                     try {
-                        $spId = (& az ad sp show --id $env:AZURE_CLIENT_ID --query objectId -o tsv) -as [string]
+                        $spId = (& az ad sp show --id $clientId --query objectId -o tsv) -as [string]
                         if ($spId -and $spId.Trim()) { $assignee = $spId.Trim(); Write-Verbose "Derived assignee from service principal: $($assignee.Substring(0,6))..." }
                     } catch { Write-Verbose "az ad sp show failed: $_" }
                 }
 
-                if (-not $assignee) {
-                    try {
-                        $userId = (& az ad signed-in-user show --query objectId -o tsv) -as [string]
-                        if ($userId -and $userId.Trim()) { $assignee = $userId.Trim(); Write-Verbose "Derived assignee from signed-in user: $($assignee.Substring(0,6))..." }
-                    } catch { Write-Verbose "az signed-in-user lookup failed: $_" }
+                # For app-only identities without directory read, fall back to ARM RBAC lookups
+                if (-not $assignee -and $clientId) {
+                    $subscriptionId = $null
+                    if ($ResourceId -match '^/subscriptions/([^/]+)/') { $subscriptionId = $matches[1] }
+                    if (-not $subscriptionId -and $env:AZURE_SUBSCRIPTION_ID) { $subscriptionId = $env:AZURE_SUBSCRIPTION_ID }
+
+                    if ($subscriptionId) {
+                        try {
+                            $principalId = (& az role assignment list --assignee $clientId --scope "/subscriptions/$subscriptionId" --query '[0].principalId' -o tsv) -as [string]
+                            if ($principalId -and $principalId.Trim()) {
+                                $assignee = $principalId.Trim()
+                                Write-Verbose "Derived assignee from role assignment: $($assignee.Substring(0,6))..."
+                            }
+                        } catch { Write-Verbose "az role assignment list lookup failed: $_" }
+                    }
                 }
             }
         } catch { Write-Verbose "Azure CLI not available or lookup failed: $_" }
@@ -60,9 +73,9 @@ if ($vaultName) {
         if (-not $assignee -or $assignee.Trim() -eq '') {
             try {
                 if (Get-Command Get-AzADServicePrincipal -ErrorAction SilentlyContinue) {
-                    if ($env:AZURE_CLIENT_ID) {
+                    if ($clientId) {
                         try {
-                            $sp = Get-AzADServicePrincipal -ApplicationId $env:AZURE_CLIENT_ID -ErrorAction Stop
+                            $sp = Get-AzADServicePrincipal -ApplicationId $clientId -ErrorAction Stop
                             if ($sp -and $sp.Id) { $assignee = $sp.Id; Write-Verbose "Derived assignee from Az module (service principal): $($assignee.Substring(0,6))..." }
                         } catch { Write-Verbose "Get-AzADServicePrincipal failed: $_" }
                     }
@@ -71,7 +84,7 @@ if ($vaultName) {
         }
 
         if (-not $assignee -or $assignee.Trim() -eq '') {
-            throw 'ASSIGNEE_OBJECT_ID is not set and could not be derived. Set ASSIGNEE_OBJECT_ID in the workflow environment or ensure Azure CLI/Az modules can resolve the current principal.'
+            throw 'ASSIGNEE_OBJECT_ID is not set and could not be derived. Provide ASSIGNEE_OBJECT_ID in the workflow (preferred) or grant permissions so az can resolve the current principal.'
         }
     }
 
