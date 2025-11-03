@@ -254,7 +254,7 @@ function Set-PimKeyVaultSecret {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $VaultName,
-        [Parameter(Mandatory)][string] $SecretName,
+        [Parameter(Mandatory=$false)][string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][string] $RequestId,
         [Parameter()][string] $NewSecretValue
     )
@@ -351,7 +351,7 @@ function Invoke-PimKeyVaultSecretRotation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $VaultName,
-        [Parameter(Mandatory)][string] $SecretName,
+        [Parameter(Mandatory=$false)][string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][string] $RequestId,
         [Parameter(Mandatory)][string] $AssigneeObjectId,
         [Parameter(Mandatory)][string] $VaultResourceId,
@@ -407,7 +407,7 @@ function Invoke-TempKeyVaultRotationLifecycle {
     [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
     param(
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultName,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $SecretName,
+        [Parameter(Mandatory=$false)][ValidateNotNullOrEmpty()] [string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $AssigneeObjectId,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultResourceId,
         [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300

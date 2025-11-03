@@ -9,15 +9,8 @@ param(
 
     [Parameter(Mandatory=$true)]
     [string] $ResourceId,
-
     [Parameter(Mandatory=$false)]
-    [string] $Justification = 'CI triggered activation',
-
-    [Parameter(Mandatory=$false)]
-    [string] $VaultName,
-
-    [Parameter(Mandatory=$false)]
-    [string] $SecretName
+    [string] $Justification = 'CI triggered activation'
 )
 
 Import-Module -Name (Join-Path $PSScriptRoot 'PimAutomation.psm1')
@@ -28,18 +21,21 @@ Connect-PimGraph -Verbose
 
 $req = New-PimActivationRequest -RoleId $RoleId -ResourceId $ResourceId -Justification $Justification
 
-if ($VaultName -and $SecretName) {
-    Write-Verbose "Rotating secret $SecretName in vault $VaultName under request $($req.requestId)"
-    # For RBAC demo we require the assignee object id (the automation principal objectId)
-    if (-not $env:ASSIGNEE_OBJECT_ID) {
-        Write-Verbose 'ASSIGNEE_OBJECT_ID env var not set; supply the automation principal objectId as ASSIGNEE_OBJECT_ID in CI.'
-    }
-    if (-not $env:VAULT_RESOURCE_ID) {
-        Write-Verbose 'VAULT_RESOURCE_ID env var not set; supply the Key Vault resource id as VAULT_RESOURCE_ID in CI.'
-    }
+# If the resourceId looks like a Key Vault resource, derive the vault name so the lifecycle helper
+# can rotate a secret without requiring callers to pass the vault name explicitly.
+$vaultName = $null
+if ($ResourceId -match '/providers/Microsoft.KeyVault/vaults/([^/]+)$') {
+    $vaultName = $matches[1]
+}
 
-    # Use the lifecycle helper that creates the role assignment, rotates the secret, and removes the role
-    $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $VaultName -SecretName $SecretName -AssigneeObjectId $env:ASSIGNEE_OBJECT_ID -VaultResourceId $env:VAULT_RESOURCE_ID -Verbose
+if ($vaultName) {
+    Write-Verbose "Rotating secret in vault $vaultName under request $($req.requestId)"
+    if (-not $env:ASSIGNEE_OBJECT_ID) { Write-Verbose 'ASSIGNEE_OBJECT_ID env var not set; supply the automation principal objectId as ASSIGNEE_OBJECT_ID in CI.' }
+    # Vault resource id - use the provided ResourceId
+    $vaultResourceId = $ResourceId
+
+    # Use the lifecycle helper (it will generate a random secret value internally)
+    $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName ("auto-rotated-secret") -AssigneeObjectId $env:ASSIGNEE_OBJECT_ID -VaultResourceId $vaultResourceId -Verbose
 
     $out = [pscustomobject]@{
         request = $req
