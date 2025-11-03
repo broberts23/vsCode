@@ -14,7 +14,21 @@ param(
     [string] $Justification = 'CI triggered activation'
 )
 
-Import-Module -Name (Join-Path $PSScriptRoot 'PimAutomation.psm1')
+# Import the PimAutomation module from the scripts folder relative to this script
+try {
+    $scriptPath = $MyInvocation.MyCommand.Definition
+    if (-not $scriptPath) { $scriptPath = $PSScriptRoot }
+    $scriptDir = if ($scriptPath) { Split-Path -Path $scriptPath -Parent } else { Split-Path -Path $PSCommandPath -Parent }
+    $modulePath = Join-Path $scriptDir 'PimAutomation.psm1'
+    if (-not (Test-Path $modulePath)) {
+        Write-Error ("Module file not found at expected path: {0}" -f $modulePath)
+        throw 'PimAutomation module not found. Ensure the script is executed from the repository checkout and the scripts folder exists.'
+    }
+    Import-Module -Name $modulePath -Force -ErrorAction Stop
+} catch {
+    Write-Error ("Failed to import PimAutomation module: {0}" -f $_)
+    throw
+}
 
 Write-Verbose 'Connect to Graph: for demos this uses interactive auth. TODO: configure OIDC or managed identity for CI.'
 Connect-PimGraph -Verbose
