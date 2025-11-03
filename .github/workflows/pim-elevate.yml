@@ -82,18 +82,34 @@ jobs:
             $resources = ConvertFrom-Json $env:RESOURCE_IDS
           } catch { $resources = @() }
 
-          # Ensure parsed values are arrays and filter out null/empty/placeholder entries
-          $rolesArr = @($roles) | Where-Object { ($_ -is [string]) -and ($_.Trim() -ne '') }
-          $resourcesArr = @($resources) | Where-Object { ($_ -is [string]) -and ($_.Trim() -ne '') -and ($_ -notmatch '<AZURE_SUBSCRIPTION_ID>') }
+          function To-StringArray([object]$value) {
+            $list = @()
+            if ($null -eq $value) { return $list }
+            $items = if ($value -is [System.Array]) { @($value) } else { @($value) }
+            foreach ($i in $items) {
+              if ($null -ne $i) {
+                $s = [string]$i
+                if ($s -and $s.Trim() -ne '') { $list += $s }
+              }
+            }
+            return ,$list
+          }
+
+          # Normalize to arrays of non-empty strings
+          $rolesArr = To-StringArray $roles
+          $resourcesArr = To-StringArray $resources
 
           # Replace placeholder <AZURE_SUBSCRIPTION_ID> in resource IDs when a subscriptionId input is provided
           $subscriptionId = $env:SUBSCRIPTION_ID
           if (($null -ne $subscriptionId) -and ($subscriptionId -ne '')) {
-            $resources = $resources | ForEach-Object { $_ -replace '<AZURE_SUBSCRIPTION_ID>', $subscriptionId }
+            $tmp = @()
+            foreach ($res in $resourcesArr) { $tmp += ($res -replace '<AZURE_SUBSCRIPTION_ID>', $subscriptionId) }
+            $resourcesArr = $tmp
           }
 
           # Refresh array view after any substitution and filter again
-          $resourcesArr = @($resources) | Where-Object { ($_ -is [string]) -and ($_.Trim() -ne '') -and ($_ -notmatch '<AZURE_SUBSCRIPTION_ID>') }
+          # Remove any entries that still contain the placeholder
+          $resourcesArr = @($resourcesArr | Where-Object { $_ -notmatch '<AZURE_SUBSCRIPTION_ID>' })
 
           # Build pairing logic:
           # - If single role and multiple resources: apply that role to all resources (one-to-many)
@@ -239,17 +255,32 @@ jobs:
           try { $roles = ConvertFrom-Json $env:ROLE_IDS } catch { $roles = @() }
           try { $resources = ConvertFrom-Json $env:RESOURCE_IDS } catch { $resources = @() }
 
-          # Ensure arrays and filter out null/empty/placeholder entries
-          $rolesArr = @($roles) | Where-Object { ($_ -is [string]) -and ($_.Trim() -ne '') }
-          $resourcesArr = @($resources) | Where-Object { ($_ -is [string]) -and ($_.Trim() -ne '') -and ($_ -notmatch '<AZURE_SUBSCRIPTION_ID>') }
+          function To-StringArray([object]$value) {
+            $list = @()
+            if ($null -eq $value) { return $list }
+            $items = if ($value -is [System.Array]) { @($value) } else { @($value) }
+            foreach ($i in $items) {
+              if ($null -ne $i) {
+                $s = [string]$i
+                if ($s -and $s.Trim() -ne '') { $list += $s }
+              }
+            }
+            return ,$list
+          }
+
+          # Normalize to arrays of non-empty strings
+          $rolesArr = To-StringArray $roles
+          $resourcesArr = To-StringArray $resources
 
           # Replace <AZURE_SUBSCRIPTION_ID> placeholder if provided
           $subscriptionId = $env:SUBSCRIPTION_ID
           if (($null -ne $subscriptionId) -and ($subscriptionId -ne '')) {
-            $resourcesArr = $resourcesArr | ForEach-Object { $_ -replace '<AZURE_SUBSCRIPTION_ID>', $subscriptionId }
+            $tmp = @()
+            foreach ($res in $resourcesArr) { $tmp += ($res -replace '<AZURE_SUBSCRIPTION_ID>', $subscriptionId) }
+            $resourcesArr = $tmp
           }
-          # Filter again after substitution
-          $resourcesArr = @($resourcesArr) | Where-Object { ($_ -is [string]) -and ($_.Trim() -ne '') -and ($_ -notmatch '<AZURE_SUBSCRIPTION_ID>') }
+          # Remove any entries that still contain the placeholder
+          $resourcesArr = @($resourcesArr | Where-Object { $_ -notmatch '<AZURE_SUBSCRIPTION_ID>' })
 
           # Build pairs using same logic as request step
           $pairs = @()
