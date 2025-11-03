@@ -69,7 +69,15 @@ function Connect-PimGraph {
     $token = Get-GraphAccessToken
     if ($token -and (Get-Command Connect-MgGraph -ErrorAction SilentlyContinue)) {
         try {
-            Connect-MgGraph -AccessToken $token -ErrorAction Stop | Out-Null
+            # Connect-MgGraph expects a SecureString for -AccessToken; convert the plain token string
+            try {
+                $secureToken = ConvertTo-SecureString -String $token -AsPlainText -Force
+            } catch {
+                Write-Verbose "Failed to convert token to SecureString: $_"
+                throw
+            }
+
+            Connect-MgGraph -AccessToken $secureToken -Scopes $Scopes -ErrorAction Stop | Out-Null
             Write-Verbose 'Connected to Microsoft Graph using access token.'
             return
         } catch {
