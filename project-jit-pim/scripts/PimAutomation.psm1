@@ -131,7 +131,7 @@ function Invoke-PimGraphRequest {
                 $res = Invoke-RestMethod -Method Put -Uri $uri -Headers $headers -Body $Body -ErrorAction Stop
             }
 
-            if ($res -ne $null) { return $res }
+            if ($null -ne $res) { return $res }
         } catch {
             Write-Verbose ("Invoke-PimGraphRequest to {0} failed: {1}" -f $uri, $_)
             # try next base (v1.0 -> beta)
@@ -321,12 +321,41 @@ function New-TemporaryKeyVaultRoleAssignment {
         throw
     }
 
-    Write-Verbose ("Creating temporary Key Vault role assignment for {0}" -f $AssigneeObjectId)
+    # Basic validation
+    if (-not $AssigneeObjectId -or $AssigneeObjectId.Trim() -eq '') { throw 'AssigneeObjectId is empty or null.' }
+    if (-not $VaultResourceId -or $VaultResourceId.Trim() -eq '') { throw 'VaultResourceId is empty or null.' }
+
+    Write-Verbose ("Creating temporary Key Vault role assignment for {0} on scope {1}" -f $AssigneeObjectId, $VaultResourceId)
+
+    # If RoleDefinitionId looks like a bare GUID, expand it to a subscription-scoped roleDefinitions resource id
+    $roleDef = $RoleDefinitionId
+    if ($roleDef -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+        # Try to obtain subscription id from the provided vault resource id or environment
+        $subId = $null
+        if ($VaultResourceId -match '^/subscriptions/([^/]+)/') { $subId = $matches[1] }
+        if (-not $subId -and $env:AZURE_SUBSCRIPTION_ID) { $subId = $env:AZURE_SUBSCRIPTION_ID }
+        if (-not $subId) {
+            try {
+                if (Get-Command Get-AzContext -ErrorAction SilentlyContinue) {
+                    $ctx = Get-AzContext -ErrorAction Stop
+                    $subId = $ctx.Subscription.Id
+                }
+            } catch { }
+        }
+
+        if (-not $subId) { throw 'Cannot expand role definition GUID to resource id: subscription id could not be determined.' }
+        $roleDef = "/subscriptions/$subId/providers/Microsoft.Authorization/roleDefinitions/$roleDef"
+        Write-Verbose ("Expanded RoleDefinitionId to {0}" -f $roleDef)
+    }
+
     try {
-        return New-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $RoleDefinitionId -Scope $VaultResourceId -ErrorAction Stop
+        return New-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $roleDef -Scope $VaultResourceId -ErrorAction Stop
     } catch {
-        Write-Error ("Failed to create role assignment: {0}" -f $_)
-        throw
+        # Surface a detailed message to help diagnose null-reference in Az module
+        $err = $_
+        $detail = $err.Exception.ToString()
+        Write-Error ("Failed to create role assignment. AssigneeObjectId={0}, RoleDefinitionId={1}, Scope={2}. Error: {3}" -f $AssigneeObjectId, $roleDef, $VaultResourceId, $detail)
+        throw $err
     }
 }
 

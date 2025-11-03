@@ -40,8 +40,16 @@ if ($vaultName) {
     # Vault resource id - use the provided ResourceId
     $vaultResourceId = $ResourceId
 
+    # Diagnostic logging to help troubleshoot RBAC/role-assignment failures
+    Write-Verbose "Invoking Invoke-TempKeyVaultRotationLifecycle with VaultName='$vaultName', VaultResourceId='$vaultResourceId', AssigneeObjectId='${assignee.Substring(0,8)}...', SecretName='auto-rotated-secret'"
+
     # Use the lifecycle helper (it will generate a random secret value internally)
-    $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName ("auto-rotated-secret") -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -Verbose
+    try {
+        $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName ("auto-rotated-secret") -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -Verbose
+    } catch {
+        Write-Error ("Invoke-TempKeyVaultRotationLifecycle failed: {0}" -f $_)
+        throw
+    }
 
     $out = [pscustomobject]@{
         request = $req
