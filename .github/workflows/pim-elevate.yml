@@ -228,5 +228,43 @@ jobs:
 
       - name: Run rotation under approved gate
         shell: pwsh
+        env:
+          ROLE_IDS: ${{ inputs.roleIds || github.event.inputs.roleIds || '[]' }}
+          RESOURCE_IDS: ${{ inputs.resourceIds || github.event.inputs.resourceIds || '[]' }}
+          SUBSCRIPTION_ID: ${{ inputs.subscriptionId || github.event.inputs.subscriptionId || secrets.AZURE_SUBSCRIPTION_ID || '' }}
         run: |
-          pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId 'role-demo' -ResourceId 'res-demo' -Justification 'Approved by approver'
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          # Parse input arrays
+          try { $roles = ConvertFrom-Json $env:ROLE_IDS } catch { $roles = @() }
+          try { $resources = ConvertFrom-Json $env:RESOURCE_IDS } catch { $resources = @() }
+
+          $rolesArr = @($roles)
+          $resourcesArr = @($resources)
+
+          # Replace <AZURE_SUBSCRIPTION_ID> placeholder if provided
+          $subscriptionId = $env:SUBSCRIPTION_ID
+          if (($null -ne $subscriptionId) -and ($subscriptionId -ne '')) {
+            $resourcesArr = $resourcesArr | ForEach-Object { $_ -replace '<AZURE_SUBSCRIPTION_ID>', $subscriptionId }
+          }
+
+          # Build pairs using same logic as request step
+          $pairs = @()
+          $rolesCount = @($rolesArr).Count
+          $resourcesCount = @($resourcesArr).Count
+          if (($rolesCount -eq 1) -and ($resourcesCount -ge 1)) {
+            foreach ($res in @($resourcesArr)) { $pairs += [pscustomobject]@{ RoleId = $rolesArr[0]; ResourceId = $res } }
+          } elseif (($resourcesCount -eq 1) -and ($rolesCount -ge 1)) {
+            foreach ($r in @($rolesArr)) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $resourcesArr[0] } }
+          } elseif ($rolesCount -eq $resourcesCount) {
+            for ($i = 0; $i -lt $rolesCount; $i++) { $pairs += [pscustomobject]@{ RoleId = $rolesArr[$i]; ResourceId = $resourcesArr[$i] } }
+          } else {
+            foreach ($r in @($rolesArr)) { foreach ($res in @($resourcesArr)) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $res } } }
+          }
+
+          if (@($pairs).Count -lt 1) { throw 'No valid role/resource pairs to process.' }
+
+          # Use the first pair for rotation under approval gate
+          $first = $pairs[0]
+          pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId $first.RoleId -ResourceId $first.ResourceId -Justification 'Approved by approver'
