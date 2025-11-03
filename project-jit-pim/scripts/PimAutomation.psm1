@@ -5,9 +5,6 @@ Implements helpers for Microsoft Graph PIM activation, temporary Key Vault RBAC
 assignment, and secret rotation. All functions are defined once in this file.
 #>
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
 # Module-level preference: prefer beta Graph endpoints when set (env or default false)
 $PimAutomation_UseBeta = $true
 if ($env:PIM_AUTOMATION_USE_BETA) {
@@ -430,7 +427,7 @@ function Invoke-TempKeyVaultRotationLifecycle {
 
     $roleAssignment = $null
     try {
-        # Create a temporary Key Vault role assignment
+    # Create a temporary Key Vault role assignment (requires ASSIGNEE_OBJECT_ID pre-resolved by workflow)
         Write-Verbose "Creating temporary Key Vault role assignment for $AssigneeObjectId"
         $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId
         Write-Verbose ("Created role assignment: {0}" -f ($roleAssignment.Id -or $roleAssignment.Name))

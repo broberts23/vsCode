@@ -1,3 +1,5 @@
+#!/usr/bin/env pwsh
+#requires -Version 7.4
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)]
@@ -31,61 +33,10 @@ if ($ResourceId -match '/providers/Microsoft.KeyVault/vaults/([^/]+)$') {
 if ($vaultName) {
     Write-Verbose "Rotating secret in vault $vaultName under request $($req.requestId)"
 
-    # Resolve assignee object id. Prefer explicit env var ASSIGNEE_OBJECT_ID, otherwise try to derive
-    # using Azure CLI (preferred in CI) or fallback to Az cmdlets if available.
+    # Resolve assignee object id from environment (set by workflow using RBAC-based lookup).
     $assignee = $env:ASSIGNEE_OBJECT_ID
     if (-not $assignee -or $assignee.Trim() -eq '') {
-        Write-Verbose 'ASSIGNEE_OBJECT_ID not provided; attempting to derive from environment (Azure CLI or Az modules).'
-
-        $clientId = $env:AZURE_CLIENT_ID
-        $tenantId = $env:AZURE_TENANT_ID
-
-        # Try Azure CLI: resolve service principal by application id (requires Graph Application.Read.All)
-        try {
-            if (Get-Command az -ErrorAction SilentlyContinue) {
-                if ($clientId) {
-                    try {
-                        $spId = (& az ad sp show --id $clientId --query objectId -o tsv) -as [string]
-                        if ($spId -and $spId.Trim()) { $assignee = $spId.Trim(); Write-Verbose "Derived assignee from service principal: $($assignee.Substring(0,6))..." }
-                    } catch { Write-Verbose "az ad sp show failed: $_" }
-                }
-
-                # For app-only identities without directory read, fall back to ARM RBAC lookups
-                if (-not $assignee -and $clientId) {
-                    $subscriptionId = $null
-                    if ($ResourceId -match '^/subscriptions/([^/]+)/') { $subscriptionId = $matches[1] }
-                    if (-not $subscriptionId -and $env:AZURE_SUBSCRIPTION_ID) { $subscriptionId = $env:AZURE_SUBSCRIPTION_ID }
-
-                    if ($subscriptionId) {
-                        try {
-                            $principalId = (& az role assignment list --assignee $clientId --scope "/subscriptions/$subscriptionId" --query '[0].principalId' -o tsv) -as [string]
-                            if ($principalId -and $principalId.Trim()) {
-                                $assignee = $principalId.Trim()
-                                Write-Verbose "Derived assignee from role assignment: $($assignee.Substring(0,6))..."
-                            }
-                        } catch { Write-Verbose "az role assignment list lookup failed: $_" }
-                    }
-                }
-            }
-        } catch { Write-Verbose "Azure CLI not available or lookup failed: $_" }
-
-        # Fallback: try Az cmdlets if installed and available
-        if (-not $assignee -or $assignee.Trim() -eq '') {
-            try {
-                if (Get-Command Get-AzADServicePrincipal -ErrorAction SilentlyContinue) {
-                    if ($clientId) {
-                        try {
-                            $sp = Get-AzADServicePrincipal -ApplicationId $clientId -ErrorAction Stop
-                            if ($sp -and $sp.Id) { $assignee = $sp.Id; Write-Verbose "Derived assignee from Az module (service principal): $($assignee.Substring(0,6))..." }
-                        } catch { Write-Verbose "Get-AzADServicePrincipal failed: $_" }
-                    }
-                }
-            } catch { }
-        }
-
-        if (-not $assignee -or $assignee.Trim() -eq '') {
-            throw 'ASSIGNEE_OBJECT_ID is not set and could not be derived. Provide ASSIGNEE_OBJECT_ID in the workflow (preferred) or grant permissions so az can resolve the current principal.'
-        }
+        throw 'ASSIGNEE_OBJECT_ID must be pre-populated by the workflow. Ensure the workflow step exports it via az role assignment list and $GITHUB_ENV.'
     }
 
     # Vault resource id - use the provided ResourceId
