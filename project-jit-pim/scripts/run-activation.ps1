@@ -3,18 +3,14 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-param(
-    [Parameter(Mandatory=$true)]
-    [string] $RoleId,
-
-    [Parameter(Mandatory=$true)]
-    [string] $ResourceId,
-    [Parameter(Mandatory=$false)]
-    [string] $Justification = 'CI triggered activation'
-)
+[Parameter(Mandatory=$true)]
+[string] $RoleId,
+[Parameter(Mandatory=$true)]
+[string] $ResourceId,
+[Parameter(Mandatory=$false)]
+[string] $Justification = 'CI triggered activation'
 
 Import-Module -Name (Join-Path $PSScriptRoot 'PimAutomation.psm1')
-
 
 Write-Verbose 'Connect to Graph: for demos this uses interactive auth. TODO: configure OIDC or managed identity for CI.'
 Connect-PimGraph -Verbose
