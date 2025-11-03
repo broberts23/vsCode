@@ -385,6 +385,7 @@ function Invoke-PimKeyVaultSecretRotation {
         [Parameter(Mandatory)][string] $RequestId,
         [Parameter(Mandatory)][string] $AssigneeObjectId,
         [Parameter(Mandatory)][string] $VaultResourceId,
+        [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7',
         [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300
     )
 
@@ -394,8 +395,6 @@ function Invoke-PimKeyVaultSecretRotation {
         Write-Verbose 'Az.Resources module not available; RBAC operations may fail.'
     }
 
-        [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300,
-        [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
     $currentStatus = $null
     while ((Get-Date) -lt $deadline) {
         $currentStatus = (Get-PimRequest -RequestId $RequestId).status
