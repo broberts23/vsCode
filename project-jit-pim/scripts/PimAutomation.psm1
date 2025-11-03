@@ -327,34 +327,25 @@ function New-TemporaryKeyVaultRoleAssignment {
 
     Write-Verbose ("Creating temporary Key Vault role assignment for {0} on scope {1}" -f $AssigneeObjectId, $VaultResourceId)
 
-    # If RoleDefinitionId looks like a bare GUID, expand it to a subscription-scoped roleDefinitions resource id
-    $roleDef = $RoleDefinitionId
-    if ($roleDef -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
-        # Try to obtain subscription id from the provided vault resource id or environment
-        $subId = $null
-        if ($VaultResourceId -match '^/subscriptions/([^/]+)/') { $subId = $matches[1] }
-        if (-not $subId -and $env:AZURE_SUBSCRIPTION_ID) { $subId = $env:AZURE_SUBSCRIPTION_ID }
-        if (-not $subId) {
-            try {
-                if (Get-Command Get-AzContext -ErrorAction SilentlyContinue) {
-                    $ctx = Get-AzContext -ErrorAction Stop
-                    $subId = $ctx.Subscription.Id
-                }
-            } catch { }
-        }
-
-        if (-not $subId) { throw 'Cannot expand role definition GUID to resource id: subscription id could not be determined.' }
-        $roleDef = "/subscriptions/$subId/providers/Microsoft.Authorization/roleDefinitions/$roleDef"
-        Write-Verbose ("Expanded RoleDefinitionId to {0}" -f $roleDef)
+    # Normalize RoleDefinitionId to a bare GUID expected by New-AzRoleAssignment
+    function Get-RoleDefinitionGuid([string] $input) {
+        if (-not $input) { throw 'RoleDefinitionId input is empty.' }
+        # If resource id provided, extract trailing GUID
+        if ($input -match '/roleDefinitions/([0-9a-fA-F\-]{36})$') { return $matches[1] }
+        # If already a GUID, return it
+        if ($input -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { return $input }
+        throw "RoleDefinitionId '$input' is not a recognized GUID or roleDefinitions resource id."
     }
 
+    $roleGuid = Get-RoleDefinitionGuid -input $RoleDefinitionId
+
     try {
-        return New-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $roleDef -Scope $VaultResourceId -ErrorAction Stop
+        return New-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $roleGuid -Scope $VaultResourceId -ErrorAction Stop
     } catch {
-        # Surface a detailed message to help diagnose null-reference in Az module
+        # Surface a detailed message to help diagnose failures in Az module
         $err = $_
         $detail = $err.Exception.ToString()
-        Write-Error ("Failed to create role assignment. AssigneeObjectId={0}, RoleDefinitionId={1}, Scope={2}. Error: {3}" -f $AssigneeObjectId, $roleDef, $VaultResourceId, $detail)
+        Write-Error ("Failed to create role assignment. AssigneeObjectId={0}, RoleDefinitionId={1}, Scope={2}. Error: {3}" -f $AssigneeObjectId, $roleGuid, $VaultResourceId, $detail)
         throw $err
     }
 }
@@ -375,7 +366,10 @@ function Remove-TemporaryKeyVaultRoleAssignment {
     }
 
     try {
-        Remove-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $RoleDefinitionId -Scope $VaultResourceId -Force -ErrorAction Stop | Out-Null
+        # Normalize RoleDefinitionId to GUID for removal
+        $rId = $RoleDefinitionId
+        if ($rId -match '/roleDefinitions/([0-9a-fA-F\-]{36})$') { $rId = $matches[1] }
+        Remove-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $rId -Scope $VaultResourceId -Force -ErrorAction Stop | Out-Null
         return $true
     } catch {
         Write-Warning ("Role assignment cleanup failed or was already removed: {0}" -f $_)
@@ -400,7 +394,8 @@ function Invoke-PimKeyVaultSecretRotation {
         Write-Verbose 'Az.Resources module not available; RBAC operations may fail.'
     }
 
-    $deadline = (Get-Date).AddSeconds($PollTimeoutSeconds)
+        [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300,
+        [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
     $currentStatus = $null
     while ((Get-Date) -lt $deadline) {
         $currentStatus = (Get-PimRequest -RequestId $RequestId).status
@@ -423,7 +418,7 @@ function Invoke-PimKeyVaultSecretRotation {
             rotation         = $rotation
             roleAssignmentId = $roleAssignment.Id
         }
-    } catch {
+        $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
         Write-Error ("Secret rotation failed: {0}" -f $_)
         throw
     } finally {

@@ -45,7 +45,7 @@ if ($vaultName) {
 
     # Use the lifecycle helper (it will generate a random secret value internally)
     try {
-        $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName ("auto-rotated-secret") -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -Verbose
+    $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName ("auto-rotated-secret") -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -RoleDefinitionId $RoleId -Verbose
     } catch {
         Write-Error ("Invoke-TempKeyVaultRotationLifecycle failed: {0}" -f $_)
         throw

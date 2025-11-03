@@ -20,4 +20,3 @@ jobs:
       roleIds: '["b86a8fe4-44ce-4948-aee5-eccb2c155cd7"]'
       resourceIds: '["/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/my-rg/providers/Microsoft.KeyVault/vaults/kvozvlgqf3cdcia"]'
     secrets: inherit
- 
