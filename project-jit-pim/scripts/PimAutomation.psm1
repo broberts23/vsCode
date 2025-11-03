@@ -314,12 +314,12 @@ function New-TemporaryKeyVaultRoleAssignment {
         [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
     )
 
-    # try {
-    #     Import-Module Az.Resources -ErrorAction Stop
-    # } catch {
-    #     Write-Error 'Az.Resources module is required for RBAC operations.'
-    #     throw
-    # }
+    try {
+        Import-Module Az.Resources -ErrorAction Stop
+    } catch {
+        Write-Error 'Az.Resources module is required for RBAC operations.'
+        throw
+    }
 
     Write-Verbose ("Creating temporary Key Vault role assignment for {0}" -f $AssigneeObjectId)
     try {

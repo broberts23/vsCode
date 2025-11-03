@@ -47,7 +47,7 @@ permissions:
 jobs:
   request-elevation:
     name: Request elevation and notify
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       assignee: ${{ steps.set-vars.outputs.assignee }}
       vault: ${{ steps.set-vars.outputs.vault }}
@@ -245,7 +245,7 @@ jobs:
   approve-and-rotate:
     name: Approve and rotate (requires manual approval)
     needs: request-elevation
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     # Environment gate: configure this environment in repo settings with required reviewers
     # to enforce a manual "Approve" click before this job executes.
     environment:
