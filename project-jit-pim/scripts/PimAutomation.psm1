@@ -77,7 +77,9 @@ function Connect-PimGraph {
                 throw
             }
 
-            Connect-MgGraph -AccessToken $secureToken -Scopes $Scopes -ErrorAction Stop | Out-Null
+            # When using -AccessToken, do not pass -Scopes (different parameter set). See
+            # Connect-MgGraph docs: https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0
+            Connect-MgGraph -AccessToken $secureToken -NoWelcome -ErrorAction Stop | Out-Null
             Write-Verbose 'Connected to Microsoft Graph using access token.'
             return
         } catch {
@@ -86,7 +88,7 @@ function Connect-PimGraph {
     }
 
     Write-Verbose 'Falling back to interactive Connect-MgGraph.'
-    Connect-MgGraph -Scopes $Scopes -ErrorAction Stop | Out-Null
+    Connect-MgGraph -Scopes $Scopes -NoWelcome -ErrorAction Stop | Out-Null
 }
 
 function Invoke-PimGraphRequest {
