@@ -1,14 +1,25 @@
 #!/usr/bin/env pwsh
 
+#requires -Version 7.4
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-[Parameter(Mandatory=$true)]
-[string] $RoleId,
-[Parameter(Mandatory=$true)]
-[string] $ResourceId,
-[Parameter(Mandatory=$false)]
-[string] $Justification = 'CI triggered activation'
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [ValidatePattern('\S')]
+    [string] $RoleId,
+
+    [Parameter(Mandatory=$true)]
+    [ValidateNotNullOrEmpty()]
+    [ValidatePattern('\S')]
+    [string] $ResourceId,
+
+    [Parameter(Mandatory=$false)]
+    [string] $Justification = 'CI triggered activation'
+)
 
 Import-Module -Name (Join-Path $PSScriptRoot 'PimAutomation.psm1')
 
