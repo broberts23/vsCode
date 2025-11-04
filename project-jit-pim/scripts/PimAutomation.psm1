@@ -5,11 +5,28 @@ Implements helpers for Microsoft Graph PIM activation, temporary Key Vault RBAC
 assignment, and secret rotation. All functions are defined once in this file.
 #>
 
+#Requires -Version 7.4
+
 # Module-level preference: prefer beta Graph endpoints when set (env or default false)
 $PimAutomation_UseBeta = $true
 if ($env:PIM_AUTOMATION_USE_BETA) {
     $val = $env:PIM_AUTOMATION_USE_BETA.ToString().ToLowerInvariant()
     if ($val -in @('1', 'true', 'yes', 'beta')) { $PimAutomation_UseBeta = $true }
+}
+
+function ConvertTo-RoleDefinitionGuid {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $RoleDefinitionId
+    )
+
+    $trimmed = $RoleDefinitionId.Trim()
+    if (-not $trimmed) { throw 'RoleDefinitionId cannot be blank.' }
+
+    if ($trimmed -match '/roleDefinitions/([0-9a-fA-F\-]{36})$') { return $matches[1] }
+    if ($trimmed -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { return $trimmed }
+
+    throw "RoleDefinitionId '$RoleDefinitionId' must be a GUID or a roleDefinitions resource ID."
 }
 
 function Get-GraphAccessToken {
@@ -326,9 +343,9 @@ function Set-PimKeyVaultSecret {
 function New-TemporaryKeyVaultRoleAssignment {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string] $AssigneeObjectId,
-        [Parameter(Mandatory)][string] $VaultResourceId,
-        [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $AssigneeObjectId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $VaultResourceId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $RoleDefinitionId
     )
 
     try {
@@ -339,23 +356,8 @@ function New-TemporaryKeyVaultRoleAssignment {
         throw
     }
 
-    # Basic validation
-    if (-not $AssigneeObjectId -or $AssigneeObjectId.Trim() -eq '') { throw 'AssigneeObjectId is empty or null.' }
-    if (-not $VaultResourceId -or $VaultResourceId.Trim() -eq '') { throw 'VaultResourceId is empty or null.' }
-
     Write-Verbose ("Creating temporary Key Vault role assignment for {0} on scope {1}" -f $AssigneeObjectId, $VaultResourceId)
-
-    # Normalize RoleDefinitionId to a bare GUID expected by New-AzRoleAssignment
-    function Get-RoleDefinitionGuid([string] $input) {
-        if (-not $input) { throw 'RoleDefinitionId input is empty.' }
-        # If resource id provided, extract trailing GUID
-        if ($input -match '/roleDefinitions/([0-9a-fA-F\-]{36})$') { return $matches[1] }
-        # If already a GUID, return it
-        if ($input -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { return $input }
-        throw "RoleDefinitionId '$input' is not a recognized GUID or roleDefinitions resource id."
-    }
-
-    $roleGuid = Get-RoleDefinitionGuid -input $RoleDefinitionId
+    $roleGuid = ConvertTo-RoleDefinitionGuid -RoleDefinitionId $RoleDefinitionId
 
     try {
         return New-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $roleGuid -Scope $VaultResourceId -ErrorAction Stop
@@ -372,9 +374,9 @@ function New-TemporaryKeyVaultRoleAssignment {
 function Remove-TemporaryKeyVaultRoleAssignment {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string] $AssigneeObjectId,
-        [Parameter(Mandatory)][string] $VaultResourceId,
-        [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $AssigneeObjectId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $VaultResourceId,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $RoleDefinitionId
     )
 
     try {
@@ -386,9 +388,7 @@ function Remove-TemporaryKeyVaultRoleAssignment {
     }
 
     try {
-        # Normalize RoleDefinitionId to GUID for removal
-        $rId = $RoleDefinitionId
-        if ($rId -match '/roleDefinitions/([0-9a-fA-F\-]{36})$') { $rId = $matches[1] }
+        $rId = ConvertTo-RoleDefinitionGuid -RoleDefinitionId $RoleDefinitionId
         Remove-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $rId -Scope $VaultResourceId -Force -ErrorAction Stop | Out-Null
         return $true
     }
@@ -396,6 +396,72 @@ function Remove-TemporaryKeyVaultRoleAssignment {
         Write-Warning ("Role assignment cleanup failed or was already removed: {0}" -f $_)
         return $false
     }
+}
+
+function Resolve-PimRoleResourcePairs {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $RoleIdsJson,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $ResourceIdsJson,
+        [Parameter()][string] $SubscriptionId
+    )
+
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference = 'Stop'
+
+    $rolesParsed = @()
+    if ($RoleIdsJson.Trim()) {
+        $rawRoles = ConvertFrom-Json -InputObject $RoleIdsJson
+        $rolesParsed = if ($rawRoles -is [System.Array]) { @($rawRoles) } else { @($rawRoles) }
+    }
+
+    $resourcesParsed = @()
+    if ($ResourceIdsJson.Trim()) {
+        $rawResources = ConvertFrom-Json -InputObject $ResourceIdsJson
+        $resourcesParsed = if ($rawResources -is [System.Array]) { @($rawResources) } else { @($rawResources) }
+    }
+
+    $roles = foreach ($entry in $rolesParsed) {
+        if ($null -eq $entry) { throw 'RoleId entries cannot be null.' }
+        $value = ([string]$entry).Trim()
+        if (-not $value) { throw 'RoleId entries cannot be empty.' }
+        $value
+    }
+
+    $resources = foreach ($entry in $resourcesParsed) {
+        if ($null -eq $entry) { throw 'ResourceId entries cannot be null.' }
+        $value = ([string]$entry).Trim()
+        if (-not $value) { throw 'ResourceId entries cannot be empty.' }
+        if ($SubscriptionId) { $value = $value -replace '<AZURE_SUBSCRIPTION_ID>', $SubscriptionId }
+        if ($value -match '<AZURE_SUBSCRIPTION_ID>') { throw 'ResourceId entries must not contain <AZURE_SUBSCRIPTION_ID> placeholders after substitution.' }
+        $value
+    }
+
+    if ($roles.Count -eq 0) { throw 'roleIds input resolved to zero usable entries.' }
+    if ($resources.Count -eq 0) { throw 'resourceIds input resolved to zero usable entries.' }
+
+    $pairs = @()
+    $rolesCount = $roles.Count
+    $resourcesCount = $resources.Count
+
+    if (($rolesCount -eq 1) -and ($resourcesCount -ge 1)) {
+        foreach ($res in $resources) { $pairs += [pscustomobject]@{ RoleId = $roles[0]; ResourceId = $res } }
+    }
+    elseif (($resourcesCount -eq 1) -and ($rolesCount -ge 1)) {
+        foreach ($role in $roles) { $pairs += [pscustomobject]@{ RoleId = $role; ResourceId = $resources[0] } }
+    }
+    elseif ($rolesCount -eq $resourcesCount) {
+        for ($i = 0; $i -lt $rolesCount; $i++) { $pairs += [pscustomobject]@{ RoleId = $roles[$i]; ResourceId = $resources[$i] } }
+    }
+    else {
+        foreach ($role in $roles) {
+            foreach ($res in $resources) {
+                $pairs += [pscustomobject]@{ RoleId = $role; ResourceId = $res }
+            }
+        }
+    }
+
+    return , $pairs
 }
 
 function Invoke-PimKeyVaultSecretRotation {
@@ -406,7 +472,7 @@ function Invoke-PimKeyVaultSecretRotation {
         [Parameter(Mandatory)][string] $RequestId,
         [Parameter(Mandatory)][string] $AssigneeObjectId,
         [Parameter(Mandatory)][string] $VaultResourceId,
-        [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7',
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $RoleDefinitionId,
         [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300
     )
 
@@ -418,6 +484,7 @@ function Invoke-PimKeyVaultSecretRotation {
     }
 
     $currentStatus = $null
+    $deadline = (Get-Date).AddSeconds($PollTimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         $currentStatus = (Get-PimRequest -RequestId $RequestId).status
         Write-Verbose ("PIM request {0} status: {1}" -f $RequestId, $currentStatus)
@@ -431,7 +498,7 @@ function Invoke-PimKeyVaultSecretRotation {
 
     $roleAssignment = $null
     try {
-        $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId
+        $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
         Write-Verbose ("Created role assignment {0}" -f $roleAssignment.Id)
 
         $rotation = Set-PimKeyVaultSecret -VaultName $VaultName -SecretName $SecretName -RequestId $RequestId
@@ -439,14 +506,11 @@ function Invoke-PimKeyVaultSecretRotation {
             rotation         = $rotation
             roleAssignmentId = $roleAssignment.Id
         }
-        $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
-        Write-Error ("Secret rotation failed: {0}" -f $_)
-        throw
     }
     finally {
         if ($roleAssignment) {
             try {
-                Remove-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId | Out-Null
+                Remove-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId | Out-Null
                 Write-Verbose 'Removed temporary Key Vault role assignment.'
             }
             catch {
@@ -464,7 +528,7 @@ function Invoke-TempKeyVaultRotationLifecycle {
         [Parameter(Mandatory = $false)][ValidateNotNullOrEmpty()] [string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $AssigneeObjectId,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultResourceId,
-        [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7',
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $RoleDefinitionId,
         [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300
     )
 
@@ -517,4 +581,4 @@ function Invoke-TempKeyVaultRotationLifecycle {
 
 Export-ModuleMember -Function Invoke-TempKeyVaultRotationLifecycle
 
-Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Connect-AzManagedIdentity, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation
+Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Connect-AzManagedIdentity, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation, Resolve-PimRoleResourcePairs

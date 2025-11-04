@@ -162,53 +162,18 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
 
-          # Parse input arrays
-          try { $roles = ConvertFrom-Json $env:ROLE_IDS } catch { $roles = @() }
-          try { $resources = ConvertFrom-Json $env:RESOURCE_IDS } catch { $resources = @() }
+          $workspace = $env:GITHUB_WORKSPACE
+          if (-not $workspace) { throw 'GITHUB_WORKSPACE environment variable is required.' }
 
-          function To-StringArray([object]$value) {
-            $list = @()
-            if ($null -eq $value) { return $list }
-            $items = if ($value -is [System.Array]) { @($value) } else { @($value) }
-            foreach ($i in $items) {
-              if ($null -ne $i) {
-                $s = [string]$i
-                if ($s -and $s.Trim() -ne '') { $list += $s }
-              }
-            }
-            return ,$list
-          }
+          $modulePath = Join-Path $workspace 'project-jit-pim/scripts/PimAutomation.psm1'
+          Import-Module -Name $modulePath -Force
 
-          # Normalize to arrays of non-empty strings
-          $rolesArr = To-StringArray $roles
-          $resourcesArr = To-StringArray $resources
+          $roleIdsJson = if ($env:ROLE_IDS) { $env:ROLE_IDS } else { '[]' }
+          $resourceIdsJson = if ($env:RESOURCE_IDS) { $env:RESOURCE_IDS } else { '[]' }
 
-          # Replace <AZURE_SUBSCRIPTION_ID> placeholder if provided
-          $subscriptionId = $env:SUBSCRIPTION_ID
-          if (($null -ne $subscriptionId) -and ($subscriptionId -ne '')) {
-            $tmp = @()
-            foreach ($res in $resourcesArr) { $tmp += ($res -replace '<AZURE_SUBSCRIPTION_ID>', $subscriptionId) }
-            $resourcesArr = $tmp
-          }
-          # Remove any entries that still contain the placeholder
-          $resourcesArr = @($resourcesArr | Where-Object { $_ -notmatch '<AZURE_SUBSCRIPTION_ID>' })
+          $pairs = Resolve-PimRoleResourcePairs -RoleIdsJson $roleIdsJson -ResourceIdsJson $resourceIdsJson -SubscriptionId $env:SUBSCRIPTION_ID
+          $pairs = @($pairs)
+          if ($pairs.Count -lt 1) { throw 'No valid role/resource pairs to process (roleIds or resourceIds were empty).' }
 
-          # Build pairs using same logic as request step
-          $pairs = @()
-          $rolesCount = @($rolesArr).Count
-          $resourcesCount = @($resourcesArr).Count
-          if (($rolesCount -eq 1) -and ($resourcesCount -ge 1)) {
-            foreach ($res in @($resourcesArr)) { $pairs += [pscustomobject]@{ RoleId = $rolesArr[0]; ResourceId = $res } }
-          } elseif (($resourcesCount -eq 1) -and ($rolesCount -ge 1)) {
-            foreach ($r in @($rolesArr)) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $resourcesArr[0] } }
-          } elseif ($rolesCount -eq $resourcesCount) {
-            for ($i = 0; $i -lt $rolesCount; $i++) { $pairs += [pscustomobject]@{ RoleId = $rolesArr[$i]; ResourceId = $resourcesArr[$i] } }
-          } else {
-            foreach ($r in @($rolesArr)) { foreach ($res in @($resourcesArr)) { $pairs += [pscustomobject]@{ RoleId = $r; ResourceId = $res } } }
-          }
-
-          if (@($pairs).Count -lt 1) { throw 'No valid role/resource pairs to process (roleIds or resourceIds empty after filtering).' }
-
-          # Use the first pair for rotation under approval gate
           $first = $pairs[0]
           pwsh ./project-jit-pim/scripts/run-activation.ps1 -RoleId $first.RoleId -ResourceId $first.ResourceId -Justification 'Approved by approver'

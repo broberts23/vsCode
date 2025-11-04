@@ -1,3 +1,6 @@
+#!/usr/bin/env pwsh
+#Requires -Version 7.4
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -13,6 +16,9 @@ param(
     [Parameter(Mandatory = $false)]
     [string] $Justification = 'CI triggered activation'
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 # Import the PimAutomation module from the scripts folder relative to this script
 try {
@@ -60,7 +66,7 @@ if ($vaultName) {
 
     # Use the lifecycle helper (it will generate a random secret value internally)
     try {
-        $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName ("auto-rotated-secret") -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -RoleDefinitionId $RoleId -Verbose
+        $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName 'auto-rotated-secret' -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -RoleDefinitionId $RoleId -Verbose
     }
     catch {
         Write-Error ("Invoke-TempKeyVaultRotationLifecycle failed: {0}" -f $_)
