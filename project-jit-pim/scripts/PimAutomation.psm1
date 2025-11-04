@@ -345,12 +345,47 @@ function Set-PimKeyVaultSecret {
 
     $secureValue = ConvertTo-SecureString -String $NewSecretValue -AsPlainText -Force
 
-    try {
-        $result = Set-AzKeyVaultSecret -VaultName $VaultName -Name $SecretName -SecretValue $secureValue -ErrorAction Stop
+    $maxAttempts = 6
+    $baseDelaySeconds = 5
+    $result = $null
+
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            $result = Set-AzKeyVaultSecret -VaultName $VaultName -Name $SecretName -SecretValue $secureValue -ErrorAction Stop
+            break
+        }
+        catch {
+            $err = $_
+            $statusCode = $null
+            if ($err.Exception -and $err.Exception.PSObject.Properties.Match('Response').Count -gt 0) {
+                $statusCodeProp = $err.Exception.PSObject.Properties['Response']
+                if ($statusCodeProp -and $statusCodeProp.Value -and $statusCodeProp.Value.PSObject.Properties.Match('StatusCode').Count -gt 0) {
+                    $statusCode = $statusCodeProp.Value.StatusCode
+                }
+            }
+
+            $shouldRetry = $false
+            if ($statusCode -and ($statusCode.ToString() -eq 'Forbidden' -or $statusCode -eq [System.Net.HttpStatusCode]::Forbidden)) {
+                $shouldRetry = $true
+            }
+            elseif ($err.Exception -and $err.Exception.Message -and ($err.Exception.Message -match 'Forbidden')) {
+                $shouldRetry = $true
+            }
+
+            if ($shouldRetry -and $attempt -lt $maxAttempts) {
+                $delay = [Math]::Min(30, $baseDelaySeconds * $attempt)
+                Write-Verbose ("Set-AzKeyVaultSecret received Forbidden. Waiting {0}s before retry {1}/{2}." -f $delay, ($attempt + 1), $maxAttempts)
+                Start-Sleep -Seconds $delay
+                continue
+            }
+
+            Write-Error ("Set-AzKeyVaultSecret failed: {0}" -f $err)
+            throw
+        }
     }
-    catch {
-        Write-Error ("Set-AzKeyVaultSecret failed: {0}" -f $_)
-        throw
+
+    if (-not $result) {
+        throw 'Set-AzKeyVaultSecret did not return a result after retry attempts.'
     }
 
     $secretVersion = $null
