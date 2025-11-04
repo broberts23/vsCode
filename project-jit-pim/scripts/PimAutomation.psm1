@@ -266,27 +266,56 @@ function Get-PimRequest {
     }
 }
 
-function Connect-AzManagedIdentity {
+function Ensure-PimAzContext {
     [CmdletBinding()]
-    param()
+    param(
+        [Parameter()][string] $SubscriptionId = $env:AZURE_SUBSCRIPTION_ID
+    )
 
-    try {
-        Import-Module Az.Accounts -ErrorAction Stop
-    }
-    catch {
-        Write-Error 'Az.Accounts module is required for Azure authentication.'
-        throw
+    Import-Module Az.Accounts -ErrorAction Stop
+
+    $context = Get-AzContext -ErrorAction SilentlyContinue
+    if ($context -and $context.Account -and $context.Subscription) {
+        if (-not $SubscriptionId -or $context.Subscription.Id -eq $SubscriptionId) { return $context }
     }
 
-    try {
-        Write-Verbose 'Attempting Connect-AzAccount using managed identity.'
-        Connect-AzAccount -Identity -ErrorAction Stop | Out-Null
-        Write-Verbose 'Authenticated with managed identity.'
+    if ($SubscriptionId) {
+        try {
+            Set-AzContext -Subscription $SubscriptionId -ErrorAction Stop | Out-Null
+            $context = Get-AzContext -ErrorAction SilentlyContinue
+            if ($context -and $context.Account) { return $context }
+        }
+        catch {
+            Write-Verbose ("Set-AzContext failed: {0}" -f $_)
+        }
     }
-    catch {
-        Write-Verbose 'Managed identity unavailable, falling back to interactive Connect-AzAccount.'
-        Connect-AzAccount -ErrorAction Stop | Out-Null
+
+    $tenantId = $env:AZURE_TENANT_ID
+    $clientId = $env:AZURE_CLIENT_ID
+    $federatedTokenFile = $env:AZURE_FEDERATED_TOKEN_FILE
+
+    if ($federatedTokenFile -and (Test-Path -Path $federatedTokenFile) -and $tenantId -and $clientId) {
+        Write-Verbose 'Connecting to Azure using federated token (OIDC).' 
+        $token = Get-Content -Path $federatedTokenFile -Raw
+        $connectParams = @{
+            Tenant          = $tenantId
+            ApplicationId   = $clientId
+            FederatedToken  = $token
+            ServicePrincipal = $true
+            ErrorAction     = 'Stop'
+        }
+        if ($SubscriptionId) { $connectParams['Subscription'] = $SubscriptionId }
+        Connect-AzAccount @connectParams | Out-Null
+        return Get-AzContext -ErrorAction Stop
     }
+
+    if ($env:IDENTITY_ENDPOINT) {
+        Write-Verbose 'Connecting to Azure using managed identity environment.'
+        Connect-AzAccount -Identity -Tenant $tenantId -Subscription $SubscriptionId -ErrorAction Stop | Out-Null
+        return Get-AzContext -ErrorAction Stop
+    }
+
+    throw 'No Azure PowerShell context available. Ensure azure/login sets enable-AzPSSession or provide federated token environment variables.'
 }
 
 function Set-PimKeyVaultSecret {
@@ -306,7 +335,7 @@ function Set-PimKeyVaultSecret {
         throw
     }
 
-    Connect-AzManagedIdentity
+    Ensure-PimAzContext | Out-Null
 
     if (-not $NewSecretValue) {
         $buffer = New-Object byte[] 32
@@ -356,6 +385,8 @@ function New-TemporaryKeyVaultRoleAssignment {
         throw
     }
 
+    Ensure-PimAzContext | Out-Null
+
     Write-Verbose ("Creating temporary Key Vault role assignment for {0} on scope {1}" -f $AssigneeObjectId, $VaultResourceId)
     $roleGuid = ConvertTo-RoleDefinitionGuid -RoleDefinitionId $RoleDefinitionId
 
@@ -386,6 +417,8 @@ function Remove-TemporaryKeyVaultRoleAssignment {
         Write-Error 'Az.Resources module is required for RBAC operations.'
         throw
     }
+
+    Ensure-PimAzContext | Out-Null
 
     try {
         $rId = ConvertTo-RoleDefinitionGuid -RoleDefinitionId $RoleDefinitionId
