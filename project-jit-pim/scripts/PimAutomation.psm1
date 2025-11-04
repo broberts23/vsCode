@@ -421,20 +421,22 @@ function Resolve-PimRoleResourcePairs {
         $resourcesParsed = if ($rawResources -is [System.Array]) { @($rawResources) } else { @($rawResources) }
     }
 
-    $roles = foreach ($entry in $rolesParsed) {
+    $roles = @()
+    foreach ($entry in $rolesParsed) {
         if ($null -eq $entry) { throw 'RoleId entries cannot be null.' }
         $value = ([string]$entry).Trim()
         if (-not $value) { throw 'RoleId entries cannot be empty.' }
-        $value
+        $roles += $value
     }
 
-    $resources = foreach ($entry in $resourcesParsed) {
+    $resources = @()
+    foreach ($entry in $resourcesParsed) {
         if ($null -eq $entry) { throw 'ResourceId entries cannot be null.' }
         $value = ([string]$entry).Trim()
         if (-not $value) { throw 'ResourceId entries cannot be empty.' }
         if ($SubscriptionId) { $value = $value -replace '<AZURE_SUBSCRIPTION_ID>', $SubscriptionId }
         if ($value -match '<AZURE_SUBSCRIPTION_ID>') { throw 'ResourceId entries must not contain <AZURE_SUBSCRIPTION_ID> placeholders after substitution.' }
-        $value
+        $resources += $value
     }
 
     if ($roles.Count -eq 0) { throw 'roleIds input resolved to zero usable entries.' }
