@@ -1,16 +1,16 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
     [ValidatePattern('\S')]
     [string] $RoleId,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
     [ValidatePattern('\S')]
     [string] $ResourceId,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string] $Justification = 'CI triggered activation'
 )
 
@@ -25,7 +25,8 @@ try {
         throw 'PimAutomation module not found. Ensure the script is executed from the repository checkout and the scripts folder exists.'
     }
     Import-Module -Name $modulePath -Force -ErrorAction Stop
-} catch {
+}
+catch {
     Write-Error ("Failed to import PimAutomation module: {0}" -f $_)
     throw
 }
@@ -59,17 +60,19 @@ if ($vaultName) {
 
     # Use the lifecycle helper (it will generate a random secret value internally)
     try {
-    $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName ("auto-rotated-secret") -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -RoleDefinitionId $RoleId -Verbose
-    } catch {
+        $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName ("auto-rotated-secret") -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -RoleDefinitionId $RoleId -Verbose
+    }
+    catch {
         Write-Error ("Invoke-TempKeyVaultRotationLifecycle failed: {0}" -f $_)
         throw
     }
 
     $out = [pscustomobject]@{
-        request = $req
+        request   = $req
         lifecycle = $lifecycleResult
     }
-} else {
+}
+else {
     $out = $req
 }
 

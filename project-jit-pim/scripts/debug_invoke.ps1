@@ -11,7 +11,8 @@ InModuleScope -ModuleName $mod.Name {
     try {
         $result = New-PimActivationRequest -RoleId 'role-123' -ResourceId 'res-456' -Justification 'test'
         Write-Output "Function returned:`n$result | Format-List | Out-String"
-    } catch {
+    }
+    catch {
         Write-Output "Caught error:`n$($_ | Out-String)"
         Write-Output "Exception ToString:`n$($_.Exception.ToString())"
         Write-Output "Exception details:`n$($_.Exception | Format-List -Force | Out-String)"

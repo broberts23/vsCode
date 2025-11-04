@@ -9,7 +9,7 @@ assignment, and secret rotation. All functions are defined once in this file.
 $PimAutomation_UseBeta = $true
 if ($env:PIM_AUTOMATION_USE_BETA) {
     $val = $env:PIM_AUTOMATION_USE_BETA.ToString().ToLowerInvariant()
-    if ($val -in @('1','true','yes','beta')) { $PimAutomation_UseBeta = $true }
+    if ($val -in @('1', 'true', 'yes', 'beta')) { $PimAutomation_UseBeta = $true }
 }
 
 function Get-GraphAccessToken {
@@ -30,13 +30,14 @@ function Get-GraphAccessToken {
         $az = Get-Command az -ErrorAction SilentlyContinue
         if ($az) {
             Write-Verbose 'Requesting Microsoft Graph token via Azure CLI.'
-            $cliArgs = @('account','get-access-token','--resource','https://graph.microsoft.com')
-            if ($TenantId) { $cliArgs += @('--tenant',$TenantId) }
+            $cliArgs = @('account', 'get-access-token', '--resource', 'https://graph.microsoft.com')
+            if ($TenantId) { $cliArgs += @('--tenant', $TenantId) }
             $tokenJson = & az @cliArgs | Out-String
             $accessToken = ($tokenJson | ConvertFrom-Json).accessToken
             if ($accessToken) { return $accessToken }
         }
-    } catch {
+    }
+    catch {
         Write-Verbose ("Azure CLI token retrieval failed: {0}" -f $_)
     }
 
@@ -49,7 +50,8 @@ function Get-GraphAccessToken {
                 if ($context -and $context.AccessToken) { return $context.AccessToken }
             }
         }
-    } catch {
+    }
+    catch {
         Write-Verbose ("Interactive Connect-MgGraph failed: {0}" -f $_)
     }
 
@@ -69,7 +71,8 @@ function Connect-PimGraph {
             # Connect-MgGraph expects a SecureString for -AccessToken; convert the plain token string
             try {
                 $secureToken = ConvertTo-SecureString -String $token -AsPlainText -Force
-            } catch {
+            }
+            catch {
                 Write-Verbose "Failed to convert token to SecureString: $_"
                 throw
             }
@@ -79,7 +82,8 @@ function Connect-PimGraph {
             Connect-MgGraph -AccessToken $secureToken -NoWelcome -ErrorAction Stop | Out-Null
             Write-Verbose 'Connected to Microsoft Graph using access token.'
             return
-        } catch {
+        }
+        catch {
             Write-Verbose ("Connect-MgGraph with token failed: {0}" -f $_)
         }
     }
@@ -91,7 +95,7 @@ function Connect-PimGraph {
 function Invoke-PimGraphRequest {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] [ValidateSet('Get','Post','Patch','Delete','Put')] [string] $Method,
+        [Parameter(Mandatory)] [ValidateSet('Get', 'Post', 'Patch', 'Delete', 'Put')] [string] $Method,
         [Parameter(Mandatory)] [string] $Path,
         [Parameter()] [string] $Body,
         [Parameter()] [string] $AccessToken
@@ -100,14 +104,16 @@ function Invoke-PimGraphRequest {
     # Decide endpoint preference: default to module-level flag unless overridden by parameter
     if ($PSBoundParameters.ContainsKey('UseBeta')) {
         $preferBeta = $UseBeta
-    } else {
+    }
+    else {
         $preferBeta = $PimAutomation_UseBeta
     }
 
     # Try v1.0 then beta by default, or beta then v1.0 when preferring beta.
     if ($preferBeta) {
         $baseUris = @('https://graph.microsoft.com/beta/', 'https://graph.microsoft.com/v1.0/')
-    } else {
+    }
+    else {
         $baseUris = @('https://graph.microsoft.com/v1.0/', 'https://graph.microsoft.com/beta/')
     }
     foreach ($base in $baseUris) {
@@ -118,21 +124,26 @@ function Invoke-PimGraphRequest {
             if ($AccessToken) { $headers['Authorization'] = "Bearer $AccessToken" }
             if ($Method -eq 'Get') {
                 $res = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -ErrorAction Stop
-            } elseif ($Method -eq 'Post') {
+            }
+            elseif ($Method -eq 'Post') {
                 $headers['Content-Type'] = 'application/json'
                 $res = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $Body -ErrorAction Stop
-            } elseif ($Method -eq 'Patch') {
+            }
+            elseif ($Method -eq 'Patch') {
                 $headers['Content-Type'] = 'application/json'
                 $res = Invoke-RestMethod -Method Patch -Uri $uri -Headers $headers -Body $Body -ErrorAction Stop
-            } elseif ($Method -eq 'Delete') {
+            }
+            elseif ($Method -eq 'Delete') {
                 $res = Invoke-RestMethod -Method Delete -Uri $uri -Headers $headers -ErrorAction Stop
-            } elseif ($Method -eq 'Put') {
+            }
+            elseif ($Method -eq 'Put') {
                 $headers['Content-Type'] = 'application/json'
                 $res = Invoke-RestMethod -Method Put -Uri $uri -Headers $headers -Body $Body -ErrorAction Stop
             }
 
             if ($null -ne $res) { return $res }
-        } catch {
+        }
+        catch {
             Write-Verbose ("Invoke-PimGraphRequest to {0} failed: {1}" -f $uri, $_)
             # try next base (v1.0 -> beta)
         }
@@ -184,7 +195,8 @@ function New-PimActivationRequest {
                     raw             = $response
                 }
             }
-        } catch {
+        }
+        catch {
             Write-Verbose ("Graph PIM POST failed: {0}" -f $_)
         }
     }
@@ -223,7 +235,8 @@ function Get-PimRequest {
                     raw         = $response
                 }
             }
-        } catch {
+        }
+        catch {
             Write-Verbose ("Graph PIM GET failed: {0}" -f $_)
         }
     }
@@ -242,7 +255,8 @@ function Connect-AzManagedIdentity {
 
     try {
         Import-Module Az.Accounts -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Write-Error 'Az.Accounts module is required for Azure authentication.'
         throw
     }
@@ -251,7 +265,8 @@ function Connect-AzManagedIdentity {
         Write-Verbose 'Attempting Connect-AzAccount using managed identity.'
         Connect-AzAccount -Identity -ErrorAction Stop | Out-Null
         Write-Verbose 'Authenticated with managed identity.'
-    } catch {
+    }
+    catch {
         Write-Verbose 'Managed identity unavailable, falling back to interactive Connect-AzAccount.'
         Connect-AzAccount -ErrorAction Stop | Out-Null
     }
@@ -261,14 +276,15 @@ function Set-PimKeyVaultSecret {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $VaultName,
-        [Parameter(Mandatory=$false)][string] $SecretName = 'auto-rotated-secret',
+        [Parameter(Mandatory = $false)][string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][string] $RequestId,
         [Parameter()][string] $NewSecretValue
     )
 
     try {
         Import-Module Az.KeyVault -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Write-Error 'Az.KeyVault module is required. Install the module before running this function.'
         throw
     }
@@ -285,7 +301,8 @@ function Set-PimKeyVaultSecret {
 
     try {
         $result = Set-AzKeyVaultSecret -VaultName $VaultName -Name $SecretName -SecretValue $secureValue -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Write-Error ("Set-AzKeyVaultSecret failed: {0}" -f $_)
         throw
     }
@@ -297,12 +314,12 @@ function Set-PimKeyVaultSecret {
     }
 
     return [pscustomobject]@{
-        vault           = $VaultName
-        secret          = $SecretName
-        requestId       = $RequestId
-        newValueMasked  = '***REDACTED***'
-        rotatedAt       = (Get-Date).ToUniversalTime()
-        secretVersion   = $secretVersion
+        vault          = $VaultName
+        secret         = $SecretName
+        requestId      = $RequestId
+        newValueMasked = '***REDACTED***'
+        rotatedAt      = (Get-Date).ToUniversalTime()
+        secretVersion  = $secretVersion
     }
 }
 
@@ -316,7 +333,8 @@ function New-TemporaryKeyVaultRoleAssignment {
 
     try {
         Import-Module Az.Resources -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Write-Error 'Az.Resources module is required for RBAC operations.'
         throw
     }
@@ -341,7 +359,8 @@ function New-TemporaryKeyVaultRoleAssignment {
 
     try {
         return New-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $roleGuid -Scope $VaultResourceId -ErrorAction Stop
-    } catch {
+    }
+    catch {
         # Surface a detailed message to help diagnose failures in Az module
         $err = $_
         $detail = $err.Exception.ToString()
@@ -360,7 +379,8 @@ function Remove-TemporaryKeyVaultRoleAssignment {
 
     try {
         Import-Module Az.Resources -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Write-Error 'Az.Resources module is required for RBAC operations.'
         throw
     }
@@ -371,7 +391,8 @@ function Remove-TemporaryKeyVaultRoleAssignment {
         if ($rId -match '/roleDefinitions/([0-9a-fA-F\-]{36})$') { $rId = $matches[1] }
         Remove-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $rId -Scope $VaultResourceId -Force -ErrorAction Stop | Out-Null
         return $true
-    } catch {
+    }
+    catch {
         Write-Warning ("Role assignment cleanup failed or was already removed: {0}" -f $_)
         return $false
     }
@@ -381,7 +402,7 @@ function Invoke-PimKeyVaultSecretRotation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $VaultName,
-        [Parameter(Mandatory=$false)][string] $SecretName = 'auto-rotated-secret',
+        [Parameter(Mandatory = $false)][string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][string] $RequestId,
         [Parameter(Mandatory)][string] $AssigneeObjectId,
         [Parameter(Mandatory)][string] $VaultResourceId,
@@ -391,7 +412,8 @@ function Invoke-PimKeyVaultSecretRotation {
 
     try {
         Import-Module Az.Resources -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Write-Verbose 'Az.Resources module not available; RBAC operations may fail.'
     }
 
@@ -420,12 +442,14 @@ function Invoke-PimKeyVaultSecretRotation {
         $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
         Write-Error ("Secret rotation failed: {0}" -f $_)
         throw
-    } finally {
+    }
+    finally {
         if ($roleAssignment) {
             try {
                 Remove-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId | Out-Null
                 Write-Verbose 'Removed temporary Key Vault role assignment.'
-            } catch {
+            }
+            catch {
                 Write-Warning ("Failed to remove temporary role assignment: {0}" -f $_)
             }
         }
@@ -434,25 +458,26 @@ function Invoke-PimKeyVaultSecretRotation {
 
 
 function Invoke-TempKeyVaultRotationLifecycle {
-    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultName,
-        [Parameter(Mandatory=$false)][ValidateNotNullOrEmpty()] [string] $SecretName = 'auto-rotated-secret',
+        [Parameter(Mandatory = $false)][ValidateNotNullOrEmpty()] [string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $AssigneeObjectId,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultResourceId,
+        [Parameter()][string] $RoleDefinitionId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7',
         [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300
     )
 
     Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
 
-    if (-not $PSCmdlet.ShouldProcess("Assign role to $AssigneeObjectId on $VaultResourceId and rotate secret")) { return }
+    if (-not $PSCmdlet.ShouldProcess("Assign role $RoleDefinitionId to $AssigneeObjectId on $VaultResourceId and rotate secret")) { return }
 
     $roleAssignment = $null
     try {
-    # Create a temporary Key Vault role assignment (requires ASSIGNEE_OBJECT_ID pre-resolved by workflow)
-        Write-Verbose "Creating temporary Key Vault role assignment for $AssigneeObjectId"
-        $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId
+        # Create a temporary Key Vault role assignment (requires ASSIGNEE_OBJECT_ID pre-resolved by workflow)
+        Write-Verbose "Creating temporary Key Vault role assignment for $AssigneeObjectId using role $RoleDefinitionId"
+        $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
         Write-Verbose ("Created role assignment: {0}" -f ($roleAssignment.Id -or $roleAssignment.Name))
 
         # Perform the secret rotation under the granted role
@@ -460,14 +485,15 @@ function Invoke-TempKeyVaultRotationLifecycle {
         $rotation = Set-PimKeyVaultSecret -VaultName $VaultName -SecretName $SecretName -RequestId ([guid]::NewGuid()).Guid
 
         # Remove the role assignment
-        Write-Verbose "Removing temporary role assignment for $AssigneeObjectId"
-        $removed = Remove-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId
+        Write-Verbose "Removing temporary role assignment for $AssigneeObjectId (role $RoleDefinitionId)"
+        $removed = Remove-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
 
         # Validate removal: attempt to find any role assignment matching principal and scope
         try {
             Import-Module Az.Resources -ErrorAction Stop
             $existing = Get-AzRoleAssignment -ObjectId $AssigneeObjectId -Scope $VaultResourceId -ErrorAction SilentlyContinue
-        } catch {
+        }
+        catch {
             Write-Verbose "Az.Resources not available for validation: $_"
             $existing = $null
         }
@@ -476,13 +502,14 @@ function Invoke-TempKeyVaultRotationLifecycle {
         if ($existing) { $validation.assignmentsFound = ($existing | Measure-Object).Count; if ($validation.assignmentsFound -gt 0) { $validation.removed = $false } }
 
         return [pscustomobject]@{
-            rotation        = $rotation
-            roleAssignment  = ($roleAssignment | Select-Object Id,Name)
-            removed         = $removed
-            validation      = $validation
-            timestamp       = (Get-Date).ToUniversalTime()
+            rotation       = $rotation
+            roleAssignment = ($roleAssignment | Select-Object Id, Name)
+            removed        = $removed
+            validation     = $validation
+            timestamp      = (Get-Date).ToUniversalTime()
         }
-    } catch {
+    }
+    catch {
         Write-Error ("Invoke-TempKeyVaultRotationLifecycle failed: {0}" -f $_)
         throw
     }
