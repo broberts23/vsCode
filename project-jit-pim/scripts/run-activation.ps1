@@ -61,8 +61,10 @@ if ($vaultName) {
     # Vault resource id - use the provided ResourceId
     $vaultResourceId = $ResourceId
 
+    $assigneePreview = if ($assignee.Length -ge 8) { $assignee.Substring(0, 8) } else { $assignee }
+
     # Diagnostic logging to help troubleshoot RBAC/role-assignment failures
-    Write-Verbose "Invoking Invoke-TempKeyVaultRotationLifecycle with VaultName='$vaultName', VaultResourceId='$vaultResourceId', AssigneeObjectId='${assignee.Substring(0,8)}...', SecretName='auto-rotated-secret'"
+    Write-Verbose "Invoking Invoke-TempKeyVaultRotationLifecycle with VaultName='$vaultName', VaultResourceId='$vaultResourceId', AssigneeObjectId='${assigneePreview}...', SecretName='auto-rotated-secret'"
 
     # Use the lifecycle helper (it will generate a random secret value internally)
     try {
