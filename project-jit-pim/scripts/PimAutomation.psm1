@@ -266,7 +266,7 @@ function Get-PimRequest {
     }
 }
 
-function Ensure-PimAzContext {
+function Set-PimAzContext {
     [CmdletBinding()]
     param(
         [Parameter()][string] $SubscriptionId = $env:AZURE_SUBSCRIPTION_ID
@@ -335,7 +335,7 @@ function Set-PimKeyVaultSecret {
         throw
     }
 
-    Ensure-PimAzContext | Out-Null
+    Set-PimAzContext | Out-Null
 
     if (-not $NewSecretValue) {
         $buffer = New-Object byte[] 32
@@ -420,7 +420,7 @@ function New-TemporaryKeyVaultRoleAssignment {
         throw
     }
 
-    Ensure-PimAzContext | Out-Null
+    Set-PimAzContext | Out-Null
 
     Write-Verbose ("Creating temporary Key Vault role assignment for {0} on scope {1}" -f $AssigneeObjectId, $VaultResourceId)
     $roleGuid = ConvertTo-RoleDefinitionGuid -RoleDefinitionId $RoleDefinitionId
@@ -453,7 +453,7 @@ function Remove-TemporaryKeyVaultRoleAssignment {
         throw
     }
 
-    Ensure-PimAzContext | Out-Null
+    Set-PimAzContext | Out-Null
 
     try {
         $rId = ConvertTo-RoleDefinitionGuid -RoleDefinitionId $RoleDefinitionId
@@ -652,4 +652,4 @@ function Invoke-TempKeyVaultRotationLifecycle {
 
 Export-ModuleMember -Function Invoke-TempKeyVaultRotationLifecycle
 
-Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Connect-AzManagedIdentity, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation, Resolve-PimRoleResourcePairs
+Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Set-PimAzContext, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation, Resolve-PimRoleResourcePairs

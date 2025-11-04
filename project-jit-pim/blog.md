@@ -13,7 +13,7 @@ Traditional portal-driven PIM activations are useful for ad-hoc human tasks, but
 - Audit and compliance: workflows produce machine-readable activation records that can be stored with build artifacts or forwarded to SIEM for longer retention.
 - Faster recovery and consistent rollback: automation can detect activation failures and run deterministic rollback or remediation flows.
 
-This repository contains a working scaffold that illustrates the pattern: Bicep templates for demo infrastructure, a PowerShell module that uses Graph authentication patterns, a small wrapper script to request activations from a runner, Pester tests, and a GitHub Actions workflow that demonstrates a dry-run activation.
+This repository contains a working scaffold that illustrates the pattern: a PowerShell module that uses Graph/Azure authentication patterns, a small wrapper script to request activations from a runner, and a GitHub Actions workflow that demonstrates an approval-gated activation.
 
 Key references:
 
@@ -24,40 +24,34 @@ What changed in this drop
 
 - Implemented a programmatic JIT pattern for automation identities (managed identity / service principal). Managed identities cannot be PIM-eligible; instead, the workflow creates a temporary RBAC role assignment, performs the privileged action, and then removes the assignment immediately after.
 - Added a reusable GitHub Actions workflow that collects requested role/resource pairs, generates a human-readable approval table, requires a GitHub Environment approval gate, and only then performs the privileged action.
-- Hardened the workflow’s approval table generation (Markdown escaping, one-to-one / one-to-many pairing logic, and robust requestId capture).
-- Updated the demo Bicep to provision a user-assigned managed identity, an RBAC-enabled Key Vault, and expose the identity’s clientId/principalId via outputs. Added a Key Vault–scoped role assignment example.
-- Refactored the PowerShell module: non-interactive testability, Graph wrapper with v1.0/beta fallback, and a new lifecycle function that runs the temporary RBAC create → rotate secret → RBAC delete sequence.
+	- Hardened the workflow’s approval table generation (Markdown escaping, one-to-one / one-to-many pairing logic, and robust requestId capture).
+	- Refactored the PowerShell module for CI-friendly behavior: explicit Az context bootstrapping via Set-PimAzContext (OIDC federated token or managed identity), corrected PSRoleAssignment property usage (RoleAssignmentId/RoleAssignmentName), and a retry around Set-AzKeyVaultSecret to absorb short RBAC propagation delays (HTTP 403 Forbidden).
 
 ## Repository structure
 
-Top-level folders and files and how they fit together:
+Key folders and files and how they fit together (paths relative to the repository root):
 
-- `infra/`
-	- `infra/main.bicep` — Demo infrastructure. Provisions a user-assigned managed identity (UAMI), an RBAC-enabled Key Vault, and a Key Vault–scoped role assignment example. Exposes outputs for `clientId`, `principalId`, and resource IDs so CI steps don’t need to call Graph to discover them.
-
-- `scripts/`
-	- `scripts/PimAutomation.psm1` — PowerShell 7.4 module that encapsulates Graph and RBAC logic. Key functions:
-		- `Get-GraphAccessToken` — prefers Az CLI token when available; supports interactive Graph login in dev.
-		- `Connect-PimGraph` — normalizes Graph connection with the token.
-		- `Invoke-PimGraphRequest` — Graph v1.0/beta compatibility wrapper for GET/POST/PATCH/DELETE.
-		- `New-PimActivationRequest` — creates an activation request (stubbed for non-interactive tests) and returns a normalized object with a `requestId`.
-		- `Get-PimRequest` — reads request status; stubbed to Approved for demo tests.
-		- `Connect-AzManagedIdentity` — helper to connect to Azure via managed identity or fallback to interactive in dev.
-		- `Set-PimKeyVaultSecret` — rotates a Key Vault secret using Az.KeyVault.
-		- `New-TemporaryKeyVaultRoleAssignment` / `Remove-TemporaryKeyVaultRoleAssignment` — creates/removes a scoped RBAC assignment on the Key Vault.
-		- `Invoke-TempKeyVaultRotationLifecycle` — orchestrates create → rotate secret → delete, and validates removal; used by CI.
-	- `scripts/run-activation.ps1` — Entry point for the workflow. Calls `Connect-PimGraph`, `New-PimActivationRequest`, and then runs `Invoke-TempKeyVaultRotationLifecycle` when vault/secret inputs are provided. Emits structured JSON for the pipeline.
+- `project-jit-pim/scripts/`
+  - `project-jit-pim/scripts/PimAutomation.psm1` — PowerShell 7.4 module that encapsulates Graph and RBAC logic. Key functions:
+    - `Get-GraphAccessToken` — prefers Azure CLI token when available; supports interactive Graph login in dev.
+    - `Connect-PimGraph` — normalizes Graph connection with the token.
+    - `Invoke-PimGraphRequest` — Graph v1.0/beta compatibility wrapper for GET/POST/PATCH/DELETE.
+    - `New-PimActivationRequest` — creates an activation request (stubbed for non-interactive tests) and returns a normalized object with a `requestId`.
+	- `Get-PimRequest` — reads request status; stubbed to Approved for demo tests.
+	- `Set-PimAzContext` — establishes Az PowerShell context using OIDC federated token or managed identity; required for RBAC and Key Vault operations.
+    - `Resolve-PimRoleResourcePairs` — robust pairing of roleIds/resourceIds (zip, one-to-many, or Cartesian product).
+    - `Set-PimKeyVaultSecret` — rotates a Key Vault secret using Az.KeyVault with Forbidden-aware retry for RBAC propagation.
+    - `New-TemporaryKeyVaultRoleAssignment` / `Remove-TemporaryKeyVaultRoleAssignment` — creates/removes a scoped RBAC assignment on the Key Vault; returns PSRoleAssignment with `RoleAssignmentId`.
+    - `Invoke-TempKeyVaultRotationLifecycle` — orchestrates create → rotate secret → delete, and validates removal; used by CI.
+  - `project-jit-pim/scripts/run-activation.ps1` — Entry point for the workflow. Calls `Connect-PimGraph`, `New-PimActivationRequest`, and then runs `Invoke-TempKeyVaultRotationLifecycle` when the `ResourceId` is a Key Vault. Emits structured JSON for the pipeline and relies on `ASSIGNEE_OBJECT_ID` from the workflow environment.
 
 - `.github/workflows/`
-	- `.github/workflows/pim-elevate.yml` — Reusable workflow that collects role/resource inputs, builds an approval table, blocks on a GitHub Environment gate, then runs the privileged step via `scripts/run-activation.ps1`.
-	- `.github/workflows/pim-elevate-demo-use.yml` — Example caller that demonstrates how to invoke the reusable workflow (uses `secrets: inherit`).
-	- `.github/workflows/test_table_generation.ps1` — Local-only helper to validate Markdown table escaping for the approval step (not used by CI runs).
+  - `.github/workflows/pim-elevate.yml` — Reusable workflow that collects role/resource inputs, builds an approval table (via `project-jit-pim/scripts/build-approval.ps1`), blocks on a GitHub Environment gate, then runs the privileged step via `project-jit-pim/scripts/run-activation.ps1`.
 
-- `tests/`
-	- `tests/PimAutomation.Tests.ps1` — Pester tests designed to run non-interactively (Graph calls skipped via environment flag). Validates exports and basic behavior.
+- `project-jit-pim/blog.md` — This document.
 
-- `blog.md` — This document.
-	- `bicepconfig.json` — Optional Bicep configuration to enable experimental extensibility for Microsoft Graph resources when authoring with Graph Bicep templates.
+- `project-jit-pim/infra/`
+	- `project-jit-pim/infra/main.bicep` — Demo infrastructure to support the JIT scenario: provisions a user-assigned managed identity (UAMI), an RBAC-enabled Key Vault, a Microsoft Entra application and service principal using the Microsoft Graph Bicep extension, and a resource group–scoped role assignment that grants the service principal User Access Administrator at the RG scope. Emits outputs (vault name/id, identity clientId/principalId/id, Graph appId/SP id, storage account id/name) for wiring into CI.
 
 ## Scenarios / use cases
 
@@ -120,7 +114,7 @@ Actors
 - Automation identity: either a user-assigned managed identity (UAMI) deployed by Bicep for demos, or an OIDC-federated workload identity for production pipelines.
 - Microsoft Graph (optional): used to create/read PIM activation requests where applicable to user principals. For managed identities, the pattern uses temporary Azure RBAC role assignments.
 - Azure Resource Manager (ARM): enforces role assignments and scopes; Key Vault is configured with RBAC data-plane permissions.
-- Approver(s): GitHub Environment approvers; optionally, an automated approver (Function/Logic App) can be integrated later.
+- Approver(s): GitHub Environment approvers; optionally, an automated approver (Function/Logic App) or notification to external systems like Teams/Slack can be integrated later.
 
 Flow (high level)
 
@@ -144,6 +138,53 @@ This section will be expanded into subpages. For now, the top-level plan:
 
 Planned docs: step-by-step command pages, payload examples, and troubleshooting for common errors (RBAC propagation, throttling, approvals). To be added as separate docs in a later update.
 
+## Demo infrastructure: `project-jit-pim/infra/main.bicep`
+
+What it deploys
+- Storage account (for a simple demo resource)
+- User-assigned managed identity (UAMI) for automation
+- Azure Key Vault configured with the RBAC permission model (`enableRbacAuthorization: true`)
+- Microsoft Entra application and service principal via the Microsoft Graph Bicep extension
+- A role assignment at the resource group scope that grants the service principal the built-in User Access Administrator role (roleDefinitionId GUID `18d7d88d-d35e-4fb5-a5c3-7773c20a72d9`) to create/remove role assignments within the RG
+
+Key details reflected in the template
+- Graph extension imports at top of file:
+	- `extension graphV1`
+	- `extension graphBeta`
+- Graph resources declared using `Microsoft.Graph/*@beta` types for `applications` and `servicePrincipals`.
+- Role assignment uses deterministic name via `guid(...)`, `principalId: ghSp.id`, and subscription-scoped roleDefinitionId built with `subscriptionResourceId('Microsoft.Authorization/roleDefinitions', userAccessAdminRoleId)`.
+- Key Vault enables RBAC model for data-plane operations to align with this JIT pattern.
+
+Outputs (used by CI/workflows)
+- Key Vault: `keyVaultName`, `keyVaultId`
+- UAMI: `userIdentityClientId`, `userIdentityPrincipalId`, `userIdentityResourceId`
+- Graph: `githubAppId`, `githubServicePrincipalId`, `githubServicePrincipalResourceId`
+- Storage: `storageAccountId`, `storageAccountName`
+
+Quick deploy and validate
+- Ensure your Bicep CLI is up to date and the Graph Bicep extensions are enabled via `bicepconfig.json` (see next section).
+
+```bash
+az bicep upgrade
+
+# Create a demo resource group (choose a location)
+az group create --name MyDemoRG --location eastus
+
+# Validate the template
+az deployment group validate \
+	--resource-group MyDemoRG \
+	--template-file project-jit-pim/infra/main.bicep \
+	--parameters location=eastus
+
+# Deploy
+az deployment group create \
+	--resource-group MyDemoRG \
+	--template-file project-jit-pim/infra/main.bicep \
+	--parameters location=eastus
+```
+
+Note: The role used in the demo (`User Access Administrator`) is convenient for a JIT RBAC demo because it can create/delete role assignments. In production, choose the least-privileged role and scope that fits your policy. Built-in roles reference: https://learn.microsoft.com/azure/role-based-access-control/built-in-roles
+
 ## Using Microsoft Graph resources in Bicep (beta)
 
 You can author Entra resources (applications / service principals) directly from Bicep using the Microsoft Graph Bicep templates. This is a preview extensibility feature in Bicep and requires two things:
@@ -153,7 +194,7 @@ You can author Entra resources (applications / service principals) directly from
 
 What you need
 - A recent Bicep CLI (or Azure CLI with the Bicep command) and the VS Code Bicep extension.
-- A repo-level `bicepconfig.json` that enables the extensibility feature and (optionally) maps extension aliases to the registry artifacts. Our repo includes a `bicepconfig.json` that looks like this:
+- A repo-level `bicepconfig.json` that enables the extensibility feature and maps extension aliases to the registry artifacts. Ensure `extensibility` is enabled. Example:
 
 ```json
 {
@@ -170,24 +211,25 @@ and the experimental features overview: https://github.com/Azure/bicep/blob/main
 
 Importing the Graph extension
 
-Once `bicepconfig.json` is present and extensibility is enabled, you can import the Graph extension at the top of your Bicep file. You can import by the full module reference (the "br:" path) or by the alias you defined in `bicepconfig.json`:
+Once `bicepconfig.json` is present and extensibility is enabled, import the Graph extensions at the top of your Bicep file using the aliases defined in `bicepconfig.json`:
 
 ```bicep
-// import by alias (preferred when you've mapped the extension in bicepconfig.json)
-extension 'graphV1'
+// imports by alias (preferred when you've mapped the extension in bicepconfig.json)
+extension graphV1
+extension graphBeta
 
 After the extension import, you can declare Microsoft Graph types in Bicep. Example (beta) — consult the Graph Bicep reference for available properties and schema:
 
 ```bicep
 resource ghApp 'Microsoft.Graph/applications@beta' = {
-	name: 'my-graph-app'
-	displayName: 'my-graph-app'
-	signInAudience: 'AzureADMyOrg'
+  uniqueName: toLower('pim-github-app-${uniqueString(resourceGroup().id)}')
+  displayName: 'pim-github-oidc-app-${uniqueString(resourceGroup().id)}'
+  signInAudience: 'AzureADMyOrg'
 }
 
 resource ghSp 'Microsoft.Graph/servicePrincipals@beta' = {
-	name: 'my-graph-sp'
-	appId: ghApp.appId
+  appId: ghApp.appId
+  displayName: ghApp.displayName
 }
 ```
 
@@ -195,18 +237,7 @@ Reference: Microsoft Graph Bicep templates — https://learn.microsoft.com/graph
 
 Validate and deploy
 
-Update your local Bicep tooling and then build/validate the template before deploying:
-
-```bash
-az bicep upgrade
-az bicep build --file infra/main.bicep
-
-# Dry-run a resource group deployment
-az deployment group validate \
-	--resource-group MyDemoRG \
-	--template-file infra/main.bicep \
-	--parameters location='eastus'
-```
+See the quick commands in the previous section for validation and deployment to a resource group.
 
 Troubleshooting and fallback strategy
 
@@ -215,14 +246,14 @@ Troubleshooting and fallback strategy
 	- `bicepconfig.json` is in the repository root (or a parent folder) and contains `"experimentalFeaturesEnabled": { "extensibility": true }`.
 	- The `extension` import line appears before any `Microsoft.Graph/*` resource declarations.
 
-- Some developer or CI environments may still lack the provider metadata required to author Graph types (the extensibility path is still evolving). For portability, this repo's `infra/main.bicep` includes a safe fallback pattern: instead of creating the app/servicePrincipal inline, accept `githubAppId` and `githubServicePrincipalId` as parameters and conditionally create the role assignment only when the service principal id is supplied. This lets teams either:
+- Some developer or CI environments may still lack the provider metadata required to author Graph types (the extensibility path is still evolving). If your environment cannot use the Graph Bicep extension, you can adapt the template to accept `githubAppId` and `githubServicePrincipalId` as parameters and only create the role assignment when the service principal id is supplied. This lets teams either:
 	1. Create the app/service principal ahead of time (via CLI or Graph APIs) and pass the returned `appId`/`principalId` into the Bicep deployment, or
 	2. Enable Bicep extensibility in their dev/CI images and let the template create the app/SP directly.
 
 Related discussion and issues: https://github.com/Azure/bicep/issues/16447
 
 
-## GitHub Actions workflow: `pim-elevate.yml`
+## GitHub Actions workflow: `.github/workflows/pim-elevate.yml`
 
 Purpose: provide a generic, approval-gated JIT elevation workflow reusable across repos and branches.
 
@@ -238,14 +269,13 @@ Jobs and flow:
 	  - If arrays are equal length → zip items by index.
 	  - If one array has length 1 and the other >1 → pair the single item across all items of the other array.
 	  - Otherwise → produce a Cartesian product (all combinations).
-	- Reverse lookups: Uses `az role definition show --id` and `az resource show --ids` to fetch human-readable names/types.
-	- Approval table: Renders a Markdown table (IDs and names wrapped in inline code; pipes/backticks/newlines escaped). Posts the table as a workflow comment via `github-script` and exposes table content as a job output.
+	- Reverse lookups + approval table: Implemented by `project-jit-pim/scripts/build-approval.ps1` — resolves human-readable names/types and renders a Markdown table (IDs and names wrapped in inline code; pipes/backticks/newlines escaped). The table is posted as a comment (for PRs) or added to the job summary.
 	- Gate: The job emits metadata and ends; the next job is gated by a GitHub Environment (for example, `pim-rotation-approval`).
 
 2) approve-and-rotate
 	- Gate: Requires the GitHub Environment approval. Approvers can review the comment table before proceeding.
 	- Auth: Logs into Azure using OIDC for RBAC operations.
-	- Action: Runs `scripts/run-activation.ps1` which creates a traceable request, then calls `Invoke-TempKeyVaultRotationLifecycle` to create the temporary Key Vault assignment → rotate the secret → remove the assignment → validate removal.
+	- Action: Resolves role/resource pairs via the module, selects the first pair for the demo, and runs `project-jit-pim/scripts/run-activation.ps1` which creates a traceable request, then calls `Invoke-TempKeyVaultRotationLifecycle` to create the temporary Key Vault assignment → rotate the secret → remove the assignment → validate removal.
 	- Outputs: Emits structured JSON and can publish artifacts with activation and rotation details.
 
 Requirements:
@@ -257,7 +287,7 @@ Notes:
 - The workflow is designed to be reusable; use the demo caller as a reference for input wiring.
 - For managed identities, PIM eligibility is not applicable; the workflow still records a requestId for traceability and relies on temporary RBAC during the approved window.
 
-## PowerShell module: `PimAutomation.psm1`
+## PowerShell module: `project-jit-pim/scripts/PimAutomation.psm1`
 
 Design goals:
 - PowerShell 7.4, cross-platform, non-interactive by default in CI.
@@ -265,16 +295,17 @@ Design goals:
 - Clear separation between Graph (request/trace) and Azure RBAC (enforcement at resource scope).
 
 Key functions and behavior:
-- `Get-GraphAccessToken` and `Connect-PimGraph`: establish Graph access using an Az CLI token when present; fall back to Connect-MgGraph in dev.
+- `Get-GraphAccessToken` and `Connect-PimGraph`: establish Graph access using an Azure CLI token when present; fall back to Connect-MgGraph in dev.
 - `Invoke-PimGraphRequest`: sends requests to v1.0 or beta, with a predictable return shape and error handling.
 - `New-PimActivationRequest` and `Get-PimRequest`: create and query activation requests; in non-interactive mode, return a stub with a generated `requestId` and Approved status to allow tests to proceed.
-- `Connect-AzManagedIdentity`: convenient helper for connecting to Azure using a managed identity or dev login.
-- `New-TemporaryKeyVaultRoleAssignment` and `Remove-TemporaryKeyVaultRoleAssignment`: create/delete RBAC assignments at the Key Vault scope for a specific principal (the automation identity). Deterministic GUID names are used to make cleanup reliable.
-- `Set-PimKeyVaultSecret`: sets or rotates a secret using Az.KeyVault under the short-lived RBAC assignment.
+- `Set-PimAzContext`: establishes Az PowerShell context using OIDC federated token or managed identity for non-interactive CI runs.
+- `Resolve-PimRoleResourcePairs`: flexible pairing logic used by the workflow to map roleIds to resourceIds.
+- `New-TemporaryKeyVaultRoleAssignment` and `Remove-TemporaryKeyVaultRoleAssignment`: create/delete RBAC assignments at the Key Vault scope for a specific principal (the automation identity). Output uses `RoleAssignmentId`/`RoleAssignmentName` (per Az.Resources).
+- `Set-PimKeyVaultSecret`: sets or rotates a secret using Az.KeyVault under the short-lived RBAC assignment, with Forbidden-aware retry to handle eventual consistency of new role assignments.
 - `Invoke-TempKeyVaultRotationLifecycle`: orchestrates the full sequence, validates removal, and returns a structured object suitable for CI logs and artifacts.
 
 Contract (high level):
-- Inputs: role definition ID, target resource ID (Key Vault), principal object ID/client ID, vault and secret names, and optional justification/metadata.
+- Inputs: role definition ID, target resource ID (Key Vault), principal object ID, vault and secret names, and optional justification/metadata.
 - Error modes: Graph unavailability (handled via stub/test mode), RBAC propagation delays (should be retried with backoff), and Azure API transient failures (retryable).
 - Outputs: activation request info (`requestId`, timestamps), RBAC assignment details (id, scope), and the new secret version/id where applicable.
 
@@ -289,9 +320,9 @@ Contract (high level):
 
 ## Testing and validation
 
-- Unit tests: Pester tests run non-interactively by default (Graph calls are skipped via an environment flag). Add mocks for Az/Graph calls to validate logic paths.
+- Unit tests: When you add tests, prefer Pester with Graph calls disabled via an environment flag; mock Az/Graph cmdlets to validate logic paths.
 - Integration tests: Use a test subscription and a disposable Key Vault. Ensure cleanup of temporary role assignments.
-- Failure modes: Validate behavior for denied approvals, RBAC propagation delays, and transient Azure API errors (add retries with backoff where appropriate).
+- Failure modes: Validate behavior for denied approvals, RBAC propagation delays (Forbidden), and transient Azure API errors (retries with backoff).
 
 ## Demo / walkthrough — Secret / Key Rotation
 
@@ -300,7 +331,7 @@ This walkthrough focuses on a concrete, high-value scenario: rotating a Key Vaul
 High-level steps for the demo
 
 1. Prerequisites
-	- An Azure Key Vault configured to use the Azure RBAC permission model (`enableRbacAuthorization: true` is set in `infra/main.bicep`). This allows data-plane permissions via RBAC.
+	- An Azure Key Vault configured to use the Azure RBAC permission model (`enableRbacAuthorization: true`). This allows data-plane permissions via RBAC.
 	- A CI runner identity: GitHub OIDC for the workflow, or a user-assigned managed identity for Azure-hosted runs.
 	- Appropriate PIM licensing for your tenant (some features require Entra ID P2).
 
@@ -313,13 +344,13 @@ High-level steps for the demo
 
 4. Approval and activation
 	- The reusable workflow posts an approval table and pauses at a GitHub Environment gate. Approvers can review the requested role/resource pairs before proceeding.
-	- A future enhancement may add an optional automated approver (Function/Logic App) for specific policies.
+	- A future enhancement may add an optional automated approver (Function/Logic App) for specific policies or send notifications to Teams/Slack.
 
 5. Rotate the secret (performed under the JIT activation)
 	- The automation generates a new secret value and calls `Set-AzKeyVaultSecret` under a temporary, Key Vault–scoped RBAC assignment. The flow implemented here is:
 		1. Create a traceable requestId (via Graph when applicable, or stub).
 		2. Wait for approval at the GitHub Environment gate.
-		3. Create a temporary Key Vault data-plane RBAC assignment (e.g., Key Vault Secrets Officer) for the automation identity.
+		3. Create a temporary Key Vault data-plane RBAC assignment (e.g., Key Vault Secrets Officer) for the automation identity. New assignments may take a short time to propagate; the module retries on Forbidden.
 		4. Perform the secret write while the assignment is active.
 		5. Remove the temporary assignment and validate removal.
 
@@ -342,36 +373,9 @@ Below is a prioritized checklist that reflects current progress and what’s nex
 - [ ] Replace stub with real Microsoft Graph PIM integration
 	- Implement `New-PimActivationRequest` and `Get-PimRequest` against privilegedAccess/azureResources (v1.0 or beta as required) with robust error handling and retries.
 - [ ] CI wiring and automated tests
-	- Extend `.github/workflows/pim-elevate.yml` to run PSScriptAnalyzer and Pester on PRs; add a separate, opt-in integration job that uses OIDC against a test subscription.
+	- Add PSScriptAnalyzer and Pester on PRs; optionally include an integration job using OIDC against a test subscription.
 - [ ] Security & auth docs
 	- Document required Graph scopes and approvals, and the minimal Azure RBAC roles for the GitHub OIDC principal. Provide a federated credential example.
-
-### Medium priority
-- [ ] Module hygiene
-	- Add `scripts/PimAutomation.psd1` with `PowerShellVersion = '7.4'` and explicit `FunctionsToExport`. Add a PSScriptAnalyzer configuration and lint step.
-- [ ] Tests and mocks
-	- Pester unit tests that mock Az and Graph calls (Connect-MgGraph, Invoke-RestMethod, Set-AzKeyVaultSecret, New/Remove-AzRoleAssignment). Cover failure paths and timeouts.
-- [ ] Operational docs
-	- Add runbooks for emergency activation, manual revoke, and escalation. Add a developer README with local test steps and environment variables.
-
-### Low priority / extras
-- [ ] Notifications and observability
-	- Optional Slack/Teams notifications from the workflow; structured logs to Azure Monitor or a SIEM.
-- [ ] Automated approver
-	- Azure Function/Logic App to approve specific low-risk requests based on policy. Add safeguards and audit logging.
-- [ ] Dashboarding
-	- Simple dashboard (e.g., Static Web App + JS) to surface activation metrics from artifacts or a data store.
-
-## Operational runbook
-
-To be added: standard playbooks for emergency activation, manual revoke, and approval escalation, plus how to audit activations in Entra and Graph for compliance investigations.
-
-## Next steps and roadmap
-
-- Replace PowerShell stubs with real Graph PIM API calls (privilegedAccess/azureResources).
-- Add GitHub OIDC federated credential example and minimal RBAC guidance.
-- Implement optional automated approver with conditional policy.
-- Create a dashboard to surface activation metrics and audit summaries.
 
 ## Conclusion
 
