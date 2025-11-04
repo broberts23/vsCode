@@ -298,11 +298,11 @@ function Ensure-PimAzContext {
         Write-Verbose 'Connecting to Azure using federated token (OIDC).' 
         $token = Get-Content -Path $federatedTokenFile -Raw
         $connectParams = @{
-            Tenant          = $tenantId
-            ApplicationId   = $clientId
-            FederatedToken  = $token
+            Tenant           = $tenantId
+            ApplicationId    = $clientId
+            FederatedToken   = $token
             ServicePrincipal = $true
-            ErrorAction     = 'Stop'
+            ErrorAction      = 'Stop'
         }
         if ($SubscriptionId) { $connectParams['Subscription'] = $SubscriptionId }
         Connect-AzAccount @connectParams | Out-Null
@@ -534,12 +534,12 @@ function Invoke-PimKeyVaultSecretRotation {
     $roleAssignment = $null
     try {
         $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
-        Write-Verbose ("Created role assignment {0}" -f $roleAssignment.Id)
+        Write-Verbose ("Created role assignment {0}" -f $roleAssignment.RoleAssignmentId)
 
         $rotation = Set-PimKeyVaultSecret -VaultName $VaultName -SecretName $SecretName -RequestId $RequestId
         return [pscustomobject]@{
             rotation         = $rotation
-            roleAssignmentId = $roleAssignment.Id
+            roleAssignmentId = $roleAssignment.RoleAssignmentId
         }
     }
     finally {
@@ -577,7 +577,8 @@ function Invoke-TempKeyVaultRotationLifecycle {
         # Create a temporary Key Vault role assignment (requires ASSIGNEE_OBJECT_ID pre-resolved by workflow)
         Write-Verbose "Creating temporary Key Vault role assignment for $AssigneeObjectId using role $RoleDefinitionId"
         $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
-        Write-Verbose ("Created role assignment: {0}" -f ($roleAssignment.Id -or $roleAssignment.Name))
+        $assignmentLabel = ($roleAssignment.RoleAssignmentId -or $roleAssignment.RoleAssignmentName)
+        Write-Verbose ("Created role assignment: {0}" -f $assignmentLabel)
 
         # Perform the secret rotation under the granted role
         Write-Verbose "Rotating secret $SecretName in vault $VaultName"
@@ -602,7 +603,7 @@ function Invoke-TempKeyVaultRotationLifecycle {
 
         return [pscustomobject]@{
             rotation       = $rotation
-            roleAssignment = ($roleAssignment | Select-Object Id, Name)
+            roleAssignment = ($roleAssignment | Select-Object RoleAssignmentId, RoleAssignmentName)
             removed        = $removed
             validation     = $validation
             timestamp      = (Get-Date).ToUniversalTime()
