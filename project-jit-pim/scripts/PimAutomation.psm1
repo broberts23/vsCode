@@ -276,7 +276,7 @@ function Set-PimAzContext {
     $__oldVerbosePreference = $VerbosePreference
     $VerbosePreference = 'SilentlyContinue'
     try {
-    Import-Module Az.Accounts -ErrorAction Stop -Verbose:$false
+        Import-Module Az.Accounts -ErrorAction Stop -Verbose:$false
     }
     finally {
         $VerbosePreference = $__oldVerbosePreference
@@ -330,89 +330,133 @@ function Set-PimKeyVaultSecret {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $VaultName,
-        [Parameter(Mandatory = $false)][string] $SecretName = 'auto-rotated-secret',
-        [Parameter(Mandatory)][string] $RequestId,
-        [Parameter()][string] $NewSecretValue
+        [Parameter(Mandatory)][string] $RequestId
     )
 
+    $__oldVerbosePreference = $VerbosePreference
     try {
-        $__oldVerbosePreference = $VerbosePreference
         $VerbosePreference = 'SilentlyContinue'
-    Import-Module Az.KeyVault -ErrorAction Stop -Verbose:$false
+        Import-Module Az.KeyVault -ErrorAction Stop -Verbose:$false
     }
     catch {
         Write-Error 'Az.KeyVault module is required. Install the module before running this function.'
         throw
     }
-    finally { $VerbosePreference = $__oldVerbosePreference }
+    finally {
+        $VerbosePreference = $__oldVerbosePreference
+    }
 
     Set-PimAzContext | Out-Null
 
-    if (-not $NewSecretValue) {
-        $buffer = New-Object byte[] 32
-        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($buffer)
-        $NewSecretValue = [System.Convert]::ToBase64String($buffer)
+    $secrets = @(Get-AzKeyVaultSecret -VaultName $VaultName -ErrorAction Stop)
+    if ($secrets.Count -eq 0) {
+        Write-Verbose "No secrets found in vault $VaultName."
+        return @()
     }
 
-    $secureValue = ConvertTo-SecureString -String $NewSecretValue -AsPlainText -Force
-
-    $maxAttempts = 6
-    $baseDelaySeconds = 5
-    $result = $null
-
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        try {
-            $result = Set-AzKeyVaultSecret -VaultName $VaultName -Name $SecretName -SecretValue $secureValue -ErrorAction Stop
-            break
+    $results = @()
+    foreach ($secret in $secrets) {
+        if (-not $secret.Name) {
+            Write-Verbose 'Encountered secret without a name; skipping.'
+            continue
         }
-        catch {
-            $err = $_
-            $statusCode = $null
-            if ($err.Exception -and $err.Exception.PSObject.Properties.Match('Response').Count -gt 0) {
-                $statusCodeProp = $err.Exception.PSObject.Properties['Response']
-                if ($statusCodeProp -and $statusCodeProp.Value -and $statusCodeProp.Value.PSObject.Properties.Match('StatusCode').Count -gt 0) {
-                    $statusCode = $statusCodeProp.Value.StatusCode
+
+        $newSecretValue = New-Object byte[] 32
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($newSecretValue)
+        $newSecretValue = [System.Convert]::ToBase64String($newSecretValue)
+        $secureValue = ConvertTo-SecureString -String $newSecretValue -AsPlainText -Force
+
+        $maxAttempts = 6
+        $baseDelaySeconds = 5
+        $result = $null
+
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            try {
+                $result = Set-AzKeyVaultSecret -VaultName $VaultName -Name $secret.Name -SecretValue $secureValue -ErrorAction Stop
+                break
+            }
+            catch {
+                $err = $_
+                $statusCode = $null
+                if ($err.Exception -and $err.Exception.PSObject.Properties.Match('Response').Count -gt 0) {
+                    $responseProp = $err.Exception.PSObject.Properties['Response']
+                    if ($responseProp -and $responseProp.Value -and $responseProp.Value.PSObject.Properties.Match('StatusCode').Count -gt 0) {
+                        $statusCode = $responseProp.Value.StatusCode
+                    }
                 }
-            }
 
-            $shouldRetry = $false
-            if ($statusCode -and ($statusCode.ToString() -eq 'Forbidden' -or $statusCode -eq [System.Net.HttpStatusCode]::Forbidden)) {
-                $shouldRetry = $true
-            }
-            elseif ($err.Exception -and $err.Exception.Message -and ($err.Exception.Message -match 'Forbidden')) {
-                $shouldRetry = $true
-            }
+                $shouldRetry = $false
+                if ($statusCode -and ($statusCode.ToString() -eq 'Forbidden' -or $statusCode -eq [System.Net.HttpStatusCode]::Forbidden)) {
+                    $shouldRetry = $true
+                }
+                elseif ($err.Exception -and $err.Exception.Message -and ($err.Exception.Message -match 'Forbidden')) {
+                    $shouldRetry = $true
+                }
 
-            if ($shouldRetry -and $attempt -lt $maxAttempts) {
-                $delay = [Math]::Min(30, $baseDelaySeconds * $attempt)
-                Write-Verbose ("Set-AzKeyVaultSecret received Forbidden. Waiting {0}s before retry {1}/{2}." -f $delay, ($attempt + 1), $maxAttempts)
-                Start-Sleep -Seconds $delay
-                continue
-            }
+                if ($shouldRetry -and $attempt -lt $maxAttempts) {
+                    $delay = [Math]::Min(30, $baseDelaySeconds * $attempt)
+                    Write-Verbose ("Set-AzKeyVaultSecret received Forbidden for secret {0}. Waiting {1}s before retry {2}/{3}." -f $secret.Name, $delay, ($attempt + 1), $maxAttempts)
+                    Start-Sleep -Seconds $delay
+                    continue
+                }
 
-            Write-Error ("Set-AzKeyVaultSecret failed: {0}" -f $err)
-            throw
+                Write-Error ("Set-AzKeyVaultSecret failed for secret {0}: {1}" -f $secret.Name, $err)
+                throw
+            }
+        }
+
+        if (-not $result) {
+            throw ("Set-AzKeyVaultSecret did not return a result for secret {0} after retry attempts." -f $secret.Name)
+        }
+
+        $secretVersion = $null
+        if ($result -and $result.Id) {
+            $idSegments = $result.Id -split '/'
+            if ($idSegments.Length -gt 0) { $secretVersion = $idSegments[-1] }
+        }
+
+        $results += [pscustomobject]@{
+            vault          = $VaultName
+            secret         = $secret.Name
+            requestId      = $RequestId
+            newValueMasked = '***REDACTED***'
+            rotatedAt      = (Get-Date).ToUniversalTime()
+            secretVersion  = $secretVersion
         }
     }
 
-    if (-not $result) {
-        throw 'Set-AzKeyVaultSecret did not return a result after retry attempts.'
+    return , $results
+}
+
+function Write-PimSecretSummary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][object[]] $Rotations
+    )
+
+    $summaryPath = $env:GITHUB_STEP_SUMMARY
+    if (-not $summaryPath) {
+        Write-Verbose 'GITHUB_STEP_SUMMARY environment variable not set; skipping summary output.'
+        return
     }
 
-    $secretVersion = $null
-    if ($result -and $result.Id) {
-        $idSegments = $result.Id -split '/'
-        if ($idSegments.Length -gt 0) { $secretVersion = $idSegments[-1] }
+    $table = [System.Text.StringBuilder]::new()
+    [void]$table.AppendLine('### Key Vault Secrets Rotated')
+    [void]$table.AppendLine()
+    [void]$table.AppendLine('| Secret | Vault | Rotated At (UTC) | Version |')
+    [void]$table.AppendLine('| --- | --- | --- | --- |')
+
+    foreach ($rotation in $Rotations) {
+        $secret = $rotation.secret
+        $vault = $rotation.vault
+        $rotatedAt = ($rotation.rotatedAt | Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        $version = $rotation.secretVersion
+        [void]$table.AppendLine("| $secret | $vault | $rotatedAt | $version |")
     }
 
-    return [pscustomobject]@{
-        vault          = $VaultName
-        secret         = $SecretName
-        requestId      = $RequestId
-        newValueMasked = '***REDACTED***'
-        rotatedAt      = (Get-Date).ToUniversalTime()
-        secretVersion  = $secretVersion
-    }
+    $table.AppendLine() | Out-Null
+    $content = $table.ToString()
+    [System.IO.File]::AppendAllText($summaryPath, $content)
 }
 
 function New-TemporaryKeyVaultRoleAssignment {
@@ -648,7 +692,6 @@ function Invoke-PimKeyVaultSecretRotation {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $VaultName,
-        [Parameter(Mandatory = $false)][string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][string] $RequestId,
         [Parameter(Mandatory)][string] $AssigneeObjectId,
         [Parameter(Mandatory)][string] $VaultResourceId,
@@ -686,9 +729,12 @@ function Invoke-PimKeyVaultSecretRotation {
         $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
         Write-Verbose ("Created role assignment {0}" -f $roleAssignment.RoleAssignmentId)
 
-        $rotation = Set-PimKeyVaultSecret -VaultName $VaultName -SecretName $SecretName -RequestId $RequestId
+        $rotations = Set-PimKeyVaultSecret -VaultName $VaultName -RequestId $RequestId
+        if ($rotations -and $rotations.Count -gt 0) {
+            Write-PimSecretSummary -Rotations $rotations
+        }
         return [pscustomobject]@{
-            rotation         = $rotation
+            rotations        = $rotations
             roleAssignmentId = $roleAssignment.RoleAssignmentId
         }
     }
@@ -710,7 +756,6 @@ function Invoke-TempKeyVaultRotationLifecycle {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultName,
-        [Parameter(Mandatory = $false)][ValidateNotNullOrEmpty()] [string] $SecretName = 'auto-rotated-secret',
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $AssigneeObjectId,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $VaultResourceId,
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()] [string] $RoleDefinitionId,
@@ -731,8 +776,11 @@ function Invoke-TempKeyVaultRotationLifecycle {
         Write-Verbose ("Created role assignment: {0}" -f $assignmentLabel)
 
         # Perform the secret rotation under the granted role
-        Write-Verbose "Rotating secret $SecretName in vault $VaultName"
-        $rotation = Set-PimKeyVaultSecret -VaultName $VaultName -SecretName $SecretName -RequestId ([guid]::NewGuid()).Guid
+        Write-Verbose "Rotating all secrets in vault $VaultName"
+        $rotations = Set-PimKeyVaultSecret -VaultName $VaultName -RequestId ([guid]::NewGuid()).Guid
+        if ($rotations -and $rotations.Count -gt 0) {
+            Write-PimSecretSummary -Rotations $rotations
+        }
 
         # Remove the role assignment
         Write-Verbose "Removing temporary role assignment for $AssigneeObjectId (role $RoleDefinitionId)"
@@ -757,7 +805,7 @@ function Invoke-TempKeyVaultRotationLifecycle {
         if ($existing) { $validation.assignmentsFound = ($existing | Measure-Object).Count; if ($validation.assignmentsFound -gt 0) { $validation.removed = $false } }
 
         return [pscustomobject]@{
-            rotation       = $rotation
+            rotations      = $rotations
             roleAssignment = ($roleAssignment | Select-Object RoleAssignmentId, RoleAssignmentName)
             removed        = $removed
             validation     = $validation
@@ -772,4 +820,4 @@ function Invoke-TempKeyVaultRotationLifecycle {
 
 Export-ModuleMember -Function Invoke-TempKeyVaultRotationLifecycle
 
-Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Set-PimAzContext, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation, Resolve-PimRoleResourcePairs
+Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Set-PimAzContext, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation, Resolve-PimRoleResourcePairs, Write-PimSecretSummary

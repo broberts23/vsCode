@@ -35,7 +35,7 @@ try {
     $__oldVerbosePreference = $VerbosePreference
     $VerbosePreference = 'SilentlyContinue'
     try {
-    Import-Module -Name $modulePath -Force -ErrorAction Stop -Verbose:$false
+        Import-Module -Name $modulePath -Force -ErrorAction Stop -Verbose:$false
     }
     finally {
         $VerbosePreference = $__oldVerbosePreference
@@ -77,7 +77,7 @@ if ($vaultName) {
 
     # Use the lifecycle helper (it will generate a random secret value internally)
     try {
-        $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -SecretName 'auto-rotated-secret' -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -RoleDefinitionId $RoleId -Verbose
+        $lifecycleResult = Invoke-TempKeyVaultRotationLifecycle -VaultName $vaultName -AssigneeObjectId $assignee -VaultResourceId $vaultResourceId -RoleDefinitionId $RoleId -Verbose
     }
     catch {
         Write-Error ("Invoke-TempKeyVaultRotationLifecycle failed: {0}" -f $_)
