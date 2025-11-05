@@ -456,12 +456,52 @@ function Remove-TemporaryKeyVaultRoleAssignment {
     Set-PimAzContext | Out-Null
 
     try {
+        # Normalize roleDefinitionId to GUID for matching
         $rId = ConvertTo-RoleDefinitionGuid -RoleDefinitionId $RoleDefinitionId
-        Remove-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $rId -Scope $VaultResourceId -Force -ErrorAction Stop | Out-Null
+
+        # Find role assignments for this principal at the specified scope
+        try {
+            $existing = Get-AzRoleAssignment -ObjectId $AssigneeObjectId -Scope $VaultResourceId -ErrorAction Stop
+        }
+        catch {
+            Write-Verbose ("Get-AzRoleAssignment failed or returned nothing: {0}" -f $_)
+            $existing = @()
+        }
+
+        if (-not $existing -or $existing.Count -eq 0) {
+            Write-Verbose 'No existing role assignments found for principal at the specified scope; nothing to remove.'
+            return $true
+        }
+
+        # Filter assignments that match the role definition GUID (RoleDefinitionId may be a full resource id)
+        $toRemove = $existing | Where-Object {
+            $rd = $_.RoleDefinitionId -as [string]
+            if ($rd) { return ($rd -match $rId) }
+            return $false
+        }
+
+        if (-not $toRemove -or $toRemove.Count -eq 0) {
+            Write-Verbose 'Found role assignments for principal at scope but none match the requested RoleDefinitionId; nothing to remove.'
+            return $true
+        }
+
+        foreach ($ra in $toRemove) {
+            try {
+                $name = $ra.Name
+                $scope = $ra.Scope
+                Write-Verbose ("Removing role assignment {0} (scope: {1}, roleDefinitionId: {2})" -f $name, $scope, $ra.RoleDefinitionId)
+                Remove-AzRoleAssignment -RoleAssignmentName $name -Scope $scope -Force -ErrorAction Stop | Out-Null
+            }
+            catch {
+                Write-Warning ("Failed to remove role assignment {0}: {1}" -f ($ra.Name -or $ra.Id), $_)
+                return $false
+            }
+        }
+
         return $true
     }
     catch {
-        Write-Warning ("Role assignment cleanup failed or was already removed: {0}" -f $_)
+        Write-Warning ("Role assignment cleanup failed: {0}" -f $_)
         return $false
     }
 }
