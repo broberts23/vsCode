@@ -20,12 +20,18 @@ Key references:
 - Microsoft Entra Privileged Identity Management: https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure
 - PIM Microsoft Graph APIs: https://learn.microsoft.com/en-us/graph/api/resources/privilegedidentitymanagementv3-overview?view=graph-rest-1.0
 
-What changed in this drop
+Project summary
 
-- Implemented a programmatic JIT pattern for automation identities (managed identity / service principal). Managed identities cannot be PIM-eligible; instead, the workflow creates a temporary RBAC role assignment, performs the privileged action, and then removes the assignment immediately after.
-- Added a reusable GitHub Actions workflow that collects requested role/resource pairs, generates a human-readable approval table, requires a GitHub Environment approval gate, and only then performs the privileged action.
-	- Hardened the workflow’s approval table generation (Markdown escaping, one-to-one / one-to-many pairing logic, and robust requestId capture).
-	- Refactored the PowerShell module for CI-friendly behavior: explicit Az context bootstrapping via Set-PimAzContext (OIDC federated token or managed identity), corrected PSRoleAssignment property usage (RoleAssignmentId/RoleAssignmentName), and a retry around Set-AzKeyVaultSecret to absorb short RBAC propagation delays (HTTP 403 Forbidden).
+This post demonstrates a production-friendly pattern for giving automation identities just‑enough, just‑in‑time access to perform high‑value, sensitive tasks (for example, rotating Key Vault secrets) while preserving auditability and minimizing standing privilege. The implementation in this repository is geared toward CI-driven automation (GitHub Actions) and contains a few pragmatic decisions you'll see reflected throughout the module and workflow:
+
+- Automation-first JIT: for non-human actors (managed identities or OIDC workload identities) the flow creates a temporary, scoped Azure RBAC assignment, performs the privileged operation, then removes the assignment immediately—capturing structured metadata (requestId, timestamps, rotated secret versions) for audit and traceability.
+- Vault‑wide secret rotation: secret rotation is implemented at the vault level. `Set-PimKeyVaultSecret` enumerates all secrets in a vault with `Get-AzKeyVaultSecret -VaultName`, rotates each secret with `Set-AzKeyVaultSecret` and returns an array of rotation result objects (vault, secret, requestId, rotatedAt, secretVersion) so CI can act on and report every change.
+- Clear CI reporting: the module includes `Write-PimSecretSummary`, which appends a compact Markdown table of rotated secrets to the file indicated by `GITHUB_STEP_SUMMARY` so runs that perform rotations display a readable summary in the Actions UI.
+- Robust RBAC cleanup: removal code was hardened to use supported `Remove-AzRoleAssignment` parameter sets (preferring `-InputObject` and falling back to the objectId+roleDefinitionId+scope set) and to defensively handle differences in PSRoleAssignment object shapes across Az versions.
+- Quiet, predictable CI logs: module imports of `Az.*` are performed with verbose output suppressed (temporary `$VerbosePreference` change plus `-Verbose:$false`) so the Actions log focuses on the steps and results rather than import chatter.
+- Caller ergonomics: lifecycle functions and the run script return machine‑friendly objects and were updated to accept the multi‑secret rotation return shape so downstream jobs and artifact writers can consume rotation metadata programmatically.
+
+Read on for how the pieces fit together and how to validate the flow in a test subscription.
 
 ## Repository structure
 
@@ -38,10 +44,11 @@ Key folders and files and how they fit together (paths relative to the repositor
     - `Invoke-PimGraphRequest` — Graph v1.0/beta compatibility wrapper for GET/POST/PATCH/DELETE.
     - `New-PimActivationRequest` — creates an activation request (stubbed for non-interactive tests) and returns a normalized object with a `requestId`.
 	- `Get-PimRequest` — reads request status; stubbed to Approved for demo tests.
-	- `Set-PimAzContext` — establishes Az PowerShell context using OIDC federated token or managed identity; required for RBAC and Key Vault operations.
-    - `Resolve-PimRoleResourcePairs` — robust pairing of roleIds/resourceIds (zip, one-to-many, or Cartesian product).
-    - `Set-PimKeyVaultSecret` — rotates a Key Vault secret using Az.KeyVault with Forbidden-aware retry for RBAC propagation.
-    - `New-TemporaryKeyVaultRoleAssignment` / `Remove-TemporaryKeyVaultRoleAssignment` — creates/removes a scoped RBAC assignment on the Key Vault; returns PSRoleAssignment with `RoleAssignmentId`.
+	- `Set-PimAzContext` — establishes Az PowerShell context using OIDC federated token or managed identity; required for RBAC and Key Vault operations. Imports of `Az.*` modules are intentionally performed with verbose output suppressed to keep CI logs clean.
+	- `Resolve-PimRoleResourcePairs` — robust pairing of roleIds/resourceIds (zip, one-to-many, or Cartesian product).
+	- `Set-PimKeyVaultSecret` — enumerates all secrets in a vault using `Get-AzKeyVaultSecret -VaultName` and rotates each secret using `Set-AzKeyVaultSecret`. The function includes Forbidden-aware retry/backoff to tolerate short RBAC propagation delays and returns an array of rotation result objects for reporting.
+	- `Write-PimSecretSummary` — new helper that appends a Markdown table of rotated secrets to the `GITHUB_STEP_SUMMARY` file (when the environment variable is present), making a concise summary visible in GitHub Actions UI.
+	- `New-TemporaryKeyVaultRoleAssignment` / `Remove-TemporaryKeyVaultRoleAssignment` — creates/removes a scoped RBAC assignment on the Key Vault. `Remove-TemporaryKeyVaultRoleAssignment` was hardened to use supported `Remove-AzRoleAssignment` parameter sets and defensively handle different property shapes returned by `Get-AzRoleAssignment` across Az versions.
     - `Invoke-TempKeyVaultRotationLifecycle` — orchestrates create → rotate secret → delete, and validates removal; used by CI.
   - `project-jit-pim/scripts/run-activation.ps1` — Entry point for the workflow. Calls `Connect-PimGraph`, `New-PimActivationRequest`, and then runs `Invoke-TempKeyVaultRotationLifecycle` when the `ResourceId` is a Key Vault. Emits structured JSON for the pipeline and relies on `ASSIGNEE_OBJECT_ID` from the workflow environment.
 
@@ -370,10 +377,6 @@ High-level steps for the demo
 Below is a prioritized checklist that reflects current progress and what’s next.
 
 ### High priority
-- [ ] Replace stub with real Microsoft Graph PIM integration
-	- Implement `New-PimActivationRequest` and `Get-PimRequest` against privilegedAccess/azureResources (v1.0 or beta as required) with robust error handling and retries.
-- [ ] CI wiring and automated tests
-	- Add PSScriptAnalyzer and Pester on PRs; optionally include an integration job using OIDC against a test subscription.
 - [ ] Security & auth docs
 	- Document required Graph scopes and approvals, and the minimal Azure RBAC roles for the GitHub OIDC principal. Provide a federated credential example.
 
