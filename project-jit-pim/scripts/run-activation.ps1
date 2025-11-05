@@ -35,7 +35,7 @@ try {
     $__oldVerbosePreference = $VerbosePreference
     $VerbosePreference = 'SilentlyContinue'
     try {
-        Import-Module -Name $modulePath -Force -ErrorAction Stop
+    Import-Module -Name $modulePath -Force -ErrorAction Stop -Verbose:$false
     }
     finally {
         $VerbosePreference = $__oldVerbosePreference

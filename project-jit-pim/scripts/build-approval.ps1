@@ -11,7 +11,7 @@ $workspace = $env:GITHUB_WORKSPACE
 if (-not $workspace) { throw 'GITHUB_WORKSPACE environment variable is required.' }
 
 $modulePath = Join-Path $workspace 'project-jit-pim/scripts/PimAutomation.psm1'
-Import-Module -Name $modulePath -Force
+Import-Module -Name $modulePath -Force -Verbose:$false
 
 $subscriptionId = $env:SUBSCRIPTION_ID
 

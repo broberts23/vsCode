@@ -276,7 +276,7 @@ function Set-PimAzContext {
     $__oldVerbosePreference = $VerbosePreference
     $VerbosePreference = 'SilentlyContinue'
     try {
-        Import-Module Az.Accounts -ErrorAction Stop
+    Import-Module Az.Accounts -ErrorAction Stop -Verbose:$false
     }
     finally {
         $VerbosePreference = $__oldVerbosePreference
@@ -338,7 +338,7 @@ function Set-PimKeyVaultSecret {
     try {
         $__oldVerbosePreference = $VerbosePreference
         $VerbosePreference = 'SilentlyContinue'
-        Import-Module Az.KeyVault -ErrorAction Stop
+    Import-Module Az.KeyVault -ErrorAction Stop -Verbose:$false
     }
     catch {
         Write-Error 'Az.KeyVault module is required. Install the module before running this function.'
@@ -426,7 +426,7 @@ function New-TemporaryKeyVaultRoleAssignment {
     try {
         $__oldVerbosePreference = $VerbosePreference
         $VerbosePreference = 'SilentlyContinue'
-        Import-Module Az.Resources -ErrorAction Stop
+        Import-Module Az.Resources -ErrorAction Stop -Verbose:$false
     }
     catch {
         Write-Error 'Az.Resources module is required for RBAC operations.'
@@ -459,12 +459,17 @@ function Remove-TemporaryKeyVaultRoleAssignment {
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $RoleDefinitionId
     )
 
+    $__oldVerbosePreference = $VerbosePreference
     try {
-        Import-Module Az.Resources -ErrorAction Stop
+        $VerbosePreference = 'SilentlyContinue'
+        Import-Module Az.Resources -ErrorAction Stop -Verbose:$false
     }
     catch {
         Write-Error 'Az.Resources module is required for RBAC operations.'
         throw
+    }
+    finally {
+        $VerbosePreference = $__oldVerbosePreference
     }
 
     Set-PimAzContext | Out-Null
@@ -651,11 +656,16 @@ function Invoke-PimKeyVaultSecretRotation {
         [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300
     )
 
+    $__oldVerbosePreference = $VerbosePreference
     try {
-        Import-Module Az.Resources -ErrorAction Stop
+        $VerbosePreference = 'SilentlyContinue'
+        Import-Module Az.Resources -ErrorAction Stop -Verbose:$false
     }
     catch {
         Write-Verbose 'Az.Resources module not available; RBAC operations may fail.'
+    }
+    finally {
+        $VerbosePreference = $__oldVerbosePreference
     }
 
     $currentStatus = $null
@@ -730,12 +740,17 @@ function Invoke-TempKeyVaultRotationLifecycle {
 
         # Validate removal: attempt to find any role assignment matching principal and scope
         try {
-            Import-Module Az.Resources -ErrorAction Stop
+            $__oldVerbosePreference = $VerbosePreference
+            $VerbosePreference = 'SilentlyContinue'
+            Import-Module Az.Resources -ErrorAction Stop -Verbose:$false
             $existing = Get-AzRoleAssignment -ObjectId $AssigneeObjectId -Scope $VaultResourceId -ErrorAction SilentlyContinue
         }
         catch {
             Write-Verbose "Az.Resources not available for validation: $_"
             $existing = $null
+        }
+        finally {
+            $VerbosePreference = $__oldVerbosePreference
         }
 
         $validation = @{ removed = $true; assignmentsFound = 0 }

@@ -1,6 +1,6 @@
-Import-Module Pester -ErrorAction Stop
+Import-Module Pester -ErrorAction Stop -Verbose:$false
 $modulePath = '/home/ben/vsCode/project-jit-pim/scripts/PimAutomation.psm1'
-$mod = Import-Module $modulePath -Force -PassThru -ErrorAction Stop
+$mod = Import-Module $modulePath -Force -PassThru -ErrorAction Stop -Verbose:$false
 
 Write-Output "Imported module: $($mod.Name)"
 
