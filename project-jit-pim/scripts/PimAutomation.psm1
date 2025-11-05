@@ -485,15 +485,39 @@ function Remove-TemporaryKeyVaultRoleAssignment {
             return $true
         }
 
+        # Emit diagnostic list of assignments we're going to remove
+        Write-Verbose "Role assignments matching requested roleDefinitionId:"
+        $toRemove | Select-Object Id, Name, RoleDefinitionId, Scope | ForEach-Object { Write-Verbose (($_ | ConvertTo-Json -Depth 4)) }
+
         foreach ($ra in $toRemove) {
+            $removedOne = $false
+            $name = $ra.Name
+            $scope = $ra.Scope
+            $id = $ra.Id
+            Write-Verbose ("Attempting removal of role assignment Name={0}, Id={1}, Scope={2}, RoleDef={3}" -f $name, $id, $scope, $ra.RoleDefinitionId)
             try {
-                $name = $ra.Name
-                $scope = $ra.Scope
-                Write-Verbose ("Removing role assignment {0} (scope: {1}, roleDefinitionId: {2})" -f $name, $scope, $ra.RoleDefinitionId)
+                # Primary removal: by name+scope (works in many Az versions)
                 Remove-AzRoleAssignment -RoleAssignmentName $name -Scope $scope -Force -ErrorAction Stop | Out-Null
+                $removedOne = $true
+                Write-Verbose ("Removed role assignment by Name: {0}" -f $name)
             }
             catch {
-                Write-Warning ("Failed to remove role assignment {0}: {1}" -f ($ra.Name -or $ra.Id), $_)
+                Write-Verbose ("Removal by Name failed for {0}: {1}" -f ($name -or $id), $_)
+                try {
+                    # Fallback: remove by resource id if available
+                    if ($id) {
+                        Remove-AzRoleAssignment -Id $id -Force -ErrorAction Stop | Out-Null
+                        $removedOne = $true
+                        Write-Verbose ("Removed role assignment by Id: {0}" -f $id)
+                    }
+                }
+                catch {
+                    Write-Warning ("Failed to remove role assignment {0} (Id {1}): {2}" -f ($name -or $id), $id, $_)
+                }
+            }
+
+            if (-not $removedOne) {
+                Write-Warning ("Failed to remove role assignment {0} (Id {1})." -f ($name -or $id), $id)
                 return $false
             }
         }
