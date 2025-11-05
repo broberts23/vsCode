@@ -272,7 +272,15 @@ function Set-PimAzContext {
         [Parameter()][string] $SubscriptionId = $env:AZURE_SUBSCRIPTION_ID
     )
 
-    Import-Module Az.Accounts -ErrorAction Stop
+    # Suppress noisy Import-Module verbose output when running with -Verbose
+    $__oldVerbosePreference = $VerbosePreference
+    $VerbosePreference = 'SilentlyContinue'
+    try {
+        Import-Module Az.Accounts -ErrorAction Stop
+    }
+    finally {
+        $VerbosePreference = $__oldVerbosePreference
+    }
 
     $context = Get-AzContext -ErrorAction SilentlyContinue
     if ($context -and $context.Account -and $context.Subscription) {
@@ -328,12 +336,15 @@ function Set-PimKeyVaultSecret {
     )
 
     try {
+        $__oldVerbosePreference = $VerbosePreference
+        $VerbosePreference = 'SilentlyContinue'
         Import-Module Az.KeyVault -ErrorAction Stop
     }
     catch {
         Write-Error 'Az.KeyVault module is required. Install the module before running this function.'
         throw
     }
+    finally { $VerbosePreference = $__oldVerbosePreference }
 
     Set-PimAzContext | Out-Null
 
@@ -413,12 +424,15 @@ function New-TemporaryKeyVaultRoleAssignment {
     )
 
     try {
+        $__oldVerbosePreference = $VerbosePreference
+        $VerbosePreference = 'SilentlyContinue'
         Import-Module Az.Resources -ErrorAction Stop
     }
     catch {
         Write-Error 'Az.Resources module is required for RBAC operations.'
         throw
     }
+    finally { $VerbosePreference = $__oldVerbosePreference }
 
     Set-PimAzContext | Out-Null
 

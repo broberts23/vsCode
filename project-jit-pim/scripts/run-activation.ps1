@@ -30,7 +30,16 @@ try {
         Write-Error ("Module file not found at expected path: {0}" -f $modulePath)
         throw 'PimAutomation module not found. Ensure the script is executed from the repository checkout and the scripts folder exists.'
     }
-    Import-Module -Name $modulePath -Force -ErrorAction Stop
+    # Suppress PowerShell's module-import verbose chatter (Importing function/alias/cmdlet) which
+    # appears when callers run with -Verbose. Restore previous preference after import.
+    $__oldVerbosePreference = $VerbosePreference
+    $VerbosePreference = 'SilentlyContinue'
+    try {
+        Import-Module -Name $modulePath -Force -ErrorAction Stop
+    }
+    finally {
+        $VerbosePreference = $__oldVerbosePreference
+    }
 }
 catch {
     Write-Error ("Failed to import PimAutomation module: {0}" -f $_)
