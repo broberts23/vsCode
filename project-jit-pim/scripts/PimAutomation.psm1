@@ -522,46 +522,43 @@ function Remove-TemporaryKeyVaultRoleAssignment {
             $scope = $null
             if ($ra.PSObject.Properties.Match('Scope').Count -gt 0) { $scope = $ra.Scope }
 
-            Write-Verbose ("Attempting removal of role assignment Name={0}, Id={1}, Scope={2}, RoleDef={3}" -f ($name -or '<none>'), ($id -or '<none>'), ($scope -or '<none>'), ($ra.RoleDefinitionId -or '<none>'))
+            $displayName = if ([string]::IsNullOrWhiteSpace([string]$name)) { '<none>' } else { [string]$name }
+            $displayId = if ([string]::IsNullOrWhiteSpace([string]$id)) { '<none>' } else { [string]$id }
+            $displayScope = if ([string]::IsNullOrWhiteSpace([string]$scope)) { '<none>' } else { [string]$scope }
+            $displayRole = if ([string]::IsNullOrWhiteSpace([string]$ra.RoleDefinitionId)) { '<none>' } else { [string]$ra.RoleDefinitionId }
 
-            # Try removal by Name+Scope where possible
-            if ($name -and $scope) {
-                try {
-                    Remove-AzRoleAssignment -RoleAssignmentName $name -Scope $scope -Force -ErrorAction Stop | Out-Null
-                    $removedOne = $true
-                    Write-Verbose ("Removed role assignment by Name: {0}" -f $name)
-                }
-                catch {
-                    Write-Verbose ("Removal by Name failed for {0}: {1}" -f $name, $_)
-                }
+            Write-Verbose ("Attempting removal of role assignment Name={0}, Id={1}, Scope={2}, RoleDef={3}" -f $displayName, $displayId, $displayScope, $displayRole)
+
+            # Preferred approach: remove using the assignment object directly
+            try {
+                Remove-AzRoleAssignment -InputObject $ra -ErrorAction Stop | Out-Null
+                $removedOne = $true
+                Write-Verbose 'Removed role assignment via InputObject.'
+            }
+            catch {
+                Write-Verbose ("Removal via InputObject failed: {0}" -f $_)
             }
 
-            # Fallback: try removal by Id
-            if (-not $removedOne -and $id) {
-                try {
-                    Remove-AzRoleAssignment -Id $id -Force -ErrorAction Stop | Out-Null
-                    $removedOne = $true
-                    Write-Verbose ("Removed role assignment by Id: {0}" -f $id)
-                }
-                catch {
-                    Write-Verbose ("Removal by Id failed for {0}: {1}" -f $id, $_)
-                }
-            }
-
-            # Final fallback: attempt to remove by ObjectId + RoleDefinitionId + Scope (may work when Name/Id missing)
+            # Fallback: attempt removal with ObjectId + RoleDefinitionId + Scope
             if (-not $removedOne) {
-                try {
-                    Remove-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $rId -Scope $VaultResourceId -Force -ErrorAction Stop | Out-Null
-                    $removedOne = $true
-                    Write-Verbose ("Removed role assignment by ObjectId+RoleDefinitionId+Scope for principal {0}" -f $AssigneeObjectId)
+                $scopeToUse = if (-not [string]::IsNullOrWhiteSpace([string]$scope)) { $scope } else { $VaultResourceId }
+                if ([string]::IsNullOrWhiteSpace([string]$AssigneeObjectId) -or [string]::IsNullOrWhiteSpace([string]$rId) -or [string]::IsNullOrWhiteSpace([string]$scopeToUse)) {
+                    Write-Verbose 'Insufficient data to attempt fallback removal via ObjectId/RoleDefinitionId/Scope.'
                 }
-                catch {
-                    Write-Verbose ("Fallback removal by ObjectId+RoleDefinitionId+Scope failed: {0}" -f $_)
+                else {
+                    try {
+                        Remove-AzRoleAssignment -ObjectId $AssigneeObjectId -RoleDefinitionId $rId -Scope $scopeToUse -ErrorAction Stop | Out-Null
+                        $removedOne = $true
+                        Write-Verbose ("Removed role assignment via ObjectId/RoleDefinitionId/Scope (Scope={0})." -f $scopeToUse)
+                    }
+                    catch {
+                        Write-Verbose ("Fallback removal by ObjectId/RoleDefinitionId/Scope failed: {0}" -f $_)
+                    }
                 }
             }
 
             if (-not $removedOne) {
-                Write-Warning ("Failed to remove role assignment (Name: {0}, Id: {1})." -f ($name -or '<none>'), ($id -or '<none>'))
+                Write-Warning ("Failed to remove role assignment (Name: {0}, Id: {1})." -f $displayName, $displayId)
                 return $false
             }
         }
