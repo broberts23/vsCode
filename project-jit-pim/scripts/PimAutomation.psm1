@@ -462,13 +462,15 @@ function Remove-TemporaryKeyVaultRoleAssignment {
         # Find role assignments for this principal at the specified scope
         try {
             $existing = Get-AzRoleAssignment -ObjectId $AssigneeObjectId -Scope $VaultResourceId -ErrorAction Stop
+            # Normalize to array so .Count is always available
+            $existing = @($existing)
         }
         catch {
             Write-Verbose ("Get-AzRoleAssignment failed or returned nothing: {0}" -f $_)
             $existing = @()
         }
 
-        if (-not $existing -or $existing.Count -eq 0) {
+        if ($existing.Count -eq 0) {
             Write-Verbose 'No existing role assignments found for principal at the specified scope; nothing to remove.'
             return $true
         }
@@ -479,8 +481,10 @@ function Remove-TemporaryKeyVaultRoleAssignment {
             if ($rd) { return ($rd -match $rId) }
             return $false
         }
+        # Normalize to array and check count safely
+        $toRemove = @($toRemove)
 
-        if (-not $toRemove -or $toRemove.Count -eq 0) {
+        if ($toRemove.Count -eq 0) {
             Write-Verbose 'Found role assignments for principal at scope but none match the requested RoleDefinitionId; nothing to remove.'
             return $true
         }
