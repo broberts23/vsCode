@@ -315,6 +315,7 @@ Contract (high level):
 - Approval: Require human approval (GitHub Environment) for production; optionally add policy-based automated approvals for low-risk cases.
 - TTLs: Keep elevation windows as short as practical. Validate that RBAC propagation is complete before proceeding.
 - Audit: Persist machine-readable activation artifacts for retention and SIEM ingestion.
+- **Workload identity hardening**: This JIT + just-enough access pattern pairs well with [Microsoft Entra Workload Identity Protection](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust) to further restrict token acquisition and usage. By combining time-limited RBAC assignments with workload identity restrictions (e.g., OIDC token validation, IP allowlisting, and token binding), you create a defense-in-depth posture that makes lateral movement and token replay attacks significantly harder.
 
 ## Testing and validation
 
@@ -362,17 +363,9 @@ High-level steps for the demo
 	- Run integration smoke tests that verify the rotated secret works for consumers (use a test consumer identity and avoid printing secrets to logs).
 	- If validation fails, run an automated rollback plan (store previous secret version reference and use it to restore if necessary).
 
-## Implementation plan (detailed TODOs)
-
-Below is a prioritized checklist that reflects current progress and what’s next.
-
-### High priority
-- [ ] Security & auth docs
-	- Document required Graph scopes and approvals, and the minimal Azure RBAC roles for the GitHub OIDC principal. Provide a federated credential example.
-
 ## Conclusion
 
-JIT elevation for automation brings the control and auditability of PIM into your delivery pipelines. By replacing standing privileges with an approval-gated, short-lived role assignment, you reduce risk without sacrificing speed. The patterns here give you a pragmatic starting point you can adapt — start with the reusable workflow and lifecycle helper, then layer in Graph-backed requests and richer approvals as you mature.
+JIT elevation for automation brings the control and auditability of PIM into your delivery pipelines. By replacing standing privileges with an approval-gated, short-lived role assignment, you reduce risk without sacrificing speed. The patterns here give you a pragmatic starting point you can adapt — start with the reusable workflow and lifecycle helper, then layer in Graph-backed requests and richer approvals as you mature. 🚀
 
 ## References
 

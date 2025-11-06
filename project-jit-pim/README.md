@@ -1,79 +1,61 @@
-# Just‑In‑Time DevOps Admins — PIM + GitHub Actions for JIT role elevation
+# Just‑In‑Time RBAC for Workload Identities — GitHub Actions + PowerShell
 
 Summary
 -------
-Build an automated, auditable workflow that gives engineers time-bound privileged Azure access using Microsoft Entra Privileged Identity Management (PIM). The project demonstrates how to request, approve, use, and automatically revoke elevated access as part of a CI/CD run — integrating GitHub Actions, Microsoft Graph, and Azure native tooling for a secure DevOps path.
+A working reference implementation that demonstrates just-in-time (JIT), just-enough privilege access for automation identities in Azure CI/CD pipelines. The project focuses on practical, production-ready patterns: temporary, scoped RBAC assignments guarded by approval gates, with machine-readable audit trails. It integrates GitHub Actions, Azure RBAC, Key Vault, and PowerShell 7.4 for a secure, auditable automation workflow.
 
-Key Entra docs
--------------
-- Privileged Identity Management (PIM): https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure
-- PIM Microsoft Graph APIs: https://learn.microsoft.com/en-us/graph/api/resources/privilegedidentitymanagementv3-overview?view=graph-rest-1.0
+This is not traditional Entra PIM (which does not yet support workload identities at time of writing), but rather a programmatic alternative using RBAC lifecycle automation that achieves the same goals: time-limited privileges, approval gating, and full auditability.
+
+Key Entra & Azure docs
+------
+- Azure RBAC for Key Vault: https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide
+- Azure role assignments: https://learn.microsoft.com/en-us/azure/role-based-access-control/role-assignments
+- Entra Workload Identity Protection: https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-create-trust
+- PIM Microsoft Graph APIs (for future enhancement): https://learn.microsoft.com/en-us/graph/api/resources/privilegedidentitymanagementv3-overview?view=graph-rest-1.0
 
 Technologies
 ------------
-- Bicep for demo infra
-- GitHub Actions for CI/CD workflows
-- PowerShell (Graph PowerShell module) to call Entra Graph APIs
-- Azure Functions (optional) for approval webhooks
-- Azure Key Vault and Microsoft.PowerShell.SecretManagement for any secrets in development
+- **PowerShell 7.4** for cross-platform automation logic
+- **Bicep** for demo infrastructure (Key Vault, managed identity, RBAC)
+- **GitHub Actions** for approval-gated CI/CD workflows
+- **Azure CLI** and **Az PowerShell modules** for RBAC and Key Vault operations
+- **OIDC** for federated identity (no secrets required)
+- **Pester 5.x** for unit testing
 
-Deliverables
-------------
-- `infra/` Bicep templates to create demo resources (resource group, role assignable groups, app registrations)
-- `scripts/` PowerShell module to request and activate PIM roles and to query audit logs
-- `ci/` GitHub Actions workflow demonstrating an elevate-for-deploy run
-- `docs/` step-by-step README with deployment and demo instructions
-- Pester unit tests for critical PowerShell functions
-
-Implementation steps (expanded)
--------------------------------
-1. Design the demo topology
-   - Identify the minimal set of Azure resources to demonstrate a privileged operation (for example: a resource group with a small role-based task such as updating a storage account or running an ARM/Bicep deployment).
-   - Create a role-assignable security group that PIM will manage (this group will be the container for eligible admin membership).
-
-2. Bicep infrastructure (infra/)
-   - Write Bicep to deploy the resource group, the demo resources, an assignable group, and an app registration that will be used by automation.
-   - Keep outputs: resource IDs, group objectId, and App Registration id/secret (if used only for initial provisioning; prefer federated identities later).
-   - Provide a `parameters.sample.json` for local runs and CI.
-
-3. Register Graph app and permissions
-   - Register a minimal app with delegated and application permissions required to call PIM APIs (document which Graph scopes are needed). Use least-privilege and admin consent steps in the README.
-
-4. PowerShell automation (scripts/)
-   - Implement functions to: Request-PimActivation, Get-PimRequests, Approve-PimRequest (for delegated approvers), Activate-PimRole, and Monitor-PimAudit.
-   - Use the Graph PowerShell module (Connect-MgGraph) with clear instructions for auth flows: interactive for dev, managed identity for automation. See https://learn.microsoft.com/powershell/microsoftgraph/authentication/connect-mggraph?view=graph-powershell-1.0
-   - Return rich objects from each function (do not write formatted strings) so they are testable and consumable by CI steps.
-
-5. GitHub Actions workflow (ci/)
-   - Build a workflow that runs the following steps during a privileged deployment job:
-     a. Create a PIM activation request for the runner's actor (or the service principal) with the required role and duration.
-     b. Optionally wait for an approval step. Approval can be manual (approver clicks in PIM portal) or automated by calling an Approver service (Azure Function) for demo purposes.
-     c. Once approved/activated, perform the privileged deployment action (example: deploy a Bicep change that modifies the target resource).
-     d. Confirm role is active and record auditing metadata back to the build logs/artifacts.
-
-6. Approval automation (optional)
-   - Implement a simple Azure Function that receives a webhook from GitHub Actions or reads pending PIM requests and auto-approves them only when preconditions are met (for a demo use-case: only for a test approver group and limited hours).
-
-7. Revoke and audit
-   - Show automatic expiration by setting a short activation window in the demo and demonstrate the role becoming inactive after expiry.
-   - Implement a script to pull PIM audit logs and summarize activations in a machine-readable report.
-
-8. Tests and CI
-   - Add Pester tests for the PowerShell module covering happy path and error handling (invalid request, already active, permission denied).
-   - Add GitHub Actions that run the tests on push and validate Bicep with a linter (arm-ttk or Bicep lint).
-
-Demo / validation
------------------
-- Walkthrough: create a PR that triggers the 'request elevated deploy' workflow, a reviewer approves, the workflow activates the PIM role, runs a deployment, and the role expires automatically. Capture screenshots and a recorded log.
-
-Estimated effort
+Project contents
 ----------------
-- MVP: 3–5 days. Add approval automation and tests: 1–2 weeks.
+- **blog.md** — Comprehensive blog post explaining the JIT architecture, scenarios, implementation details, and security considerations. Start here for context.
+- **infra/main.bicep** — Bicep template provisioning a demo Key Vault (RBAC-enabled), user-assigned managed identity, and service principal via Microsoft Graph Bicep extension.
+- **scripts/PimAutomation.psm1** — PowerShell 7.4 module encapsulating RBAC and Key Vault lifecycle logic:
+  - `Set-PimAzContext` — Azure authentication via OIDC or managed identity
+  - `Resolve-PimRoleResourcePairs` — Pairing logic (zip, one-to-many, or Cartesian product)
+  - `New-TemporaryKeyVaultRoleAssignment` / `Remove-TemporaryKeyVaultRoleAssignment` — RBAC create/delete lifecycle
+  - `Set-PimKeyVaultSecret` — Secret rotation with Forbidden-aware retry
+  - `Invoke-TempKeyVaultRotationLifecycle` — Full orchestration: create → rotate → delete
+  - `Write-PimSecretSummary` — Markdown table writer for GitHub Actions summaries
+- **scripts/run-activation.ps1** — Entry point for the workflow. Parses environment, imports the module, and orchestrates the rotation lifecycle.
+- **scripts/build-approval.ps1** — Builds a Markdown approval table from role/resource pairs.
+- **scripts/debug_invoke.ps1** — Demonstration helper showing `Resolve-PimRoleResourcePairs` in action.
+- **tests/PimAutomation.Tests.ps1** — Pester unit tests covering role/resource pairing logic.
+- **.github/workflows/pim-elevate.yml** — Reusable GitHub Actions workflow (request-elevation + approve-and-rotate jobs)
 
-Why this fits your portfolio
----------------------------
-This project aligns with your existing posts on GitHub Actions, Bicep, and managed identities. It neatly showcases identity governance applied to DevOps scenarios — a high-value, practical demonstration of least-privilege in action.
+Architecture & workflow
+-----------------------
+The workflow follows a simple, auditable pattern:
 
-Next steps
-----------
-- I can scaffold the `infra/`, `scripts/`, and `ci/` subfolders with starter files and a GitHub Actions workflow next. Tell me to proceed and I will create the initial Bicep and PowerShell stubs.
+1. **CI/CD trigger**: GitHub Actions job starts and gathers role/resource pairs (e.g., Key Vault Secrets Officer + Key Vault resource ID).
+2. **Pairing & approval table**: `Resolve-PimRoleResourcePairs` expands the pairs, and `build-approval.ps1` renders a Markdown table showing exactly what will be elevated.
+3. **GitHub Environment gate**: Job pauses; approvers review the table and approve or deny.
+4. **Elevation phase** (on approval):
+   - Create a temporary Key Vault–scoped RBAC assignment for the automation identity.
+   - Wait briefly for RBAC propagation (retries on Forbidden).
+   - Perform the privileged action (e.g., rotate a secret).
+   - Remove the assignment and validate removal.
+5. **Audit & reporting**: Structured output (vault name, secret name, version, timestamps) is emitted as JSON and can be published to artifacts.
+
+Key design principles:
+- **No long-lived secrets**: OIDC for GitHub Actions; managed identity for Azure-hosted workloads.
+- **Time-bounded access**: RBAC assignments created just-in-time and removed immediately.
+- **Approval-gated**: GitHub Environments provide human oversight; future enhanceable with policy-based auto-approval for low-risk cases.
+- **Auditable**: Every step is logged; rotation metadata can be forwarded to SIEM or compliance stores.
+- **Testable**: PowerShell functions return rich objects; Pester tests validate logic paths.
