@@ -46,11 +46,6 @@ catch {
     throw
 }
 
-Write-Verbose 'Connect to Graph: for demos this uses interactive auth. TODO: configure OIDC or managed identity for CI.'
-Connect-PimGraph -Verbose
-
-$req = New-PimActivationRequest -RoleId $RoleId -ResourceId $ResourceId -Justification $Justification
-
 # If the resourceId looks like a Key Vault resource, derive the vault name so the lifecycle helper
 # can rotate a secret without requiring callers to pass the vault name explicitly.
 $vaultName = $null
@@ -59,7 +54,7 @@ if ($ResourceId -match '/providers/Microsoft.KeyVault/vaults/([^/]+)$') {
 }
 
 if ($vaultName) {
-    Write-Verbose "Rotating secret in vault $vaultName under request $($req.requestId)"
+    Write-Verbose "Rotating secrets in vault $vaultName"
 
     # Resolve assignee object id from environment (set by workflow using RBAC-based lookup).
     $assignee = $env:ASSIGNEE_OBJECT_ID
@@ -73,7 +68,7 @@ if ($vaultName) {
     $assigneePreview = if ($assignee.Length -ge 8) { $assignee.Substring(0, 8) } else { $assignee }
 
     # Diagnostic logging to help troubleshoot RBAC/role-assignment failures
-    Write-Verbose "Invoking Invoke-TempKeyVaultRotationLifecycle with VaultName='$vaultName', VaultResourceId='$vaultResourceId', AssigneeObjectId='${assigneePreview}...', SecretName='auto-rotated-secret'"
+    Write-Verbose "Invoking Invoke-TempKeyVaultRotationLifecycle with VaultName='$vaultName', VaultResourceId='$vaultResourceId', AssigneeObjectId='${assigneePreview}'"
 
     # Use the lifecycle helper (it will generate a random secret value internally)
     try {
@@ -85,12 +80,18 @@ if ($vaultName) {
     }
 
     $out = [pscustomobject]@{
-        request   = $req
-        lifecycle = $lifecycleResult
+        vault      = $vaultName
+        lifecycle  = $lifecycleResult
+        justification = $Justification
     }
 }
 else {
-    $out = $req
+    $out = [pscustomobject]@{
+        resourceId   = $ResourceId
+        roleId       = $RoleId
+        justification = $Justification
+        note         = 'Resource is not a Key Vault; no rotation performed.'
+    }
 }
 
 Write-Output ($out | ConvertTo-Json -Depth 6)

@@ -11,13 +11,13 @@ Describe 'PimAutomation module' {
         Remove-Item Env:PIM_AUTOMATION_SKIP_GRAPH -ErrorAction SilentlyContinue
     }
 
-    It 'New-PimActivationRequest returns PSCustomObject with requestId and status' {
-        $obj = New-PimActivationRequest -RoleId 'role-123' -ResourceId 'res-456' -Justification 'test'
-        $obj | Should -Not -BeNullOrEmpty
-        $obj | Should -BeOfType 'System.Management.Automation.PSCustomObject'
-    $obj.PSObject.Properties.Name | Should -Contain 'requestId'
-    $obj.PSObject.Properties.Name | Should -Contain 'status'
-    $obj.requestId | Should -Not -BeNullOrEmpty
-    $obj.status | Should -Not -BeNullOrEmpty
+    It 'Resolve-PimRoleResourcePairs duplicates single role across multiple resources' {
+        $pairs = Resolve-PimRoleResourcePairs -RoleIdsJson '["role-123"]' -ResourceIdsJson '["res-1","res-2"]'
+        $pairs | Should -Not -BeNullOrEmpty
+        ($pairs | Measure-Object).Count | Should -Be 2
+        $pairs[0].RoleId | Should -Be 'role-123'
+        $pairs[1].RoleId | Should -Be 'role-123'
+        $pairs[0].ResourceId | Should -Be 'res-1'
+        $pairs[1].ResourceId | Should -Be 'res-2'
     }
 }

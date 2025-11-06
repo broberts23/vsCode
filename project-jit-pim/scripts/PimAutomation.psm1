@@ -169,103 +169,6 @@ function Invoke-PimGraphRequest {
     return $null
 }
 
-function New-PimActivationRequest {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string] $RoleId,
-        [Parameter(Mandatory)][string] $ResourceId,
-        [Parameter()][string] $Justification,
-        [Parameter()][ValidateRange(15, 1440)][int] $DurationMinutes = 60,
-        [Parameter()][switch] $UseBeta
-    )
-
-    $token = Get-GraphAccessToken
-    if ($token) {
-        # Build Graph payload according to documented fields (best-effort):
-        $payload = [ordered]@{
-            roleDefinitionId = $RoleId
-            resourceId       = $ResourceId
-            justification    = $Justification
-            duration         = "PT${DurationMinutes}M"
-        }
-        $body = $payload | ConvertTo-Json -Depth 6
-        try {
-            Write-Verbose 'Submitting PIM activation request via Graph (v1.0 then beta)'
-            $response = Invoke-PimGraphRequest -Method Post -Path 'privilegedAccess/azureResources/roleAssignmentRequests' -Body $body -AccessToken $token -UseBeta:$UseBeta
-            # Normalize response: prefer id/status/createdDateTime/activatedDateTime
-            if ($response -is [System.Management.Automation.PSCustomObject] -or $response -is [System.Object]) {
-                $respId = $null
-                if ($response.PSObject.Properties.Match('id').Count -gt 0) { $respId = $response.id }
-                elseif ($response.PSObject.Properties.Match('requestId').Count -gt 0) { $respId = $response.requestId }
-                elseif ($response.'@odata.id') { $respId = $response.'@odata.id' }
-                $respStatus = $response.status -or $response.state -or $null
-                $respCreated = $response.createdDateTime -or $response.createdDateTimeUtc -or $null
-            }
-            if ($response) {
-                return [pscustomobject]@{
-                    roleId          = $RoleId
-                    resourceId      = $ResourceId
-                    requestId       = ($respId -or $response.id -or ([guid]::NewGuid()).Guid)
-                    status          = ($respStatus -or ($response.status) -or 'Pending')
-                    createdDateTime = (($respCreated -or $response.createdDateTime) -as [datetime])
-                    justification   = $Justification
-                    raw             = $response
-                }
-            }
-        }
-        catch {
-            Write-Verbose ("Graph PIM POST failed: {0}" -f $_)
-        }
-    }
-
-    return [pscustomobject]@{
-        roleId          = $RoleId
-        resourceId      = $ResourceId
-        requestId       = ([guid]::NewGuid()).Guid
-        status          = 'Pending'
-        createdDateTime = (Get-Date).ToUniversalTime()
-        justification   = $Justification
-        note            = 'Local stub used because Graph call failed or token unavailable.'
-    }
-}
-
-function Get-PimRequest {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string] $RequestId,
-        [Parameter()][switch] $UseBeta
-    )
-
-    $token = Get-GraphAccessToken
-    if ($token) {
-        try {
-            Write-Verbose 'Retrieving PIM request via Graph (v1.0 then beta)'
-            $response = Invoke-PimGraphRequest -Method Get -Path ("privilegedAccess/azureResources/roleAssignmentRequests/$RequestId") -AccessToken $token -UseBeta:$UseBeta
-            if ($response) {
-                # Normalize response
-                $respStatus = $response.status -or $response.state -or $null
-                $respActivated = $response.activatedDateTime -or $response.activatedDateTimeUtc -or $null
-                return [pscustomobject]@{
-                    requestId   = ($response.id -or $RequestId)
-                    status      = ($respStatus -or 'Unknown')
-                    activatedAt = ($respActivated -as [datetime])
-                    raw         = $response
-                }
-            }
-        }
-        catch {
-            Write-Verbose ("Graph PIM GET failed: {0}" -f $_)
-        }
-    }
-
-    return [pscustomobject]@{
-        requestId   = $RequestId
-        status      = 'Approved'
-        activatedAt = (Get-Date).ToUniversalTime()
-        note        = 'Local fallback used: assuming Approved for demo scenarios.'
-    }
-}
-
 function Set-PimAzContext {
     [CmdletBinding()]
     param(
@@ -329,8 +232,7 @@ function Set-PimAzContext {
 function Set-PimKeyVaultSecret {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string] $VaultName,
-        [Parameter(Mandatory)][string] $RequestId
+        [Parameter(Mandatory)][string] $VaultName
     )
 
     $__oldVerbosePreference = $VerbosePreference
@@ -418,7 +320,6 @@ function Set-PimKeyVaultSecret {
         $results += [pscustomobject]@{
             vault          = $VaultName
             secret         = $secret.Name
-            requestId      = $RequestId
             newValueMasked = '***REDACTED***'
             rotatedAt      = (Get-Date).ToUniversalTime()
             secretVersion  = $secretVersion
@@ -688,70 +589,6 @@ function Resolve-PimRoleResourcePairs {
     return , $pairs
 }
 
-function Invoke-PimKeyVaultSecretRotation {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string] $VaultName,
-        [Parameter(Mandatory)][string] $RequestId,
-        [Parameter(Mandatory)][string] $AssigneeObjectId,
-        [Parameter(Mandatory)][string] $VaultResourceId,
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string] $RoleDefinitionId,
-        [Parameter()][ValidateRange(30, 1800)][int] $PollTimeoutSeconds = 300
-    )
-
-    $__oldVerbosePreference = $VerbosePreference
-    try {
-        $VerbosePreference = 'SilentlyContinue'
-        Import-Module Az.Resources -ErrorAction Stop -Verbose:$false
-    }
-    catch {
-        Write-Verbose 'Az.Resources module not available; RBAC operations may fail.'
-    }
-    finally {
-        $VerbosePreference = $__oldVerbosePreference
-    }
-
-    $currentStatus = $null
-    $deadline = (Get-Date).AddSeconds($PollTimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        $currentStatus = (Get-PimRequest -RequestId $RequestId).status
-        Write-Verbose ("PIM request {0} status: {1}" -f $RequestId, $currentStatus)
-        if ($currentStatus -eq 'Approved' -or $currentStatus -eq 'Activated') { break }
-        Start-Sleep -Seconds 5
-    }
-
-    if ($currentStatus -ne 'Approved' -and $currentStatus -ne 'Activated') {
-        throw ("PIM request {0} not approved/activated. Current status: {1}" -f $RequestId, $currentStatus)
-    }
-
-    $roleAssignment = $null
-    try {
-        $roleAssignment = New-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId
-        Write-Verbose ("Created role assignment {0}" -f $roleAssignment.RoleAssignmentId)
-
-        $rotations = Set-PimKeyVaultSecret -VaultName $VaultName -RequestId $RequestId
-        if ($rotations -and $rotations.Count -gt 0) {
-            Write-PimSecretSummary -Rotations $rotations
-        }
-        return [pscustomobject]@{
-            rotations        = $rotations
-            roleAssignmentId = $roleAssignment.RoleAssignmentId
-        }
-    }
-    finally {
-        if ($roleAssignment) {
-            try {
-                Remove-TemporaryKeyVaultRoleAssignment -AssigneeObjectId $AssigneeObjectId -VaultResourceId $VaultResourceId -RoleDefinitionId $RoleDefinitionId | Out-Null
-                Write-Verbose 'Removed temporary Key Vault role assignment.'
-            }
-            catch {
-                Write-Warning ("Failed to remove temporary role assignment: {0}" -f $_)
-            }
-        }
-    }
-}
-
-
 function Invoke-TempKeyVaultRotationLifecycle {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
@@ -777,7 +614,7 @@ function Invoke-TempKeyVaultRotationLifecycle {
 
         # Perform the secret rotation under the granted role
         Write-Verbose "Rotating all secrets in vault $VaultName"
-        $rotations = Set-PimKeyVaultSecret -VaultName $VaultName -RequestId ([guid]::NewGuid()).Guid
+    $rotations = Set-PimKeyVaultSecret -VaultName $VaultName
         if ($rotations -and $rotations.Count -gt 0) {
             Write-PimSecretSummary -Rotations $rotations
         }
@@ -820,4 +657,4 @@ function Invoke-TempKeyVaultRotationLifecycle {
 
 Export-ModuleMember -Function Invoke-TempKeyVaultRotationLifecycle
 
-Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, New-PimActivationRequest, Get-PimRequest, Set-PimAzContext, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Invoke-PimKeyVaultSecretRotation, Resolve-PimRoleResourcePairs, Write-PimSecretSummary
+Export-ModuleMember -Function Get-GraphAccessToken, Connect-PimGraph, Set-PimAzContext, Set-PimKeyVaultSecret, New-TemporaryKeyVaultRoleAssignment, Remove-TemporaryKeyVaultRoleAssignment, Resolve-PimRoleResourcePairs, Write-PimSecretSummary

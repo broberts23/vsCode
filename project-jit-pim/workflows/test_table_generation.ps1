@@ -23,11 +23,11 @@ function ConvertTo-MarkdownCell {
 }
 
 $rows = @(
-    @{ roleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'; roleName = 'Key Vault Secrets Officer'; resourceId = '/subscriptions/0000/resourceGroups/rg1/providers/Microsoft.KeyVault/vaults/my|vault'; resName = 'my|vault'; resType = 'Microsoft.KeyVault/vaults'; req = @{ requestId = 'req-123' } },
-    @{ roleId = 'role-2'; roleName = 'Role With `backtick` and | pipe'; resourceId = '/subscriptions/0000/resourceGroups/rg2/providers/Microsoft.Service/thing'; resName = "Name`nWithNewline"; resType = 'Custom.Type'; req = @{} }
+    @{ roleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'; roleName = 'Key Vault Secrets Officer'; resourceId = '/subscriptions/0000/resourceGroups/rg1/providers/Microsoft.KeyVault/vaults/my|vault'; resName = 'my|vault'; resType = 'Microsoft.KeyVault/vaults' },
+    @{ roleId = 'role-2'; roleName = 'Role With `backtick` and | pipe'; resourceId = '/subscriptions/0000/resourceGroups/rg2/providers/Microsoft.Service/thing'; resName = "Name`nWithNewline"; resType = 'Custom.Type' }
 )
 
-$header = "| roleId | roleName | resourceId | resourceName | resourceType | requestId |`n|---|---|---|---|---|---|`n"
+$header = "| roleId | roleName | resourceId | resourceName | resourceType |`n|---|---|---|---|---|`n"
 $table = $header
 
 foreach ($row in $rows) {
@@ -37,23 +37,7 @@ foreach ($row in $rows) {
     $resNameCell = ConvertTo-MarkdownCell $row.resName
     $resTypeCell = ConvertTo-MarkdownCell $row.resType
 
-    $req = $row.req
-    $reqId = $null
-    if ($null -ne $req) {
-        if ($req -is [System.Collections.IDictionary]) {
-            if ($req.Contains('requestId') -and $req['requestId']) { $reqId = $req['requestId'] }
-            elseif ($req.Contains('id') -and $req['id']) { $reqId = $req['id'] }
-        }
-        else {
-            if ($PSBoundParameters.ContainsKey('requestId') -or $req.requestId) { $reqId = $req.requestId }
-            elseif ($req.id) { $reqId = $req.id }
-        }
-    }
-    if (-not $reqId) { $reqId = [guid]::NewGuid().Guid }
-
-    $reqIdCell = ConvertTo-MarkdownCell $reqId
-
-    $table += "| $rIdCell | $rNameCell | $resIdCell | $resNameCell | $resTypeCell | $reqIdCell |`n"
+    $table += "| $rIdCell | $rNameCell | $resIdCell | $resNameCell | $resTypeCell |`n"
 }
 
 Write-Output $table

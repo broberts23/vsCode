@@ -21,13 +21,10 @@ $resourceIdsJson = if ($env:RESOURCE_IDS) { $env:RESOURCE_IDS } else { '[]' }
 $pairs = Resolve-PimRoleResourcePairs -RoleIdsJson $roleIdsJson -ResourceIdsJson $resourceIdsJson -SubscriptionId $subscriptionId
 
 # Build table
-$table = "| RoleId | RoleName | ResourceId | ResourceName | ResourceType | RequestId |`n|---|---|---|---|---|---|`n"
-$requests = @()
+$table = "| RoleId | RoleName | ResourceId | ResourceName | ResourceType |`n|---|---|---|---|---|`n"
 
 foreach ($pair in $pairs) {
   $roleId = $pair.RoleId; $resourceId = $pair.ResourceId
-  $req = New-PimActivationRequest -RoleId $roleId -ResourceId $resourceId -Justification 'CI requested activation'
-  $requests += $req
 
   # Resolve role name and resource details (best-effort)
   $roleName = $roleId
@@ -68,9 +65,7 @@ foreach ($pair in $pairs) {
   $resNameCell = & $escape $resName
   $resTypeCell = & $escape $resType
 
-  $reqId = $req.requestId -or $req.id -or ([guid]::NewGuid()).Guid
-  $reqIdCell = & $escape $reqId
-  $table += "| $rIdCell | $rNameCell | $resIdCell | $resNameCell | $resTypeCell | $reqIdCell |`n"
+  $table += "| $rIdCell | $rNameCell | $resIdCell | $resNameCell | $resTypeCell |`n"
 }
 
 # Export outputs
