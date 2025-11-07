@@ -52,6 +52,7 @@ if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
