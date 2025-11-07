@@ -1,0 +1,140 @@
+# GitHub Actions workflow scaffold for ephemeral per-PR environment.
+# References:
+# - Azure Login OIDC: https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect
+# - Workload identity federation concepts: https://learn.microsoft.com/azure/active-directory/develop/workload-identity-federation
+
+name: Ephemeral PR Environment
+on:
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  provision:
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy Bicep (Identity + Infra)
+        run: |
+          az deployment group create \
+            --resource-group pr-${{ github.event.number }}-rg \
+            --template-file project-bicep-graph/infra/main.bicep \
+            --parameters prNumber=${{ github.event.number }} location='eastus' \
+            --query properties.outputs --output json > env-outputs.json
+      - name: Display Deployment Outputs
+        run: cat env-outputs.json
+      - name: Build WebApi
+        run: |
+          dotnet publish project-bicep-graph/src/WebApi/WebApi.csproj -c Release -o publish
+      - name: Deploy WebApi to App Service
+        run: |
+          WEBAPP_NAME=$(jq -r '.webAppName.value' env-outputs.json)
+          az webapp deploy --resource-group pr-${{ github.event.number }}-rg --name "$WEBAPP_NAME" --src-path publish --type zip
+      - name: Create Federated Credential
+        shell: pwsh
+        run: |
+          $o = Get-Content env-outputs.json | ConvertFrom-Json
+          $appObjId = $o.appObjectId.value
+          $repo = '${{ github.repository }}'
+          $subject = "repo:$repo:pull_request"
+          pwsh -File project-bicep-graph/scripts/GraphFederation.ps1 -ApplicationObjectId $appObjId -Subject $subject -CredentialName 'github-pr' | Out-File federation.json
+          Get-Content federation.json
+      - name: Assign Swagger.Admin role to test group (if present)
+        shell: pwsh
+        run: |
+          $o = Get-Content env-outputs.json | ConvertFrom-Json
+          $spId = $o.servicePrincipalObjectId.value
+          $roleId = $o.swaggerAdminRoleId.value
+          $grpName = $o.testGroupDisplayName.value
+          if ([string]::IsNullOrWhiteSpace($grpName)) {
+            Write-Host 'No test group provided; skipping role assignment.'
+          } else {
+            $env:RESOURCE_SP_OBJECTID = $spId
+            $env:APP_ROLE_ID = $roleId
+            $env:GROUP_DISPLAY_NAME = $grpName
+            pwsh -File project-bicep-graph/scripts/Assign-AppRoleToGroup.ps1 | Tee-Object -FilePath approle-assignment.json
+            Get-Content approle-assignment.json
+          }
+      - name: Upload Outputs Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: env-outputs
+          path: env-outputs.json
+      - name: Upload Federation Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: federation
+          path: federation.json
+
+  smoke-tests:
+    needs: provision
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download env outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: env-outputs
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-AzPSSession: true
+      - name: PowerShell Smoke Tests
+        shell: pwsh
+        run: |
+          $o = Get-Content env-outputs.json | ConvertFrom-Json
+          $appId = $o.appId.value
+          $kv = $o.keyVaultName.value
+          $st = $o.storageAccountName.value
+          $api = $o.webAppUrl.value
+          $token = az account get-access-token --resource "api://$appId" --query accessToken -o tsv
+          $res = pwsh -File project-bicep-graph/scripts/SmokeTests.ps1; `
+            Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -BearerToken $token | ConvertTo-Json -Depth 8
+          $res | Out-File smoke-results.json
+          $obj = Get-Content smoke-results.json | ConvertFrom-Json
+          echo "### Smoke Test Summary" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $env:GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $env:GITHUB_STEP_SUMMARY
+          echo "| API Auth Configured | $($obj.Api.Healthz.authConfigured) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Protected API /health | $($obj.Api.Health.status) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Key Vault Accessible | $($obj.KeyVault.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Storage Accessible | $($obj.Storage.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload Smoke Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: smoke-results.json
+
+  destroy:
+    needs: smoke-tests
+    if: github.event.pull_request.merged == true || github.event.action == 'closed'
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Delete Resource Group (Placeholder)
+        run: |
+          az group delete --name pr-${{ github.event.number }}-rg --yes --no-wait
