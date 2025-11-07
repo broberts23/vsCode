@@ -10,6 +10,8 @@ param servicePrincipalObjectId string
 param appId string
 @description('ISO8601 created timestamp for tagging')
 param createdAt string = 'n/a'
+@description('Optional: service principal objectId of the GitHub runner (OIDC workload identity) to grant Key Vault Secrets User for smoke tests.')
+param runnerPrincipalObjectId string = ''
 
 @description('Optional storage account name override.')
 param storageName string = toLower(replace('st${uniqueString(resourceGroup().id, string(prNumber))}', '-', ''))
@@ -60,6 +62,17 @@ resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultRoleDefinitionId)
     principalId: servicePrincipalObjectId
+    principalType: 'ServicePrincipal'
+  }
+  scope: keyVault
+}
+
+// Optional: assign same Key Vault role to the GitHub runner service principal so smoke tests can access secrets without extra manual RBAC.
+resource kvRunnerRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (runnerPrincipalObjectId != '') {
+  name: guid(keyVault.id, runnerPrincipalObjectId, keyVaultRoleDefinitionId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultRoleDefinitionId)
+    principalId: runnerPrincipalObjectId
     principalType: 'ServicePrincipal'
   }
   scope: keyVault

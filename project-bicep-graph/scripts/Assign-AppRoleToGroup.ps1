@@ -25,6 +25,8 @@ $ResourceServicePrincipalObjectId = $env:RESOURCE_SP_OBJECTID
 $AppRoleId = $env:APP_ROLE_ID
 $GroupDisplayName = $env:GROUP_DISPLAY_NAME
 $GroupObjectId = $env:GROUP_OBJECT_ID
+$ApplicationAppId = $env:APPLICATION_APP_ID  # Consumer application (runner) appId to receive application permission assignment
+$ApplicationSpObjectId = $env:APPLICATION_SP_OBJECTID # Optional direct SP objectId override
 $WhatIf = [bool]::Parse($env:WHATIF  ) 2>$null
 $ConfirmFlag = [bool]::Parse($env:CONFIRM ) 2>$null
 
@@ -73,6 +75,31 @@ function Resolve-GroupIdByDisplayName {
     return $resp.value[0].id
 }
 
+function Resolve-ServicePrincipalIdByAppId {
+    param(
+        [string]$AppId,
+        [string]$Token
+    )
+    $filter = [System.Web.HttpUtility]::UrlEncode("appId eq '$AppId'")
+    $uri = "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=$filter"
+    $resp = Invoke-GraphGet -Uri $uri -Token $Token
+    if (-not $resp.value -or $resp.value.Count -eq 0) { throw "Service principal for appId '$AppId' not found." }
+    if ($resp.value.Count -gt 1) { throw "Multiple service principals found for appId '$AppId'. Specify APPLICATION_SP_OBJECTID instead." }
+    return $resp.value[0].id
+}
+
+function Confirm-AppRoleAssignmentForPrincipal {
+    param(
+        [string]$ResourceSpId,
+        [string]$PrincipalId,
+        [string]$AppRoleId,
+        [string]$Token
+    )
+    $existing = Get-ExistingAssignment -ResourceSpId $ResourceSpId -PrincipalId $PrincipalId -AppRoleId $AppRoleId -Token $Token
+    if ($existing -and $existing.Count -gt 0) { return $existing }
+    else { return New-AppRoleAssignment -ResourceSpId $ResourceSpId -PrincipalId $PrincipalId -AppRoleId $AppRoleId -Token $Token }
+}
+
 function Get-ExistingAssignment {
     param(
         [string]$ResourceSpId,
@@ -105,6 +132,10 @@ try {
 
     $token = Get-GraphToken
     $principalId = if ($GroupObjectId) { $GroupObjectId } else { Resolve-GroupIdByDisplayName -DisplayName $GroupDisplayName -Token $token }
+    $applicationPrincipalId = $null
+    if ($ApplicationAppId -or $ApplicationSpObjectId) {
+        $applicationPrincipalId = if ($ApplicationSpObjectId) { $ApplicationSpObjectId } else { Resolve-ServicePrincipalIdByAppId -AppId $ApplicationAppId -Token $token }
+    }
 
     $shouldProcess = $true
     if ($WhatIf) { Write-Information 'WhatIf: Skipping actual assignment.'; $shouldProcess = $false }
@@ -113,15 +144,15 @@ try {
         if ($response -ne 'y') { Write-Information 'Confirmation declined.'; $shouldProcess = $false }
     }
     if ($shouldProcess) {
-        $existing = Get-ExistingAssignment -ResourceSpId $ResourceServicePrincipalObjectId -PrincipalId $principalId -AppRoleId $AppRoleId -Token $token
-        if ($existing -and $existing.Count -gt 0) {
-            Write-Verbose 'App role assignment already exists.'
-            $existing | ForEach-Object { $_ }
+        # Group assignment
+        $groupAssignment = Confirm-AppRoleAssignmentForPrincipal -ResourceSpId $ResourceServicePrincipalObjectId -PrincipalId $principalId -AppRoleId $AppRoleId -Token $token
+        $output = @($groupAssignment)
+        # Application (runner) assignment if provided
+        if ($applicationPrincipalId) {
+            $appAssignment = Confirm-AppRoleAssignmentForPrincipal -ResourceSpId $ResourceServicePrincipalObjectId -PrincipalId $applicationPrincipalId -AppRoleId $AppRoleId -Token $token
+            $output += $appAssignment
         }
-        else {
-            $created = New-AppRoleAssignment -ResourceSpId $ResourceServicePrincipalObjectId -PrincipalId $principalId -AppRoleId $AppRoleId -Token $token
-            $created
-        }
+        $output | ForEach-Object { $_ }
     }
 }
 catch {

@@ -8,13 +8,15 @@ param ttlHours int = 6
 // Provide a createdAt timestamp as a parameter (consumer supplies value at deploy time if needed)
 @description('ISO8601 timestamp for resource tagging (provide from workflow).')
 param createdAt string = 'n/a'
+@description('Optional: service principal objectId for the GitHub runner (OIDC workload identity) to grant Key Vault data-plane RBAC.')
+param runnerPrincipalObjectId string = ''
 
 // Module: Identity (App + Service Principal)
 module identity 'modules/identity.bicep' = {
   name: 'identity-pr-${prNumber}'
   params: {
     prNumber: prNumber
-      ttlHours: ttlHours
+    ttlHours: ttlHours
     createdAt: createdAt
   }
 }
@@ -24,10 +26,11 @@ module appInfra 'modules/appInfra.bicep' = {
   name: 'infra-pr-${prNumber}'
   params: {
     prNumber: prNumber
-      location: location
+    location: location
     servicePrincipalObjectId: identity.outputs.servicePrincipalObjectId
     createdAt: createdAt
     appId: identity.outputs.appId
+    runnerPrincipalObjectId: runnerPrincipalObjectId
   }
 }
 
@@ -47,6 +50,7 @@ output swaggerScopes object = identity.outputs.swaggerScopes
 @secure()
 output swaggerAdminRoleId string = identity.outputs.swaggerAdminRoleId
 output testGroupDisplayName string = identity.outputs.testGroupDisplayName
+output testGroupObjectId string = identity.outputs.testGroupObjectId
 
 // Federation step (if implemented in Bicep later) would be an additional module.
 // For now rely on scripts/GraphFederation.ps1 using Graph REST API.

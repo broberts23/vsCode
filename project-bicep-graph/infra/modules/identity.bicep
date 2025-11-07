@@ -10,8 +10,6 @@ param prNumber int
 param ttlHours int
 @description('ISO8601 created timestamp for tagging')
 param createdAt string = 'n/a'
-@description('Optional list of existing test user UPNs to place into a generated security group for Swagger/API access.')
-param testUserPrincipalNames array = []
 
 // GUID seeds for deterministic scope & role identifiers (must be stable across redeploys for consent integrity)
 var swaggerReadScopeId = guid(subscription().id, resourceGroup().id, 'Swagger.Read', string(prNumber))
@@ -81,23 +79,14 @@ resource sp 'Microsoft.Graph/servicePrincipals@beta' = {
   ]
 }
 
-// Existing user references (creation of users via Graph Bicep currently limited; treat as existing)
-resource testUsers 'Microsoft.Graph/users@beta' existing = [for upn in testUserPrincipalNames: {
-  userPrincipalName: toLower(upn)
-}]
-
-// Security group to aggregate test users for role/scoped access (only if users provided)
-resource testGroup 'Microsoft.Graph/groups@beta' = if (length(testUserPrincipalNames) > 0) {
+// Security group for ephemeral test users (created unconditionally; members added post-deploy via script)
+resource testGroup 'Microsoft.Graph/groups@beta' = {
   displayName: 'grp-${displayBase}-testers'
   uniqueName: 'grp-${displayBase}-testers'
   description: 'Ephemeral test access group for PR ${prNumber}'
   mailEnabled: false
   securityEnabled: true
   mailNickname: replace('grp${prNumber}${uniqueSuffix}', '-', '')
-  members: {
-    relationships: [for (upn, i) in testUserPrincipalNames: testUsers[i].id]
-    relationshipSemantics: 'append'
-  }
 }
 
 output appId string = app.appId
@@ -111,5 +100,5 @@ output swaggerScopes object = {
 }
 @secure()
 output swaggerAdminRoleId string = swaggerAdminRoleId
-// Avoid referencing conditionally-deployed resource id directly; emit displayName for discovery instead.
-output testGroupDisplayName string = length(testUserPrincipalNames) > 0 ? 'grp-${displayBase}-testers' : ''
+output testGroupDisplayName string = 'grp-${displayBase}-testers'
+output testGroupObjectId string = testGroup.id
