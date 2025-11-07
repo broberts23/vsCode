@@ -1,0 +1,173 @@
+name: Ephemeral PR Environment
+on:
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  provision:
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Resolve Runner Service Principal ObjectId
+        run: |
+          echo "RUNNER_SP_OBJECTID=$(az ad sp show --id ${{ secrets.AZURE_CLIENT_ID }} --query id -o tsv)" >> $GITHUB_ENV
+      - name: Ensure Resource Group Exists
+        run: |
+          az group create --name pr-${{ github.event.number }}-rg --location eastus --tags pr=${{ github.event.number }}
+      - name: Deploy Bicep (Identity + Infra)
+        run: |
+          az deployment group create \
+            --resource-group pr-${{ github.event.number }}-rg \
+            --template-file project-bicep-graph/infra/main.bicep \
+            --parameters prNumber=${{ github.event.number }} location='eastus' runnerPrincipalObjectId=$RUNNER_SP_OBJECTID \
+            --query properties.outputs --output json > env-outputs.json
+      - name: Display Deployment Outputs
+        run: cat env-outputs.json
+      - name: Build WebApi
+        run: |
+          dotnet publish project-bicep-graph/src/WebApi/WebApi.csproj -c Release -o publish
+      - name: Deploy WebApi to App Service
+        run: |
+          WEBAPP_NAME=$(jq -r '.webAppName.value' env-outputs.json)
+          az webapp deploy --resource-group pr-${{ github.event.number }}-rg --name "$WEBAPP_NAME" --src-path publish --type zip
+      - name: Assign Swagger.Admin role to test group (if present)
+        shell: pwsh
+        run: |
+          $o = Get-Content env-outputs.json | ConvertFrom-Json
+          $spId = $o.servicePrincipalObjectId.value
+          $roleId = $o.swaggerAdminRoleId.value
+          $grpName = $o.testGroupDisplayName.value
+          if ([string]::IsNullOrWhiteSpace($grpName)) {
+            Write-Host 'No test group provided; skipping role assignment.'
+          } else {
+            $env:RESOURCE_SP_OBJECTID = $spId
+            $env:APP_ROLE_ID = $roleId
+            $env:GROUP_DISPLAY_NAME = $grpName
+            $env:APPLICATION_APP_ID = '${{ secrets.AZURE_CLIENT_ID }}'
+            pwsh -File project-bicep-graph/scripts/Assign-AppRoleToGroup.ps1 | Tee-Object -FilePath approle-assignment.json
+            Get-Content approle-assignment.json
+          }
+      - name: Create Ephemeral Test Users
+        shell: pwsh
+        run: |
+          $o = Get-Content env-outputs.json | ConvertFrom-Json
+          $grpId = $o.testGroupObjectId.value
+          if ([string]::IsNullOrWhiteSpace($grpId)) { Write-Host 'No test group objectId; skipping user creation.' } else {
+            $env:GROUP_OBJECT_ID = $grpId
+            $env:PR_NUMBER = '${{ github.event.number }}'
+            pwsh -File project-bicep-graph/scripts/Create-TestUsers.ps1 | Tee-Object -FilePath test-users.json
+            Write-Host 'Created test users:'
+            Get-Content test-users.json
+          }
+      - name: Upload Outputs Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: env-outputs
+          path: env-outputs.json
+      - name: Upload Test Users Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-users
+          path: test-users.json
+
+  smoke-tests:
+    needs: provision
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download env outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: env-outputs
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          enable-AzPSSession: true
+      - name: PowerShell Smoke Tests
+        shell: pwsh
+        run: |
+          $o = Get-Content env-outputs.json | ConvertFrom-Json
+          $appId = $o.appId.value
+          $kv = $o.keyVaultName.value
+          $st = $o.storageAccountName.value
+          $api = $o.webAppUrl.value
+          $token = az account get-access-token --resource "api://$appId" --query accessToken -o tsv
+          . project-bicep-graph/scripts/SmokeTests.ps1
+          $resultObject = Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -BearerToken $token
+          $json = $resultObject | ConvertTo-Json -Depth 8
+          $json | Out-File smoke-results.json
+          $obj = $json | ConvertFrom-Json
+          echo "### Smoke Test Summary" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Check | Result |" >> $env:GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $env:GITHUB_STEP_SUMMARY
+          echo "| API Auth Configured | $($obj.Api.Healthz.authConfigured) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Protected API /health | $($obj.Api.Health.status) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Key Vault Accessible | $($obj.KeyVault.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Storage Accessible | $($obj.Storage.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload Smoke Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: smoke-results.json
+
+  destroy:
+    needs: smoke-tests
+    if: github.event.pull_request.merged == true || github.event.action == 'closed'
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Download env outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: env-outputs
+      - name: Download test users
+        uses: actions/download-artifact@v4
+        with:
+          name: test-users
+        continue-on-error: true
+      - name: Delete Test Users
+        shell: pwsh
+        run: |
+          if (Test-Path env-outputs.json) {
+            $o = Get-Content env-outputs.json | ConvertFrom-Json
+            $grpId = $o.testGroupObjectId.value
+            if ($grpId) { $env:GROUP_OBJECT_ID = $grpId }
+          }
+          $env:PR_NUMBER = '${{ github.event.number }}'
+          pwsh -File project-bicep-graph/scripts/Delete-TestUsers.ps1 | Tee-Object -FilePath deleted-users.json
+          Get-Content deleted-users.json
+      - name: Cleanup Graph Objects (App / SP / Group)
+        shell: pwsh
+        run: |
+          if (Test-Path env-outputs.json) { $env:ENV_OUTPUTS_PATH = 'env-outputs.json' }
+          pwsh -File project-bicep-graph/scripts/Cleanup-GraphEphemeral.ps1 | Tee-Object -FilePath graph-cleanup.json
+          Get-Content graph-cleanup.json
+      - name: Delete Resource Group (Placeholder)
+        run: |
+          az group delete --name pr-${{ github.event.number }}-rg --yes --no-wait
