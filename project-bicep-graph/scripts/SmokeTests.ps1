@@ -30,14 +30,39 @@ function Test-EnvContext {
     }
 }
 
+function New-Url {
+    [CmdletBinding()] [OutputType([string])] param(
+        [Parameter(Mandatory)][string]$BaseUrl,
+        [Parameter(Mandatory)][string]$RelativePath
+    )
+    $b = $BaseUrl.TrimEnd('/')
+    $p = $RelativePath.TrimStart('/')
+    return "$b/$p"
+}
+
+function Invoke-AzCliJson {
+    [CmdletBinding()] [OutputType([object])] param(
+        [Parameter(Mandatory)][string]$CommandLine
+    )
+    # Execute az and parse JSON safely
+    $output = & az $CommandLine.Split(' ') 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "az $CommandLine failed: $output"
+    }
+    try { return $output | ConvertFrom-Json } catch { return $null }
+}
+
 function Test-StorageAccess {
     [CmdletBinding()] [OutputType([pscustomobject])] param(
         [Parameter(Mandatory)][string]$StorageAccountName
     )
-    $result = [pscustomobject]@{ StorageAccountName = $StorageAccountName; Accessible = $false; Error = $null }
+    $result = [pscustomobject]@{ StorageAccountName = $StorageAccountName; Accessible = $false; Error = $null; ContainerCount = $null }
     try {
-        $keys = Get-AzStorageAccountKey -Name $StorageAccountName -ResourceGroupName (Get-AzResourceGroup | Select-Object -First 1 -ExpandProperty ResourceGroupName) -ErrorAction Stop
-        if ($keys) { $result.Accessible = $true }
+        # Use data-plane check via Azure AD: list containers without keys
+        $containers = Invoke-AzCliJson -CommandLine "storage container list --account-name $StorageAccountName --auth-mode login -o json"
+        $count = if ($containers) { ($containers | Measure-Object).Count } else { 0 }
+        $result.ContainerCount = $count
+        $result.Accessible = $true
     }
     catch { $result.Error = $_.Exception.Message }
     return $result
@@ -49,9 +74,10 @@ function Test-KeyVaultAccess {
     )
     $result = [pscustomobject]@{ VaultName = $VaultName; Accessible = $false; Error = $null; SecretCount = $null }
     try {
-        $secrets = Get-AzKeyVaultSecret -VaultName $VaultName -ErrorAction Stop
+        # Use az CLI data-plane operation with RBAC
+        $secrets = Invoke-AzCliJson -CommandLine "keyvault secret list --vault-name $VaultName -o json"
         $result.Accessible = $true
-        $result.SecretCount = ($secrets | Measure-Object).Count
+        $result.SecretCount = if ($secrets) { ($secrets | Measure-Object).Count } else { 0 }
     }
     catch { $result.Error = $_.Exception.Message }
     return $result
@@ -71,21 +97,27 @@ function Invoke-EphemeralSmokeTests {
     $apiHealthProtected = $null
     if ($ApiBaseUrl) {
         try {
-            $apiHealthz = Invoke-RestMethod -Uri (Join-Path $ApiBaseUrl 'healthz') -Method GET -ErrorAction Stop
+            $apiHealthz = Invoke-RestMethod -Uri (New-Url -BaseUrl $ApiBaseUrl -RelativePath 'healthz') -Method GET -ErrorAction Stop
         }
         catch { $apiHealthz = [pscustomobject]@{ error = $_.Exception.Message } }
         if ($BearerToken) {
             try {
-                $apiHealthProtected = Invoke-RestMethod -Uri (Join-Path $ApiBaseUrl 'health') -Headers @{ Authorization = "Bearer $BearerToken" } -Method GET -ErrorAction Stop
+                $apiHealthProtected = Invoke-RestMethod -Uri (New-Url -BaseUrl $ApiBaseUrl -RelativePath 'health') -Headers @{ Authorization = "Bearer $BearerToken" } -Method GET -ErrorAction Stop
             }
             catch { $apiHealthProtected = [pscustomobject]@{ error = $_.Exception.Message } }
         }
     }
+    $healthStatus = $null
+    if ($apiHealthProtected -and ($apiHealthProtected | Get-Member -Name status -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+        $healthStatus = $apiHealthProtected.status
+    }
+    $success = [bool]($kv.Accessible -and $st.Accessible -and ($healthStatus -eq 'Healthy'))
     [pscustomobject]@{
         Environment = $env
         KeyVault    = $kv
         Storage     = $st
-        Api         = [pscustomobject]@{ Healthz = $apiHealthz; Health = $apiHealthProtected; BaseUrl = $ApiBaseUrl }
+        Api         = [pscustomobject]@{ Healthz = $apiHealthz; Health = $apiHealthProtected; BaseUrl = $ApiBaseUrl; HealthStatus = $healthStatus }
+        Success     = $success
         CompletedAt = (Get-Date).ToString('o')
     }
 }

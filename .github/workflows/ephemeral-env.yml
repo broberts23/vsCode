@@ -124,6 +124,7 @@ jobs:
           $obj = $json | ConvertFrom-Json
           $authConfigured = if ($obj.Api.Healthz.PSObject.Properties.Name -contains 'authConfigured') { $obj.Api.Healthz.authConfigured } else { 'Error' }
           $healthStatus = if ($obj.Api.Health.PSObject.Properties.Name -contains 'status') { $obj.Api.Health.status } else { 'Error' }
+          $overall = if ($obj.PSObject.Properties.Name -contains 'Success') { [bool]$obj.Success } else { $false }
           echo "### Smoke Test Summary" >> $env:GITHUB_STEP_SUMMARY
           echo "| Check | Result |" >> $env:GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $env:GITHUB_STEP_SUMMARY
@@ -131,6 +132,8 @@ jobs:
           echo "| Protected API /health | $healthStatus |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Key Vault Accessible | $($obj.KeyVault.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Storage Accessible | $($obj.Storage.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Overall | $overall |" >> $env:GITHUB_STEP_SUMMARY
+          if (-not $overall) { Write-Error "Smoke tests failed. See smoke-results.json for details." }
       - name: Upload Smoke Results
         uses: actions/upload-artifact@v4
         with:
