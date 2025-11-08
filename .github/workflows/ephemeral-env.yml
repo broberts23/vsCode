@@ -1,7 +1,7 @@
 name: Ephemeral PR Environment
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, labeled]
 
 jobs:
   provision:
@@ -9,6 +9,7 @@ jobs:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
+    if: github.event.action != 'labeled'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -89,6 +90,7 @@ jobs:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
+    if: github.event.action != 'labeled'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -132,7 +134,7 @@ jobs:
 
   destroy:
     needs: smoke-tests
-    if: github.event.pull_request.merged == true || github.event.action == 'closed'
+    if: github.event.action == 'labeled' && contains(github.event.pull_request.labels.*.name, 'Destroy')
     permissions:
       id-token: write
       contents: read
