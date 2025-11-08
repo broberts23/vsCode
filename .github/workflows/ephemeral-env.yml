@@ -122,11 +122,13 @@ jobs:
           $json = $resultObject | ConvertTo-Json -Depth 8
           $json | Out-File smoke-results.json
           $obj = $json | ConvertFrom-Json
+          $authConfigured = if ($obj.Api.Healthz.PSObject.Properties.Name -contains 'authConfigured') { $obj.Api.Healthz.authConfigured } else { 'Error' }
+          $healthStatus = if ($obj.Api.Health.PSObject.Properties.Name -contains 'status') { $obj.Api.Health.status } else { 'Error' }
           echo "### Smoke Test Summary" >> $env:GITHUB_STEP_SUMMARY
           echo "| Check | Result |" >> $env:GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $env:GITHUB_STEP_SUMMARY
-          echo "| API Auth Configured | $($obj.Api.Healthz.authConfigured) |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| Protected API /health | $($obj.Api.Health.status) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| API Auth Configured | $authConfigured |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Protected API /health | $healthStatus |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Key Vault Accessible | $($obj.KeyVault.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Storage Accessible | $($obj.Storage.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
       - name: Upload Smoke Results
