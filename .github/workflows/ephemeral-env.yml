@@ -36,10 +36,12 @@ jobs:
       - name: Build WebApi
         run: |
           dotnet publish project-bicep-graph/src/WebApi/WebApi.csproj -c Release -o publish
+      - name: Zip Publish Directory
+        run: zip -r publish.zip publish
       - name: Deploy WebApi to App Service
         run: |
           WEBAPP_NAME=$(jq -r '.webAppName.value' env-outputs.json)
-          az webapp deploy --resource-group pr-${{ github.event.number }}-rg --name "$WEBAPP_NAME" --src-path publish --type zip
+          az webapp deploy --resource-group pr-${{ github.event.number }}-rg --name "$WEBAPP_NAME" --src-path publish.zip --type zip
       - name: Assign Swagger.Admin role to test group (if present)
         shell: pwsh
         run: |
