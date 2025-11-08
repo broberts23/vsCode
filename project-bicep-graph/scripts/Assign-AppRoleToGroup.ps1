@@ -27,8 +27,8 @@ $GroupDisplayName = $env:GROUP_DISPLAY_NAME
 $GroupObjectId = $env:GROUP_OBJECT_ID
 $ApplicationAppId = $env:APPLICATION_APP_ID  # Consumer application (runner) appId to receive application permission assignment
 $ApplicationSpObjectId = $env:APPLICATION_SP_OBJECTID # Optional direct SP objectId override
-$WhatIf = [bool]::Parse($env:WHATIF  ) 2>$null
-$ConfirmFlag = [bool]::Parse($env:CONFIRM ) 2>$null
+$WhatIf = $env:WHATIF -eq 'true'
+$ConfirmFlag = $env:CONFIRM -eq 'true'
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

@@ -58,6 +58,13 @@ The design focus here is NOT deep functional testing of business endpoints. Inst
 * Destroy: Deletes ephemeral test users and resource group (asynchronously) when PR closes or merges.
 * Artifacts: `env-outputs.json`, `federation.json`, `test-users.json`, `smoke-results.json`.
 
+#### Workflow Modifications for Controlled Teardown and PR Protection
+* **Trigger Updates**: Workflow now runs on PR `opened`, `reopened`, and `labeled` events to support destroy on label application.
+* **Conditional Job Execution**:
+  * `provision` and `smoke-tests` run only on PR open/reopen (skipped on label events).
+  * `destroy` runs only when the "Destroy" label is added to the PR.
+* **PR Merge Protection**: Configure branch protection rules in GitHub repository settings to require `provision` and `smoke-tests` status checks to pass before merging. This prevents merging until the pipeline completes successfully, ensuring resources are validated before integration.
+
 ## Clarification: App Roles & Swagger Scopes Are Demonstrative
 
 The project intentionally provisions OAuth2 scopes and an app role to show how they can be:
