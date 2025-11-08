@@ -53,9 +53,9 @@ resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
 }
 
 // Role assignment placeholders — assign minimal roles (adjust roleDefinitionId GUIDs appropriately).
-// Example GUIDs: Key Vault Secrets User (b86a8fe4-44ce-4b36-8b83-4cda283ebc46) or Key Vault Secrets Officer (b5a9f5a8-0c42-4a6f-8346-6a1ef56e9631)
+// Example GUIDs: Key Vault Secrets User (4633458b-17de-408a-b874-0445c86b69e6
 @description('Role definition ID to assign on Key Vault scope')
-param keyVaultRoleDefinitionId string = 'b86a8fe4-44ce-4b36-8b83-4cda283ebc46'
+param keyVaultRoleDefinitionId string = '4633458b-17de-408a-b874-0445c86b69e6'
 
 resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(keyVault.id, servicePrincipalObjectId, keyVaultRoleDefinitionId)
