@@ -47,7 +47,7 @@ output keyVaultName string = appInfra.outputs.keyVaultName
 output storageAccountName string = appInfra.outputs.storageAccountName
 @secure()
 output swaggerScopes object = identity.outputs.swaggerScopes
-@secure()
+
 output swaggerAdminRoleId string = identity.outputs.swaggerAdminRoleId
 output testGroupDisplayName string = identity.outputs.testGroupDisplayName
 output testGroupObjectId string = identity.outputs.testGroupObjectId
