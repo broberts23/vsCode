@@ -98,7 +98,7 @@ output swaggerScopes object = {
   read: swaggerReadScopeId
   write: swaggerWriteScopeId
 }
-@secure()
+
 output swaggerAdminRoleId string = swaggerAdminRoleId
 output testGroupDisplayName string = 'grp-${displayBase}-testers'
 output testGroupObjectId string = testGroup.id
