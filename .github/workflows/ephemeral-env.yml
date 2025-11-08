@@ -59,6 +59,7 @@ jobs:
             $env:GROUP_DISPLAY_NAME = $grpName
             $env:GROUP_OBJECT_ID = $grpId
             $env:APPLICATION_APP_ID = '${{ secrets.AZURE_CLIENT_ID }}'
+            $env:APPLICATION_SP_OBJECTID = $env:RUNNER_SP_OBJECTID
             pwsh -File project-bicep-graph/scripts/Assign-AppRoleToGroup.ps1 | Tee-Object -FilePath approle-assignment.json
             Get-Content approle-assignment.json
           }
