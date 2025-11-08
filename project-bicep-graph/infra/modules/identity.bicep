@@ -93,12 +93,10 @@ output appId string = app.appId
 output appObjectId string = app.id
 output servicePrincipalObjectId string = sp.id
 output displayName string = app.displayName
-@secure()
 output swaggerScopes object = {
   read: swaggerReadScopeId
   write: swaggerWriteScopeId
 }
-
 output swaggerAdminRoleId string = swaggerAdminRoleId
 output testGroupDisplayName string = 'grp-${displayBase}-testers'
 output testGroupObjectId string = testGroup.id

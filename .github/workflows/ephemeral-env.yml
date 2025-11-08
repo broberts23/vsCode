@@ -50,12 +50,14 @@ jobs:
           $spId = $o.servicePrincipalObjectId.value
           $roleId = $o.swaggerAdminRoleId.value
           $grpName = $o.testGroupDisplayName.value
+          $grpId = $o.testGroupObjectId.value
           if ([string]::IsNullOrWhiteSpace($grpName)) {
             Write-Host 'No test group provided; skipping role assignment.'
           } else {
             $env:RESOURCE_SP_OBJECTID = $spId
             $env:APP_ROLE_ID = $roleId
             $env:GROUP_DISPLAY_NAME = $grpName
+            $env:GROUP_OBJECT_ID = $grpId
             $env:APPLICATION_APP_ID = '${{ secrets.AZURE_CLIENT_ID }}'
             pwsh -File project-bicep-graph/scripts/Assign-AppRoleToGroup.ps1 | Tee-Object -FilePath approle-assignment.json
             Get-Content approle-assignment.json
