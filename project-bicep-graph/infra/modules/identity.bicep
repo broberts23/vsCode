@@ -18,12 +18,16 @@ var swaggerAdminRoleId = guid(subscription().id, resourceGroup().id, 'Swagger.Ad
 
 var uniqueSuffix = toLower(uniqueString(subscription().id, resourceGroup().id, string(prNumber)))
 var displayBase = 'pr-${prNumber}-${uniqueSuffix}'
+var appIdUri = 'api://${displayBase}'
 
 resource app 'Microsoft.Graph/applications@beta' = {
   displayName: 'app-${displayBase}'
   uniqueName: 'app-${displayBase}'
   signInAudience: 'AzureADMyOrg'
   groupMembershipClaims: 'SecurityGroup'
+  identifierUris: [
+    appIdUri
+  ]
   api: {
     requestedAccessTokenVersion: 2
     oauth2PermissionScopes: [
@@ -100,3 +104,4 @@ output swaggerScopes object = {
 output swaggerAdminRoleId string = swaggerAdminRoleId
 output testGroupDisplayName string = 'grp-${displayBase}-testers'
 output testGroupObjectId string = testGroup.id
+output appAudience string = appIdUri

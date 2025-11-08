@@ -112,11 +112,11 @@ jobs:
         shell: pwsh
         run: |
           $o = Get-Content env-outputs.json | ConvertFrom-Json
-          $appId = $o.appId.value
+          $aud = $o.appAudience.value
           $kv = $o.keyVaultName.value
           $st = $o.storageAccountName.value
           $api = $o.webAppUrl.value
-          $token = az account get-access-token --resource "api://$appId" --query accessToken -o tsv
+          $token = az account get-access-token --resource "$aud" --query accessToken -o tsv
           . project-bicep-graph/scripts/SmokeTests.ps1
           $resultObject = Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -BearerToken $token
           $json = $resultObject | ConvertTo-Json -Depth 8

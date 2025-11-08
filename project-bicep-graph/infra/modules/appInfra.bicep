@@ -6,8 +6,8 @@
 param prNumber int
 param location string
 param servicePrincipalObjectId string
-@description('Client/Application ID for the API (audience)')
-param appId string
+@description('Application audience/identifier URI')
+param appAudience string
 @description('ISO8601 created timestamp for tagging')
 param createdAt string = 'n/a'
 @description('Optional: service principal objectId of the GitHub runner (OIDC workload identity) to grant Key Vault Secrets User for smoke tests.')
@@ -104,7 +104,7 @@ resource apiSite 'Microsoft.Web/sites@2024-11-01' = {
         }
         {
           name: 'AzureAd__Audience'
-          value: 'api://${appId}'
+          value: appAudience
         }
       ]
     }
