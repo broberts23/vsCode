@@ -112,9 +112,17 @@ function Get-ExistingAssignment {
     $assignments = @()
     $resp = Invoke-GraphGet -Uri $uri -Token $Token
     if ($resp.value) { $assignments += $resp.value }
-    while ($resp.'@odata.nextLink') {
-        $resp = Invoke-GraphGet -Uri $resp.'@odata.nextLink' -Token $Token
+    $nextLink = $null
+    if ($resp -and ($resp.PSObject.Properties.Name -contains '@odata.nextLink')) {
+        $nextLink = $resp.'@odata.nextLink'
+    }
+    while ($nextLink) {
+        $resp = Invoke-GraphGet -Uri $nextLink -Token $Token
         if ($resp.value) { $assignments += $resp.value }
+        if ($resp -and ($resp.PSObject.Properties.Name -contains '@odata.nextLink')) {
+            $nextLink = $resp.'@odata.nextLink'
+        }
+        else { $nextLink = $null }
     }
     return $assignments | Where-Object { $_.principalId -eq $PrincipalId -and $_.appRoleId -eq $AppRoleId }
 }
