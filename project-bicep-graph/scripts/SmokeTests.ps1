@@ -11,11 +11,20 @@ Returns: Structured objects (do NOT format output).
 
 function Test-EnvContext {
     [CmdletBinding()] [OutputType([pscustomobject])] param()
-    $context = try { Get-AzContext } catch { $null }
+    $context = try { Get-AzContext -ErrorAction SilentlyContinue } catch { $null }
+    $subscriptionId = $null
+    $tenantId = $null
+    $accountId = $null
+    if ($null -ne $context) {
+        # Use safe navigation for nested properties; avoid "$context?" token under StrictMode
+        $subscriptionId = $context.Subscription?.Id
+        $tenantId = $context.Tenant?.Id
+        $accountId = $context.Account?.Id
+    }
     [pscustomobject]@{
-        SubscriptionId = $context?.Subscription.Id
-        TenantId       = $context?.Tenant.Id
-        Account        = $context?.Account.Id
+        SubscriptionId = $subscriptionId
+        TenantId       = $tenantId
+        Account        = $accountId
         RetrievedAt    = (Get-Date).ToString('o')
         ContextPresent = [bool]$context
     }
