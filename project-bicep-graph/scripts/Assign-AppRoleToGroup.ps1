@@ -107,10 +107,16 @@ function Get-ExistingAssignment {
         [string]$AppRoleId,
         [string]$Token
     )
-    $filter = [System.Web.HttpUtility]::UrlEncode("principalId eq $PrincipalId and appRoleId eq $AppRoleId")
-    $uri = "https://graph.microsoft.com/v1.0/servicePrincipals/$ResourceSpId/appRoleAssignedTo?`$filter=$filter"
+    # Some Graph relationship endpoints do not support filtering on multiple properties; fetch and filter client-side.
+    $uri = "https://graph.microsoft.com/v1.0/servicePrincipals/$ResourceSpId/appRoleAssignedTo"
+    $assignments = @()
     $resp = Invoke-GraphGet -Uri $uri -Token $Token
-    return $resp.value
+    if ($resp.value) { $assignments += $resp.value }
+    while ($resp.'@odata.nextLink') {
+        $resp = Invoke-GraphGet -Uri $resp.'@odata.nextLink' -Token $Token
+        if ($resp.value) { $assignments += $resp.value }
+    }
+    return $assignments | Where-Object { $_.principalId -eq $PrincipalId -and $_.appRoleId -eq $AppRoleId }
 }
 
 function New-AppRoleAssignment {
