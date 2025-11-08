@@ -25,7 +25,7 @@ var tags = {
 }
 
 // Storage Account (placeholder properties simplified)
-resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+resource storage 'Microsoft.Storage/storageAccounts@2025-01-01' = {
   name: storageName
   location: location
   sku: {
@@ -36,7 +36,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 }
 
 // Key Vault (placeholder minimal)
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
   name: kvName
   location: location
   properties: {
@@ -79,18 +79,18 @@ resource kvRunnerRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04
 }
 
 // App Service Plan (Free tier for demo)
-resource apiPlan 'Microsoft.Web/serverfarms@2022-09-01' = {
+resource apiPlan 'Microsoft.Web/serverfarms@2024-11-01' = {
   name: planName
   location: location
   sku: {
-    name: 'F1'
-    tier: 'Free'
+    name: 'B1'
+    tier: 'Basic'
   }
   tags: tags
 }
 
 // Web App hosting the API (expects container or code deployment separately)
-resource apiSite 'Microsoft.Web/sites@2022-09-01' = {
+resource apiSite 'Microsoft.Web/sites@2024-11-01' = {
   name: webName
   location: location
   properties: {
