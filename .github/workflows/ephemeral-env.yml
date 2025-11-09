@@ -184,7 +184,7 @@ jobs:
 
   destroy:
     needs: smoke-tests
-    if: github.event.action == 'labeled' && contains(github.event.pull_request.labels.*.name, 'Destroy')
+    if: github.event.action == 'labeled' && contains(github.event.pull_request.labels.*.name, 'destroy')
     permissions:
       id-token: write
       contents: read
