@@ -49,38 +49,8 @@ if ($EnvOutputsPath -and (Test-Path $EnvOutputsPath)) {
     if (-not $TestGroupObjectId) { $TestGroupObjectId = $o.testGroupObjectId.value }
 }
 
-# Fallback resolution if object IDs are missing (artifact unavailable). We derive deterministic display name prefixes
-function Resolve-ApplicationAndSpIdsFallback {
-    param([int]$PrNumber)
-    if (-not $PrNumber) { return }
-    $prefix = "app-pr-$PrNumber-" # unique suffix appended; use startsWith filter
-    $token = Get-GraphToken
-    $script:ResolvedAppAppId = $null
-    try {
-        $apps = Invoke-GraphGet -Uri "https://graph.microsoft.com/v1.0/applications?`$filter=startsWith(displayName,'$prefix')" -Token $token
-        if (-not $AppObjectId -and $apps.value.Count -gt 0) {
-            $AppObjectId = $apps.value[0].id
-            $script:ResolvedAppAppId = $apps.value[0].appId
-        }
-    } catch { }
-    try {
-        if ((-not $ServicePrincipalObjectId) -and ($script:ResolvedAppAppId)) {
-            $spList = Invoke-GraphGet -Uri "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId eq '$($script:ResolvedAppAppId)'" -Token $token
-            if ($spList.value.Count -gt 0) { $ServicePrincipalObjectId = $spList.value[0].id }
-        }
-    } catch { }
-    try {
-        $grpPrefix = "grp-pr-$PrNumber-"
-        if (-not $TestGroupObjectId) {
-            $grps = Invoke-GraphGet -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=startsWith(displayName,'$grpPrefix')" -Token $token
-            if ($grps.value.Count -gt 0) { $TestGroupObjectId = $grps.value[0].id }
-        }
-    } catch { }
-}
-
-if (-not $AppObjectId -or -not $ServicePrincipalObjectId -or -not $TestGroupObjectId) {
-    Resolve-ApplicationAndSpIdsFallback -PrNumber $PrNumber
-}
+# Previous fallback based on displayName/mailNickname removed to avoid fragile heuristics.
+# If object IDs are not available from artifacts/parameters, those objects will be skipped.
 
 $token = Get-GraphToken
 $summary = @()

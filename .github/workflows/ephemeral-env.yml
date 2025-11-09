@@ -208,10 +208,10 @@ jobs:
           # Query workflow runs for this workflow file
           curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/ephemeral-env.yml/runs?event=pull_request&per_page=50" > runs.json
-          # Extract latest completed run (excluding current) matching head_sha
-          PREV_RUN_ID=$(jq -r --arg cur "${{ github.run_id }}" --arg sha "${{ github.event.pull_request.head.sha }}" '(.workflow_runs | map(select(.head_sha==$sha and (.id|tostring) != $cur and .status=="completed" and .conclusion=="success"))) | sort_by(.run_number) | last | (.id // "")')
+          # Extract latest completed successful run (excluding current) for this PR number
+          PREV_RUN_ID=$(jq -r --arg cur "${{ github.run_id }}" --argjson pr ${{ github.event.number }} '(.workflow_runs | map(select((.id|tostring) != $cur and .status=="completed" and .conclusion=="success" and (.pull_requests | any(.number == $pr))))) | sort_by(.run_number) | last | (.id // "")')
           if [ "$PREV_RUN_ID" = "null" ] || [ -z "$PREV_RUN_ID" ]; then
-            echo "No previous successful run found for this PR head SHA; will proceed with deterministic cleanup.";
+            echo "No previous successful run artifacts found for this PR number; proceeding with objectId-only cleanup (no heuristic lookups).";
             PREV_RUN_ID="";
           fi
           echo "prev_run_id=$PREV_RUN_ID" >> $GITHUB_OUTPUT

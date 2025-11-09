@@ -108,7 +108,8 @@ for ($i = 1; $i -le $count; $i++) {
     Add-GroupMember -GroupId $groupId -MemberObjectId $user.id -Token $token | Out-Null
     # Store plaintext password in results for artifact (avoid console output later)
     $plainOut = ([System.Net.NetworkCredential]::new('', $generatedPassword)).Password
-    $results += [pscustomobject]@{ upn = $upn; id = $user.id; password = $plainOut }
+    # Include explicit objectId field (same as id) and groupObjectId for deletion script robustness
+    $results += [pscustomobject]@{ upn = $upn; id = $user.id; objectId = $user.id; groupObjectId = $groupId; password = $plainOut }
 }
 
 $results | ConvertTo-Json -Depth 5

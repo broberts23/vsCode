@@ -1,21 +1,24 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
-<#!
+<#
 .SYNOPSIS
-Deletes ephemeral PR test users and removes them from the test group.
+Deletes ephemeral PR test users using recorded object IDs or group membership rather than fragile displayName/mailNickname heuristics.
 
 .DESCRIPTION
-ENV inputs:
-- GROUP_OBJECT_ID (optional; if provided will remove members first)
-- PR_NUMBER (required for name prefix) or USER_PREFIX override
+Inputs (environment variables):
+  GROUP_OBJECT_ID  - Security group objectId containing ephemeral users (optional but recommended)
+  PR_NUMBER        - PR number (informational only; no longer used for filtering)
 
-Users created by Create-TestUsers.ps1 follow alias pattern: pr<PR_NUMBER>tester<index><6hex>
-We query users with startswith(displayName,'PR <PR_NUMBER> Tester') as a heuristic + startswith(mailNickname,'pr<PR_NUMBER>tester').
+Process:
+  1. If test-users.json artifact present, parse user objectIds and delete directly.
+  2. Else if GROUP_OBJECT_ID provided, enumerate group members and delete all user objects returned (assumes dedicated ephemeral group per PR).
+  3. Else, exit with message (cannot safely determine users).
+
+Outputs JSON array: upn, id (objectId), status, error.
 
 Graph references:
-- List users: https://learn.microsoft.com/graph/api/user-list?view=graph-rest-beta
-- Delete user: https://learn.microsoft.com/graph/api/user-delete?view=graph-rest-beta
-Note: Group member removal optional; deleting user implicitly removes membership.
+  List group members: https://learn.microsoft.com/graph/api/group-list-members?view=graph-rest-1.0
+  Delete user: https://learn.microsoft.com/graph/api/user-delete?view=graph-rest-1.0
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -28,22 +31,40 @@ function Invoke-Graph {
   Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers -Body $json 
 }
 
-$pr = $env:PR_NUMBER
-$prefixOverride = $env:USER_PREFIX
-if (-not $pr -and -not $prefixOverride) { throw 'PR_NUMBER or USER_PREFIX required.' }
-$aliasPrefix = if ($prefixOverride) { $prefixOverride } else { "pr${pr}tester" }
-$displayPrefix = if ($prefixOverride) { $prefixOverride } else { "PR $pr Tester" }
-
+$groupId = $env:GROUP_OBJECT_ID
+$testUsersPath = 'test-users.json'
 $token = Get-GraphToken
-$filterNickname = [System.Web.HttpUtility]::UrlEncode("startsWith(mailNickname,'$aliasPrefix')")
-$uri = "https://graph.microsoft.com/v1.0/users?`$filter=$filterNickname"
-$users = Invoke-Graph -Method GET -Uri $uri -Body $null -Token $token
-$deleted = @()
-foreach ($u in $users.value) {
-  # Extra safety: verify both conditions where possible
-  if ($u.mailNickname -like "$aliasPrefix*" -or $u.displayName -like "$displayPrefix*") {
-    Invoke-Graph -Method DELETE -Uri "https://graph.microsoft.com/v1.0/users/$($u.id)" -Body $null -Token $token
-    $deleted += [pscustomobject]@{ upn = $u.userPrincipalName; id = $u.id }
+$results = @()
+
+function Remove-UserById {
+  param([string]$UserId, [string]$Upn)
+  $item = [pscustomobject]@{ upn = $Upn; id = $UserId; status = 'Skipped'; error = $null }
+  try {
+    Invoke-Graph -Method DELETE -Uri "https://graph.microsoft.com/v1.0/users/$UserId" -Body $null -Token $token
+    $item.status = 'Deleted'
+  } catch { $item.status = 'Error'; $item.error = $_.Exception.Message }
+  $results += $item
+}
+
+if (Test-Path $testUsersPath) {
+  $raw = Get-Content $testUsersPath -Raw | ConvertFrom-Json
+  if ($raw -is [System.Array]) {
+    foreach ($u in $raw) { if ($u.id) { Remove-UserById -UserId $u.id -Upn $u.upn } }
+  } else {
+    if ($raw.users) { foreach ($u in $raw.users) { if ($u.id) { Remove-UserById -UserId $u.id -Upn $u.upn } } }
   }
 }
-$deleted | ConvertTo-Json -Depth 4
+elseif ($groupId) {
+  # Enumerate group members and delete each user (assumes dedicated ephemeral group)
+  $membersUri = "https://graph.microsoft.com/v1.0/groups/$groupId/members?`$select=id,userPrincipalName"
+  try {
+    $members = Invoke-Graph -Method GET -Uri $membersUri -Body $null -Token $token
+    foreach ($m in $members.value) { if ($m.id) { Remove-UserById -UserId $m.id -Upn $m.userPrincipalName } }
+  } catch {
+    $results += [pscustomobject]@{ upn = $null; id = $groupId; status = 'GroupMembersError'; error = $_.Exception.Message }
+  }
+} else {
+  $results += [pscustomobject]@{ upn = $null; id = $null; status = 'NoAction'; error = 'No test-users artifact or group objectId available.' }
+}
+
+$results | ConvertTo-Json -Depth 4
