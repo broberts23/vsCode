@@ -96,15 +96,31 @@ function Invoke-EphemeralSmokeTests {
     $apiHealthz = $null
     $apiHealthProtected = $null
     if ($ApiBaseUrl) {
-        try {
-            $apiHealthz = Invoke-RestMethod -Uri (New-Url -BaseUrl $ApiBaseUrl -RelativePath 'healthz') -Method GET -ErrorAction Stop
-        }
-        catch { $apiHealthz = [pscustomobject]@{ error = $_.Exception.Message } }
-        if ($BearerToken) {
+        $healthzUrl = New-Url -BaseUrl $ApiBaseUrl -RelativePath 'healthz'
+        $healthUrl = New-Url -BaseUrl $ApiBaseUrl -RelativePath 'health'
+        $attempts = 5
+        $delaySec = 3
+        for ($i = 1; $i -le $attempts; $i++) {
             try {
-                $apiHealthProtected = Invoke-RestMethod -Uri (New-Url -BaseUrl $ApiBaseUrl -RelativePath 'health') -Headers @{ Authorization = "Bearer $BearerToken" } -Method GET -ErrorAction Stop
+                $apiHealthz = Invoke-RestMethod -Uri $healthzUrl -Method GET -ErrorAction Stop
+                break
             }
-            catch { $apiHealthProtected = [pscustomobject]@{ error = $_.Exception.Message } }
+            catch {
+                if ($i -eq $attempts) { $apiHealthz = [pscustomobject]@{ error = $_.Exception.Message; attempts = $attempts } }
+                Start-Sleep -Seconds $delaySec
+            }
+        }
+        if ($BearerToken) {
+            for ($i = 1; $i -le $attempts; $i++) {
+                try {
+                    $apiHealthProtected = Invoke-RestMethod -Uri $healthUrl -Headers @{ Authorization = "Bearer $BearerToken" } -Method GET -ErrorAction Stop
+                    break
+                }
+                catch {
+                    if ($i -eq $attempts) { $apiHealthProtected = [pscustomobject]@{ error = $_.Exception.Message; attempts = $attempts } }
+                    Start-Sleep -Seconds $delaySec
+                }
+            }
         }
     }
     $healthStatus = $null
