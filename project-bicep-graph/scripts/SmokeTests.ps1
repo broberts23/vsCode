@@ -88,8 +88,8 @@ function Invoke-EphemeralSmokeTests {
         [Parameter(Mandatory)][string]$VaultName,
         [Parameter(Mandatory)][string]$StorageAccountName,
         [Parameter()][string]$ApiBaseUrl,
-        [Parameter()][string]$RoleBearerToken,
-        [Parameter()][string]$TenantBearerToken
+        [Parameter()][string]$AdminBearerToken,
+        [Parameter()][string]$UserBearerToken
     )
     $env = Test-EnvContext
     $kv = Test-KeyVaultAccess -VaultName $VaultName
@@ -103,7 +103,7 @@ function Invoke-EphemeralSmokeTests {
         $delaySec = 3
         for ($i = 1; $i -le $attempts; $i++) {
             try {
-                $headers = if ($RoleBearerToken) { @{ Authorization = "Bearer $RoleBearerToken" } } else { @{} }
+                $headers = if ($AdminBearerToken) { @{ Authorization = "Bearer $AdminBearerToken" } } else { @{} }
                 $apiHealthz = Invoke-RestMethod -Uri $healthzUrl -Method GET -Headers $headers -ErrorAction Stop
                 break
             }
@@ -113,7 +113,7 @@ function Invoke-EphemeralSmokeTests {
                 Start-Sleep -Seconds $delaySec
             }
         }
-        $tokenToUse = if ($TenantBearerToken) { $TenantBearerToken } else { $RoleBearerToken }
+        $tokenToUse = if ($UserBearerToken) { $UserBearerToken } else { $AdminBearerToken }
         if ($tokenToUse) {
             for ($i = 1; $i -le $attempts; $i++) {
                 try {
@@ -136,15 +136,15 @@ function Invoke-EphemeralSmokeTests {
     if ($apiHealthProtected -and ($apiHealthProtected | Get-Member -Name status -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
         $healthStatus = $apiHealthProtected.status
     }
-    $primaryClaims = Decode-JwtClaims -Token $RoleBearerToken
-    $alternateClaims = Decode-JwtClaims -Token $TenantBearerToken
+    $adminClaims = Decode-JwtClaims -Token $AdminBearerToken
+    $userClaims = Decode-JwtClaims -Token $UserBearerToken
     $success = [bool]($kv.Accessible -and $st.Accessible -and ($healthzStatus -eq 'ok') -and ($healthStatus -eq 'ok'))
     [pscustomobject]@{
         Environment = $env
         KeyVault    = $kv
         Storage     = $st
         Api         = [pscustomobject]@{ Healthz = $apiHealthz; Health = $apiHealthProtected; BaseUrl = $ApiBaseUrl; HealthStatus = $healthStatus }
-        Token       = [pscustomobject]@{ Role = $primaryClaims; Tenant = $alternateClaims }
+        Token       = [pscustomobject]@{ Admin = $adminClaims; User = $userClaims }
         Success     = $success
         CompletedAt = (Get-Date).ToString('o')
     }

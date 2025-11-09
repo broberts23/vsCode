@@ -120,20 +120,17 @@ jobs:
           $st = $o.storageAccountName.value
           $api = $o.webAppUrl.value
           $clientId = '${{ secrets.AZURE_CLIENT_ID }}'
-          $roleToken = $null
-          $roleTokenError = $null
-          try { $roleToken = az account get-access-token --resource "$aud" --query accessToken -o tsv }
-          catch { $roleTokenError = $_.Exception.Message }
-          if (-not $roleToken) {
-            try { $roleToken = az account get-access-token --resource "$(jq -r '.appId.value' env-outputs.json)" --query accessToken -o tsv } catch { }
+          $adminToken = $null
+          $adminTokenError = $null
+          try { $adminToken = az account get-access-token --scope "$aud/.default" --query accessToken -o tsv }
+          catch { $adminTokenError = $_.Exception.Message }
+          if (-not $adminToken) {
+            try { $adminToken = az account get-access-token --scope "$(jq -r '.appId.value' env-outputs.json)/.default" --query accessToken -o tsv } catch { }
           }
-          $tenantToken = $null
-          $tenantTokenError = $null
-          try { $tenantToken = az account get-access-token --resource-type ms-graph --query accessToken -o tsv }
-          catch { $tenantTokenError = $_.Exception.Message }
+          $userToken = $adminToken # same principal; keep for future differentiation
           . project-bicep-graph/scripts/SmokeTests.ps1
           try {
-            $resultObject = Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -RoleBearerToken $roleToken -TenantBearerToken $tenantToken
+            $resultObject = Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -AdminBearerToken $adminToken -UserBearerToken $userToken
           }
           catch {
             $err = $_.Exception.Message
@@ -166,8 +163,14 @@ jobs:
           echo "| Storage Accessible | $stAccessible |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Overall | $overall |" >> $env:GITHUB_STEP_SUMMARY
           echo "\n#### Token Diagnostics" >> $env:GITHUB_STEP_SUMMARY
-          echo "- SwaggerAdmin token acquired: $([bool]$roleToken) (error: $roleTokenError)" >> $env:GITHUB_STEP_SUMMARY
-          echo "- Tenant token acquired: $([bool]$tenantToken) (error: $tenantTokenError)" >> $env:GITHUB_STEP_SUMMARY
+          echo "- Admin token acquired: $([bool]$adminToken) (error: $adminTokenError)" >> $env:GITHUB_STEP_SUMMARY
+          if ($adminToken) {
+            $rParts = $adminToken.Split('.')
+            try { $rPayload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($rParts[1] -replace '-', '+' -replace '_','/').PadRight(((($rParts[1].Length + 3) / 4) * 4),'='))) | ConvertFrom-Json } catch { $rPayload = $null }
+            if ($rPayload) {
+              echo "- Role token aud: $($rPayload.aud) iss: $($rPayload.iss) roles: $($rPayload.roles -join ',')" >> $env:GITHUB_STEP_SUMMARY
+            }
+          }
           if (-not $overall) { Write-Error "Smoke tests failed. See smoke-results.json for details." }
       - name: Ensure Smoke Results Exists
         if: always()

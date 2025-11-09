@@ -15,9 +15,11 @@ var authority = string.IsNullOrWhiteSpace(tenantId)
 
 if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience))
 {
-    var authenticationBuilder = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
-
-    authenticationBuilder.AddJwtBearer(options =>
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    }).AddJwtBearer(options =>
     {
         options.Authority = authority;
         options.TokenValidationParameters = new TokenValidationParameters
@@ -25,18 +27,7 @@ if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience
             ValidAudiences = new[] { audience, clientId },
             ValidateAudience = true,
             ValidateIssuer = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true
-        };
-    });
-
-    authenticationBuilder.AddJwtBearer("TenantBearer", options =>
-    {
-        options.Authority = authority;
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateAudience = true,
-            ValidateIssuer = true,
+            ValidIssuer = $"https://login.microsoftonline.com/{tenantId}/v2.0",
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true
         };
@@ -62,10 +53,9 @@ if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience
                 return roles.Contains("Swagger.Admin") || rolesAlt.Contains("Swagger.Admin");
             }));
 
-        // Tenant-wide token policy (any valid token from the tenant)
-        options.AddPolicy("TenantToken", policy =>
+        // Generic authenticated policy for /health (any valid v2 token for this tenant)
+        options.AddPolicy("AnyAuthenticated", policy =>
         {
-            policy.AddAuthenticationSchemes("TenantBearer");
             policy.RequireAuthenticatedUser();
         });
     });
@@ -109,7 +99,7 @@ if (!string.IsNullOrWhiteSpace(authority))
             name,
             audience = aud
         });
-    }).RequireAuthorization(new AuthorizeAttribute { Policy = "TenantToken" });
+    }).RequireAuthorization("AnyAuthenticated");
 
     // Mock data API (requires Swagger.Read)
     app.MapGet("/api/mock", () =>
