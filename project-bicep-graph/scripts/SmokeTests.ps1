@@ -136,31 +136,15 @@ function Invoke-EphemeralSmokeTests {
     if ($apiHealthProtected -and ($apiHealthProtected | Get-Member -Name status -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
         $healthStatus = $apiHealthProtected.status
     }
-    $adminClaims = Decode-JwtClaims -Token $AdminBearerToken
-    $userClaims = Decode-JwtClaims -Token $UserBearerToken
     $success = [bool]($kv.Accessible -and $st.Accessible -and ($healthzStatus -eq 'ok') -and ($healthStatus -eq 'ok'))
     [pscustomobject]@{
         Environment = $env
         KeyVault    = $kv
         Storage     = $st
         Api         = [pscustomobject]@{ Healthz = $apiHealthz; Health = $apiHealthProtected; BaseUrl = $ApiBaseUrl; HealthStatus = $healthStatus }
-        Token       = [pscustomobject]@{ Admin = $adminClaims; User = $userClaims }
         Success     = $success
         CompletedAt = (Get-Date).ToString('o')
     }
-}
-
-function Decode-JwtClaims {
-    param([string]$Token)
-    if (-not $Token) { return $null }
-    try {
-        $parts = $Token.Split('.')
-        if ($parts.Length -lt 2) { return $null }
-        $payload = $parts[1].Replace('-', '+').Replace('_', '/')
-        switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } 0 {} default { $payload += '===' } }
-        $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
-        return ($json | ConvertFrom-Json)
-    } catch { return $null }
 }
 
 # Example local execution (commented):

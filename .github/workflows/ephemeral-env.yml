@@ -162,15 +162,6 @@ jobs:
           echo "| Key Vault Accessible | $kvAccessible |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Storage Accessible | $stAccessible |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Overall | $overall |" >> $env:GITHUB_STEP_SUMMARY
-          echo "\n#### Token Diagnostics" >> $env:GITHUB_STEP_SUMMARY
-          echo "- Admin token acquired: $([bool]$adminToken) (error: $adminTokenError)" >> $env:GITHUB_STEP_SUMMARY
-          if ($adminToken) {
-            $rParts = $adminToken.Split('.')
-            try { $rPayload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($rParts[1] -replace '-', '+' -replace '_','/').PadRight(((($rParts[1].Length + 3) / 4) * 4),'='))) | ConvertFrom-Json } catch { $rPayload = $null }
-            if ($rPayload) {
-              echo "- Role token aud: $($rPayload.aud) iss: $($rPayload.iss) roles: $($rPayload.roles -join ',')" >> $env:GITHUB_STEP_SUMMARY
-            }
-          }
           if (-not $overall) { Write-Error "Smoke tests failed. See smoke-results.json for details." }
       - name: Ensure Smoke Results Exists
         if: always()
