@@ -183,23 +183,57 @@ jobs:
           path: smoke-results.json
 
   destroy:
-    needs: smoke-tests
-    if: github.event.action == 'labeled' && contains(github.event.pull_request.labels.*.name, 'destroy')
+    # Run on label application; independent of provision/smoke (which are skipped on labeled action)
+    if: github.event.action == 'labeled' && (github.event.label.name == 'Destroy' || github.event.label.name == 'destroy')
     permissions:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set PR Number Env
+        run: echo "PR_NUMBER=${{ github.event.number }}" >> $GITHUB_ENV
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Find Previous Successful Run (Provision Artifacts)
+        id: find_prev_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Query workflow runs for this workflow file
+          curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/ephemeral-env.yml/runs?event=pull_request&per_page=50" > runs.json
+          # Extract latest completed run (excluding current) matching head_sha
+          PREV_RUN_ID=$(jq -r --arg cur "${{ github.run_id }}" --arg sha "${{ github.event.pull_request.head.sha }}" '(.workflow_runs | map(select(.head_sha==$sha and (.id|tostring) != $cur and .status=="completed" and .conclusion=="success"))) | sort_by(.run_number) | last | (.id // "")')
+          if [ "$PREV_RUN_ID" = "null" ] || [ -z "$PREV_RUN_ID" ]; then
+            echo "No previous successful run found for this PR head SHA; will proceed with deterministic cleanup.";
+            PREV_RUN_ID="";
+          fi
+          echo "prev_run_id=$PREV_RUN_ID" >> $GITHUB_OUTPUT
+      - name: Download env-outputs artifact (previous run)
+        if: ${{ steps.find_prev_run.outputs.prev_run_id != '' }}
+        uses: actions/download-artifact@v5
+        with:
+          name: env-outputs
+          run-id: ${{ steps.find_prev_run.outputs.prev_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download test-users artifact (previous run)
+        if: ${{ steps.find_prev_run.outputs.prev_run_id != '' }}
+        uses: actions/download-artifact@v5
+        with:
+          name: test-users
+          run-id: ${{ steps.find_prev_run.outputs.prev_run_id }}
+          github-token: ${{ github.token }}
       - name: Download env outputs
         uses: actions/download-artifact@v4
         with:
           name: env-outputs
+        continue-on-error: true
       - name: Download test users
         uses: actions/download-artifact@v4
         with:
@@ -220,6 +254,7 @@ jobs:
         shell: pwsh
         run: |
           if (Test-Path env-outputs.json) { $env:ENV_OUTPUTS_PATH = 'env-outputs.json' }
+          $env:PR_NUMBER = '${{ github.event.number }}'
           pwsh -File project-bicep-graph/scripts/Cleanup-GraphEphemeral.ps1 | Tee-Object -FilePath graph-cleanup.json
           Get-Content graph-cleanup.json
       - name: Delete Resource Group (Placeholder)

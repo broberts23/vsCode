@@ -4,10 +4,12 @@
 
 This project demonstrates an end-to-end ephemeral pull request (PR) environment pattern using:
 
-* Bicep + Microsoft Graph (beta extension) to provision an application, service principal, security group, custom OAuth2 permission scopes, and an application role.
+* Microsoft Graph Bicep to provision an application, service principal, security group, test accounts, custom OAuth2 permission scopes, and an application role.
 * Azure resource deployment (Key Vault with RBAC, Storage, App Service Plan, Web App) as disposable per‑PR infrastructure.
+* .NET 8 Minimal API with standardized v2 JwtBearer authentication accepting both identifier URI and clientId audiences.
 * GitHub Actions OIDC workload identity federation (no client secrets) to deploy and test.
 * PowerShell automation for post‑deploy Graph operations (federated credential, app role assignment, ephemeral test users lifecycle).
+* Smoke tests validating Web App (service) readiness, role claim propagation, authenticated access, and data-plane RBAC for Key Vault and Storage.
 
 The design focus here is NOT deep functional testing of business endpoints. Instead, it highlights how identity artifacts (scopes, roles, group membership, users) can be created and wired programmatically as part of an ephemeral environment. The only required application tests are:
 
@@ -18,7 +20,7 @@ Swagger/UI endpoints and scope-gated API surface are intentionally optional and 
 
 ## Project summary
 
-This repository delivers a per‑PR ephemeral environment pattern that automates identity artifacts (application, service principal, scopes, roles, and a tester group) alongside disposable Azure resources (Key Vault, Storage, Web App). It standardizes on v2 tokens for the Minimal API using a single JwtBearer scheme (valid audiences include the identifier URI and clientId). CI provisions the environment, deploys the API, runs smoke tests against `/healthz` (role-gated) and `/health` (any authenticated token), and preserves results as artifacts. Resources remain until a PR is labeled Destroy, at which point a gated teardown removes the Graph objects and the resource group.
+This repository delivers a per‑PR ephemeral environment pattern that automates identity artifacts (application, service principal, scopes, roles, and a tester group) alongside disposable Azure resources (Key Vault, Storage, Web App). It standardizes on v2 Graph tokens for the Minimal API using a single JwtBearer scheme (valid audiences include the identifier URI and clientId). CI provisions the environment, deploys the API, runs smoke tests against `/healthz` (role-gated) and `/health` (any authenticated token), and preserves results as artifacts. Resources remain until a PR is labeled `destroy`, at which point a gated teardown removes the Graph objects and the Azureresource group.
 
 ## Repository structure
 
@@ -50,11 +52,53 @@ project-bicep-graph/
 
 ## Scenarios / use cases
 
-- Validate identity wiring per PR: confirm role claims and authenticated access to the Minimal API before merging.
-- Provide a safe sandbox for reviewers: optional test users and a tester group enable manual exploration of scopes/roles while the PR is open.
-- Demonstrate Graph Bicep beta: author apps, service principals, roles, and scopes declaratively with deterministic IDs for repeatable deployments.
-- Exercise RBAC data-plane checks: Key Vault and Storage access validated via Azure AD (no keys), useful as a template for adding more checks.
-- Ephemeral environments for feature branches: spin up quickly, keep until explicitly destroyed, and ensure teardown cleans identity objects too.
+Below are practical, real-world scenarios where this pattern adds value:
+
+- Feature-branch validation environments
+  - Spin up a complete stack per PR, run smoke tests, and keep the environment available for iterative commits until explicitly destroyed.
+
+- Identity wiring and RBAC regression checks
+  - Prove role claim propagation (`Swagger.Admin` → `/healthz`) and audience/issuer correctness (`/health`) before merge; catch config drift early.
+
+- Contract and SDK change verification
+  - Validate changes to Minimal API endpoints or OpenAPI contracts with generated clients; exercise `Swagger.Read` policy gating (optionally) without impacting shared envs.
+
+- Dependency upgrade confidence
+  - Test .NET minor/patch upgrades, App Service runtime updates, Az CLI/PowerShell module bumps, and Graph API changes in isolation per PR.
+
+- Cross-service integration tests
+  - Verify Key Vault and Storage data‑plane RBAC using the workload identity; ensure least‑privilege roles still allow the required operations.
+
+- Secrets rotation rehearsal
+  - Rehearse secret or certificate rotation patterns (paired with a JIT RBAC activation workflow) and verify the app consumes new versions without downtime.
+
+- Conditional Access and role policy previews
+  - Trial tenant policy changes that may affect service‑to‑service flows; confirm protected endpoints still authorize correctly with v2 tokens.
+
+- Multi-tenant app hardening
+  - Exercise deterministic identifier URIs and dual accepted audiences (audience + clientId) to ensure consistent v2 auth in multi‑tenant setups.
+
+- Performance smoke and cold‑start checks
+  - Measure first‑hit latency and basic throughput after deploy; compare over time as dependencies change.
+
+- Chaos/resiliency drills (lightweight)
+  - Intentionally deny KV or Storage access (temporary RBAC change) to confirm the app and pipeline report actionable errors.
+
+- PR demos and review sandboxes
+  - Provide reviewers with test users and a safe, isolated environment for manual exploration during the review window.
+
+- Bug reproduction and fix validation
+  - Reproduce production issues in a throwaway env with the same identity wiring and app settings; validate fixes without risking shared dev/test.
+
+- Bicep module canary testing
+  - Validate changes to shared modules (identity/infra) behind a PR; confirm outputs, RBAC assignments, and app settings are correct end‑to‑end.
+
+- Workflow and OIDC trust changes
+  - Safely evolve GitHub Actions workflow steps (OIDC, artifact handling, smoke steps) and verify behavior in isolation before rolling to other repos.
+
+- Testing team regression suites
+  - Provide QA teams with ephemeral test accounts and a disposable environment to run regression test suites; each PR gets fresh test users with known credentials and role assignments, ensuring repeatable and isolated test runs.
+
 
 ## Architecture overview
 
@@ -169,40 +213,18 @@ Automated testing focuses solely on:
 ## Demo / walkthrough — end-to-end PR flow
 
 1. Open or reopen a PR.
-  - CI logs into Azure via OIDC and deploys Bicep (identity + infra).
-  - Builds and zips the Minimal API, deploys to the Web App.
-  - Assigns `Swagger.Admin` app role to the tester group; optionally creates ephemeral test users and uploads artifacts.
+    - CI logs into Azure via OIDC and deploys Bicep (identity + infra).
+    - Builds and zips the Minimal API, deploys to the Web App.
+    - Assigns `Swagger.Admin` app role to the tester group; optionally creates ephemeral test users and uploads artifacts.
 2. Smoke tests run.
-  - Acquire a v2 token for `<identifierUri>/.default` (fallback to `<clientId>/.default`).
-  - Call `/healthz` with the admin token; call `/health` with an authenticated token.
-  - Validate Key Vault and Storage access via Azure AD; upload `smoke-results.json` (no token contents).
+    - Acquire a v2 token for `<identifierUri>/.default` (fallback to `<clientId>/.default`).
+    - Call `/healthz` with the admin token; call `/health` with an authenticated token.
+    - Validate Key Vault and Storage access via Azure AD; upload `smoke-results.json` (no token contents).
 3. Review results in the PR summary and artifacts. Merge when checks pass.
 4. Apply the Destroy label when you’re done.
-  - CI deletes test users, revokes app role assignments, deletes the tester group, service principal, application, and the resource group.
+    - CI deletes test users, revokes app role assignments, deletes the tester group, service principal, application, and the resource group.
 
-## Current Capabilities Checklist
-| Capability | Status | Notes |
-|------------|--------|-------|
-| App + SP creation via Graph Bicep | Implemented | Beta resource types; deterministic naming & tags |
-| Application audience URI (`identifierUris`) | Implemented | Deterministic `api://pr-<prNumber>-<uniqueSuffix>`; stable for token requests |
-| Custom OAuth2 scopes (Swagger.Read/Write) | Implemented | Deterministic GUIDs; declared in api.oauth2PermissionScopes |
-| Application role (Swagger.Admin) | Implemented | Assigned to tester group post-deploy |
-| Security group for test users | Implemented | Always created; objectId output for member management |
-| Ephemeral test user creation & deletion | Implemented | Lifecycle integrated in workflow; pattern-based cleanup |
-| Web API deployment (zip) | Implemented | .NET 8 Minimal API with JWT Bearer auth |
-| `/healthz` (Swagger.Admin role) & `/health` (AnyAuthenticated) | Implemented | Smoke test covers role-gated + generic auth; returns status & user info |
-| `/api/mock` (Swagger.Read scope) | Implemented | Policy-protected; not exercised in smoke tests |
-| `/swagger` (Swagger.Admin role) | Implemented | Redirects to Swagger UI; protected by role; not tested in CI |
-| Scope or role-based automated tests | Not in scope | Intentional—manual exploration only |
-| Secure outputs for scope/role IDs | Not in recent change | Can be re-added if log leakage is a concern |
-| Artifact publication (env/test users/smoke) | Implemented | JSON artifacts for traceability |
-| Per-PR resource lifecycle control | Implemented | Provision on PR open/reopen; destroy on "Destroy" label |
-| GitHub OIDC workload identity | Implemented | Runner SP auto-resolved and granted Key Vault access |
-| API audience wiring | Implemented | `appAudience` output used in App Service config and token acquisition |
-| StrictMode-compliant PowerShell | Implemented | Safe property checks; no null-conditional operator abuse |
-| Error-resilient smoke tests | Implemented | Missing API properties handled gracefully; summary generation continues |
-
-## Potential Future Enhancements (Optional)
+## Potential Future Enhancements
 * Add delegated token acquisition (device code flow) to validate `scp` claim presence in user tokens (if you later want automated scope testing).
 * Implement preAuthorizedApplications in application manifest for zero-consent user token acquisition.
 * Introduce TTL scan job to clean orphaned PR resource groups/users if a workflow run is interrupted or "Destroy" label is never applied.
