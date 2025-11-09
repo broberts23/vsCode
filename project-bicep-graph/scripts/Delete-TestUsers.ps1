@@ -42,7 +42,8 @@ function Remove-UserById {
   try {
     Invoke-Graph -Method DELETE -Uri "https://graph.microsoft.com/v1.0/users/$UserId" -Body $null -Token $token
     $item.status = 'Deleted'
-  } catch { $item.status = 'Error'; $item.error = $_.Exception.Message }
+  }
+  catch { $item.status = 'Error'; $item.error = $_.Exception.Message }
   $results += $item
 }
 
@@ -50,7 +51,8 @@ if (Test-Path $testUsersPath) {
   $raw = Get-Content $testUsersPath -Raw | ConvertFrom-Json
   if ($raw -is [System.Array]) {
     foreach ($u in $raw) { if ($u.id) { Remove-UserById -UserId $u.id -Upn $u.upn } }
-  } else {
+  }
+  else {
     if ($raw.users) { foreach ($u in $raw.users) { if ($u.id) { Remove-UserById -UserId $u.id -Upn $u.upn } } }
   }
 }
@@ -60,10 +62,12 @@ elseif ($groupId) {
   try {
     $members = Invoke-Graph -Method GET -Uri $membersUri -Body $null -Token $token
     foreach ($m in $members.value) { if ($m.id) { Remove-UserById -UserId $m.id -Upn $m.userPrincipalName } }
-  } catch {
+  }
+  catch {
     $results += [pscustomobject]@{ upn = $null; id = $groupId; status = 'GroupMembersError'; error = $_.Exception.Message }
   }
-} else {
+}
+else {
   $results += [pscustomobject]@{ upn = $null; id = $null; status = 'NoAction'; error = 'No test-users artifact or group objectId available.' }
 }
 

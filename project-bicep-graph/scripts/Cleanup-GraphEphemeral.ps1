@@ -27,9 +27,6 @@ REFERENCES
   Access tokens & Graph: https://learn.microsoft.com/azure/active-directory/develop/access-tokens
 #>
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
-
 param(
     [string]$EnvOutputsPath = $env:ENV_OUTPUTS_PATH,
     [string]$AppObjectId = $env:APP_OBJECT_ID,
@@ -37,6 +34,9 @@ param(
     [string]$TestGroupObjectId = $env:TEST_GROUP_OBJECT_ID,
     [int]$PrNumber = [int]($env:PR_NUMBER)
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
 
 function Get-GraphToken { (az account get-access-token --resource-type ms-graph --output json | ConvertFrom-Json).accessToken }
 function Invoke-GraphDelete { param([string]$Uri, [string]$Token) $h = @{Authorization = "Bearer $Token" }; Invoke-RestMethod -Method DELETE -Uri $Uri -Headers $h }
