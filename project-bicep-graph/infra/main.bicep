@@ -10,6 +10,8 @@ param ttlHours int = 6
 param createdAt string = 'n/a'
 @description('Optional: service principal objectId for the GitHub runner (OIDC workload identity) to grant Key Vault data-plane RBAC.')
 param runnerPrincipalObjectId string = ''
+@description('Client ID of the application (app ID).')
+param clientId string
 
 // Module: Identity (App + Service Principal)
 module identity 'modules/identity.bicep' = {
@@ -31,6 +33,7 @@ module appInfra 'modules/appInfra.bicep' = {
     createdAt: createdAt
     appAudience: identity.outputs.appAudience
     runnerPrincipalObjectId: runnerPrincipalObjectId
+    clientId: clientId
   }
 }
 

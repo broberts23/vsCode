@@ -30,7 +30,7 @@ jobs:
           az deployment group create \
             --resource-group pr-${{ github.event.number }}-rg \
             --template-file project-bicep-graph/infra/main.bicep \
-            --parameters prNumber=${{ github.event.number }} location='eastus' runnerPrincipalObjectId=$RUNNER_SP_OBJECTID \
+            --parameters prNumber=${{ github.event.number }} location='eastus' runnerPrincipalObjectId=$RUNNER_SP_OBJECTID clientId='${{ secrets.AZURE_CLIENT_ID }}' \
             --query properties.outputs --output json > env-outputs.json
       - name: Display Deployment Outputs
         run: cat env-outputs.json
@@ -46,20 +46,6 @@ jobs:
         run: |
           WEBAPP_NAME=$(jq -r '.webAppName.value' env-outputs.json)
           az webapp deploy --resource-group pr-${{ github.event.number }}-rg --name "$WEBAPP_NAME" --src-path publish.zip --type zip
-      - name: Warm Up Web App
-        run: |
-          WEBAPP_URL=$(jq -r '.webAppUrl.value' env-outputs.json)
-          echo "Warming $WEBAPP_URL/healthz"
-          for i in {1..12}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$WEBAPP_URL/healthz" || true)
-            echo "Attempt $i: HTTP $code"
-            if [ "$code" = "200" ]; then
-              echo "Warm-up succeeded"
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "Warm-up did not reach 200; continuing"
       - name: Assign Swagger.Admin role to test group (if present)
         shell: pwsh
         run: |
@@ -133,9 +119,10 @@ jobs:
           $kv = $o.keyVaultName.value
           $st = $o.storageAccountName.value
           $api = $o.webAppUrl.value
+          $clientId = '${{ secrets.AZURE_CLIENT_ID }}'
           $roleToken = $null
           $roleTokenError = $null
-          try { $roleToken = az account get-access-token --resource "$aud" --query accessToken -o tsv }
+          try { $roleToken = az account get-access-token --resource "$clientId" --query accessToken -o tsv }
           catch { $roleTokenError = $_.Exception.Message }
           $tenantToken = $null
           $tenantTokenError = $null

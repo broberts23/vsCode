@@ -16,6 +16,9 @@ param runnerPrincipalObjectId string = ''
 @description('Optional storage account name override.')
 param storageName string = toLower(replace('st${uniqueString(resourceGroup().id, string(prNumber))}', '-', ''))
 
+@description('Client ID of the application (app ID).')
+param clientId string
+
 var kvName = toLower('kv-${uniqueString(resourceGroup().id, string(prNumber))}')
 var planName = toLower('plan-${uniqueString(resourceGroup().id, string(prNumber))}')
 var webName = toLower('api-${uniqueString(resourceGroup().id, string(prNumber))}')
@@ -105,6 +108,10 @@ resource apiSite 'Microsoft.Web/sites@2024-11-01' = {
         {
           name: 'AzureAd__Audience'
           value: appAudience
+        }
+        {
+          name: 'AzureAd__ClientId'
+          value: clientId
         }
       ]
     }

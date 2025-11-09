@@ -8,6 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Configuration: AzureAd:TenantId, AzureAd:Audience (App ID URI or Client ID)
 var tenantId = builder.Configuration["AzureAd:TenantId"] ?? "";
 var audience = builder.Configuration["AzureAd:Audience"] ?? "";
+var clientId = builder.Configuration["AzureAd:ClientId"] ?? "";
 var authority = string.IsNullOrWhiteSpace(tenantId)
     ? null
     : $"https://login.microsoftonline.com/{tenantId}/v2.0";
@@ -21,7 +22,7 @@ if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience
         options.Authority = authority;
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidAudience = audience,
+            ValidAudiences = new[] { audience, clientId },
             ValidateAudience = true,
             ValidateIssuer = true,
             ValidateLifetime = true,
