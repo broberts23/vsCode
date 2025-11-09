@@ -183,28 +183,74 @@ jobs:
           path: smoke-results.json
 
   destroy:
-    needs: smoke-tests
-    if: github.event.action == 'labeled' && contains(github.event.pull_request.labels.*.name, 'destroy')
+    # Run on label application; independent of provision/smoke (which are skipped on labeled action)
+    if: github.event.action == 'labeled' && (github.event.label.name == 'Destroy' || github.event.label.name == 'destroy')
     permissions:
       id-token: write
       contents: read
+      actions: read
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set PR Number Env
+        run: echo "PR_NUMBER=${{ github.event.number }}" >> $GITHUB_ENV
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Download env outputs
-        uses: actions/download-artifact@v4
+      - name: Find Previous Successful Run (Provision Artifacts)
+        id: find_prev_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Query workflow runs for this workflow file
+          curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/ephemeral-env.yml/runs?event=pull_request&per_page=50" > runs.json
+          echo "Found $(jq -r '.workflow_runs | length') workflow runs in runs.json"
+          # Build candidate list: completed PR runs for this PR number, newest first (excluding current)
+          CANDIDATES=$(jq -r --arg cur "${{ github.run_id }}" --argjson pr ${{ github.event.number }} '(.workflow_runs | map(select((.id|tostring) != $cur and .status=="completed" and (.pull_requests | any(.number == $pr))))) | sort_by(.run_number) | reverse | .[].id' runs.json)
+          echo "Candidate run IDs (newest->oldest): $CANDIDATES"
+          PREV_RUN_ID=""
+          for RID in $CANDIDATES; do
+            echo "Checking artifacts for run $RID ..."
+            curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RID/artifacts?per_page=100" > artifacts.json
+            HAS_ENV=$(jq -r '.artifacts | map(select(.name=="env-outputs")) | length' artifacts.json)
+            HAS_USERS=$(jq -r '.artifacts | map(select(.name=="test-users")) | length' artifacts.json)
+            echo "Artifacts: env-outputs=$HAS_ENV, test-users=$HAS_USERS"
+            if [ "$HAS_ENV" != "0" ] || [ "$HAS_USERS" != "0" ]; then
+              PREV_RUN_ID="$RID"
+              break
+            fi
+          done
+          if [ -z "$PREV_RUN_ID" ]; then
+            echo "No prior run with required artifacts found for PR #${{ github.event.number }}; proceeding without artifacts.";
+          fi
+          echo "prev_run_id=$PREV_RUN_ID" >> $GITHUB_OUTPUT
+      - name: Download env-outputs artifact (previous run)
+        if: ${{ steps.find_prev_run.outputs.prev_run_id != '' }}
+        uses: actions/download-artifact@v5
         with:
           name: env-outputs
-      - name: Download test users
-        uses: actions/download-artifact@v4
+          run-id: ${{ steps.find_prev_run.outputs.prev_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download test-users artifact (previous run)
+        if: ${{ steps.find_prev_run.outputs.prev_run_id != '' }}
+        uses: actions/download-artifact@v5
         with:
           name: test-users
-        continue-on-error: true
+          run-id: ${{ steps.find_prev_run.outputs.prev_run_id }}
+          github-token: ${{ github.token }}
+      - name: List downloaded artifacts (debug)
+        if: ${{ steps.find_prev_run.outputs.prev_run_id != '' }}
+        run: |
+          echo "Files in workspace:"
+          ls -la
+          echo "env-outputs.json (if present):"; [ -f env-outputs.json ] && cat env-outputs.json || echo "(missing)"
+          echo "test-users.json (if present):"; [ -f test-users.json ] && cat test-users.json || echo "(missing)"
       - name: Delete Test Users
         shell: pwsh
         run: |
@@ -220,6 +266,7 @@ jobs:
         shell: pwsh
         run: |
           if (Test-Path env-outputs.json) { $env:ENV_OUTPUTS_PATH = 'env-outputs.json' }
+          $env:PR_NUMBER = '${{ github.event.number }}'
           pwsh -File project-bicep-graph/scripts/Cleanup-GraphEphemeral.ps1 | Tee-Object -FilePath graph-cleanup.json
           Get-Content graph-cleanup.json
       - name: Delete Resource Group (Placeholder)

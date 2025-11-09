@@ -1,57 +1,83 @@
-# Project: Graph-Backed Ephemeral Environment Scaffolding
+# Graph-Backed Ephemeral PR Environments (project-bicep-graph)
 
-This project demonstrates declarative creation of Microsoft Entra (Azure AD) application and service principal objects via the Microsoft Graph Bicep extension together with ephemeral Azure infrastructure for pull request (PR) validation environments.
+Lightweight pattern for spinning up (and explicitly tearing down) per‑pull‑request Azure environments plus Microsoft Entra application/service principal, scopes, app role, and a tester group using the Microsoft Graph Bicep beta extension.
 
-Preview disclaimer: Microsoft Graph Bicep templates (applications/servicePrincipals) are in beta. APIs under `/beta` may change. Do not use this unmodified in production without validation.
+> Preview: Microsoft Graph Bicep resource types are in beta; schemas may change. Validate in a test tenant before production use.
 
-## Objectives
-- Per‑PR isolated identity (App + Service Principal) created in Bicep.
-- Minimal RBAC scoped to just the resources provisioned for validation.
-- Optional workload identity federation (GitHub Actions OIDC) via federated identity credential (currently created post‑deploy with Graph API if not exposed in Bicep).
-- Smoke tests executed under the ephemeral identity; results surfaced to PR (simulating a ServiceNow ticket update).
-- Deterministic teardown with audit of removed role assignments and deleted Entra objects.
+## ✨ Key Features
+- Declarative identity layer: App + Service Principal + OAuth2 scopes (Swagger.Read/Write) + application role (Swagger.Admin) + tester security group in Bicep.
+- Deterministic GUID seeding for scopes & role → stable across redeploys.
+- Ephemeral infra: Key Vault (RBAC), Storage Account, App Service Plan, Minimal API Web App.
+- v2-only JWT auth: Single bearer scheme accepting identifier URI & clientId as audiences.
+- Role-gated `/healthz` and authenticated `/health` smoke validation (no token contents logged).
+- GitHub Actions OIDC based workflow: provision → smoke-tests → label-gated destroy.
+- PowerShell 7.4 scripts for role assignment, test user creation/deletion, and Graph cleanup.
 
-## Structure
+## 📁 Repository Structure
 ```
-project-bicep-graph/
-  bicepconfig.json               # Enables extensibility + Graph extension aliases.
-  infra/
-    main.bicep                   # Orchestrates modules.
-    modules/
-      identity.bicep             # Creates application + service principal.
-      appInfra.bicep             # Demo infra (Key Vault, Storage) + RBAC (placeholder).
-  scripts/
-    SmokeTests.ps1               # Placeholder PowerShell smoke tests (7.4).
-    GraphFederation.ps1          # Placeholder for federated identity credential creation.
-  workflows/
-    ephemeral-env.yml            # GitHub Actions workflow scaffold.
-  tests/
-    SmokeTests.Tests.ps1         # Pester tests scaffold.
+bicepconfig.json            # Extensibility + Graph extension aliases
+infra/
+  main.bicep               # Orchestrator (identity + infra modules)
+  modules/
+    identity.bicep         # Graph app/SP, scopes, role, tester group (deterministic IDs)
+    appInfra.bicep         # Key Vault, Storage, Web App, RBAC + app settings
+scripts/
+  Assign-AppRoleToGroup.ps1
+  Create-TestUsers.ps1
+  Delete-TestUsers.ps1
+  Cleanup-GraphEphemeral.ps1
+  GraphFederation.ps1       # (placeholder for federated credential)
+  SmokeTests.ps1            # API, KV, Storage validation (no token output)
+src/WebApi/                 # .NET 8 Minimal API (Program.cs)
+tests/SmokeTests.Tests.ps1  # Pester placeholder
+blog.md                     # Deep-dive technical article
+README.md                   # (This file) concise overview
 ```
 
-## Microsoft Learn References
+## 🧱 Architecture (High Level)
+1. PR opened → workflow deploys Bicep: identity + infra.
+2. Web API published (zip deploy) with app settings (`AzureAd__TenantId`, `AzureAd__Audience`, `AzureAd__ClientId`).
+3. Role assignment script grants `Swagger.Admin` to tester group; optional test users created and added to group.
+4. Smoke tests acquire v2 token (`<identifierUri>/.default` → fallback `<clientId>/.default`), validate `/healthz` (role) + `/health` (auth) + Key Vault & Storage access.
+5. Artifacts uploaded: `env-outputs.json`, `test-users.json`, `smoke-results.json` (no tokens).
+6. Label "Destroy" applied → cleanup job deletes users, role assignments, group, service principal, application, resource group.
+
+## 🔍 Smoke Tests (What They Prove)
+| Check | Purpose |
+|-------|---------|
+| /healthz (Swagger.Admin) | App role assignment & role claim propagation |
+| /health (AnyAuthenticated) | Baseline token validation & audience config |
+| Key Vault RBAC | Data-plane access under assigned role |
+| Storage RBAC | Data-plane container list via AAD |
+
+## 🔐 Security & Governance
+- OIDC only (no client secrets) for GitHub Actions: https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect
+- Key Vault RBAC model (`enableRbacAuthorization=true`); no access policies.
+- Tokens not written to logs/artifacts; only success/status fields are stored.
+- Least privilege roles (e.g., Key Vault Secrets User) recommended; sample uses roleDefinitionId parameter.
+- Deterministic tags (`Env=pr-<n>`, `TTLHours`, `CreatedAt`) enable future TTL sweeps / scheduled cleanup.
+- Preview caution: Pin Bicep & validate Graph beta types when upgrading.
+
+## 🚀 Quick Start (Conceptual)
+1. Ensure Azure login/OIDC secrets are configured (client-id, tenant-id, subscription-id) in repo.
+2. Open a PR → workflow provisions environment automatically.
+3. Review smoke test summary & artifacts.
+4. (Optional) Use test users for manual scope/role exploration.
+5. Apply "Destroy" label to trigger teardown when finished.
+
+## 🧹 Teardown
+Explicit label triggers cleanup: removes app role assignments → deletes group/SP/app → deletes resource group. No implicit auto-remove (keeps environment for iterative PR testing until explicitly destroyed).
+
+## 📚 References
 - Applications (Bicep): https://learn.microsoft.com/graph/templates/bicep/reference/applications?view=graph-bicep-beta
 - Service Principals (Bicep): https://learn.microsoft.com/graph/templates/bicep/reference/serviceprincipals?view=graph-bicep-beta
-- Federated identity credentials overview: https://learn.microsoft.com/graph/api/resources/federatedidentitycredentials-overview?view=graph-rest-1.0
-- Workload identity federation concepts: https://learn.microsoft.com/azure/active-directory/develop/workload-identity-federation
-- Bicep configuration: https://learn.microsoft.com/azure/azure-resource-manager/bicep/bicep-config
-- Azure Login OIDC (GitHub): https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect
+- Access tokens & claims: https://learn.microsoft.com/azure/active-directory/develop/access-tokens
+- Key Vault RBAC: https://learn.microsoft.com/azure/key-vault/general/rbac-guide
 - Role assignments cmdlets: https://learn.microsoft.com/powershell/module/az.resources/new-azroleassignment?view=azps-latest
+- Workload identity federation: https://learn.microsoft.com/azure/active-directory/develop/workload-identity-federation
 
-## Next Steps
-1. Fill in `appInfra.bicep` with concrete resource definitions and role assignment logic.
-2. Implement federated identity credential creation (Graph API) in `GraphFederation.ps1`.
-3. Expand smoke tests to validate Key Vault and Storage permissions.
-4. Integrate workflow steps to call the scripts and post PR comments.
-5. Add cleanup workflow for stale PR environments.
+## ⚠️ Disclaimer
+This is a demonstration scaffold. Before production: harden logging, add Pester coverage, implement federated credentials (GraphFederation.ps1), enforce TTL sweeps, and review role scopes.
 
-## Cleanup Strategy
-- Tag every resource and Entra object with `Env=pr-<number>`, `TTLHours=<n>`, `CreatedAt=<ISO8601>`.
-- Nightly scheduled workflow queries for expired TTL environments and runs teardown.
-
-## Security Notes
-- Avoid storing secrets: use OIDC federation only.
-- Use least privileged role definitions (e.g., Key Vault Secrets User vs Secrets Officer when possible).
-
-## Disclaimer
-This scaffold is intentionally minimal; adapt RBAC scopes and add logging, error handling, and compliance instrumentation before production use.
+---
+For a deeper architectural narrative, see `blog.md`.
