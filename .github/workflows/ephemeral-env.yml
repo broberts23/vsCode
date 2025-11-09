@@ -133,19 +133,23 @@ jobs:
           $kv = $o.keyVaultName.value
           $st = $o.storageAccountName.value
           $api = $o.webAppUrl.value
-          $token = $null
-          $tokenError = $null
-          try { $token = az account get-access-token --resource "$aud" --query accessToken -o tsv }
-          catch { $tokenError = $_.Exception.Message }
+          $roleToken = $null
+          $roleTokenError = $null
+          try { $roleToken = az account get-access-token --resource "$aud" --query accessToken -o tsv }
+          catch { $roleTokenError = $_.Exception.Message }
+          $tenantToken = $null
+          $tenantTokenError = $null
+          try { $tenantToken = az account get-access-token --resource-type ms-graph --query accessToken -o tsv }
+          catch { $tenantTokenError = $_.Exception.Message }
           . project-bicep-graph/scripts/SmokeTests.ps1
           try {
-            $resultObject = Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -BearerToken $token
+            $resultObject = Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -RoleBearerToken $roleToken -TenantBearerToken $tenantToken
           }
           catch {
             $err = $_.Exception.Message
             $resultObject = [pscustomobject]@{
               Success     = $false
-              Error       = if ($tokenError) { "Token error: $tokenError; Test error: $err" } else { $err }
+              Error       = "Smoke tests failed: $err"
               Environment = $null
               KeyVault    = [pscustomobject]@{ Accessible = $false; Error = "Invoke-EphemeralSmokeTests failed: $err" }
               Storage     = [pscustomobject]@{ Accessible = $false; Error = "Invoke-EphemeralSmokeTests failed: $err" }
@@ -157,18 +161,23 @@ jobs:
           $json | Out-File smoke-results.json
           $obj = $json | ConvertFrom-Json
           $authConfigured = if ($obj.PSObject.Properties.Name -contains 'Api' -and $obj.Api -and $obj.Api.PSObject.Properties.Name -contains 'Healthz' -and $obj.Api.Healthz -and $obj.Api.Healthz.PSObject.Properties.Name -contains 'authConfigured') { $obj.Api.Healthz.authConfigured } else { 'Error' }
+          $healthzStatus = if ($obj.PSObject.Properties.Name -contains 'Api' -and $obj.Api -and $obj.Api.PSObject.Properties.Name -contains 'Healthz' -and $obj.Api.Healthz -and $obj.Api.Healthz.PSObject.Properties.Name -contains 'status') { $obj.Api.Healthz.status } else { 'Error' }
           $healthStatus = if ($obj.PSObject.Properties.Name -contains 'Api' -and $obj.Api -and $obj.Api.PSObject.Properties.Name -contains 'Health' -and $obj.Api.Health -and $obj.Api.Health.PSObject.Properties.Name -contains 'status') { $obj.Api.Health.status } else { 'Error' }
           $overall = if ($obj.PSObject.Properties.Name -contains 'Success') { [bool]$obj.Success } else { $false }
           echo "### Smoke Test Summary" >> $env:GITHUB_STEP_SUMMARY
           echo "| Check | Result |" >> $env:GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $env:GITHUB_STEP_SUMMARY
           echo "| API Auth Configured | $authConfigured |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Admin API /healthz | $healthzStatus |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Protected API /health | $healthStatus |" >> $env:GITHUB_STEP_SUMMARY
           $kvAccessible = if ($obj.PSObject.Properties.Name -contains 'KeyVault' -and $obj.KeyVault -and $obj.KeyVault.PSObject.Properties.Name -contains 'Accessible') { $obj.KeyVault.Accessible } else { 'Error' }
           $stAccessible = if ($obj.PSObject.Properties.Name -contains 'Storage' -and $obj.Storage -and $obj.Storage.PSObject.Properties.Name -contains 'Accessible') { $obj.Storage.Accessible } else { 'Error' }
           echo "| Key Vault Accessible | $kvAccessible |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Storage Accessible | $stAccessible |" >> $env:GITHUB_STEP_SUMMARY
           echo "| Overall | $overall |" >> $env:GITHUB_STEP_SUMMARY
+          echo "\n#### Token Diagnostics" >> $env:GITHUB_STEP_SUMMARY
+          echo "- SwaggerAdmin token acquired: $([bool]$roleToken) (error: $roleTokenError)" >> $env:GITHUB_STEP_SUMMARY
+          echo "- Tenant token acquired: $([bool]$tenantToken) (error: $tenantTokenError)" >> $env:GITHUB_STEP_SUMMARY
           if (-not $overall) { Write-Error "Smoke tests failed. See smoke-results.json for details." }
       - name: Ensure Smoke Results Exists
         if: always()

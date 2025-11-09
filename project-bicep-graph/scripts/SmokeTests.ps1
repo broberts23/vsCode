@@ -88,7 +88,8 @@ function Invoke-EphemeralSmokeTests {
         [Parameter(Mandatory)][string]$VaultName,
         [Parameter(Mandatory)][string]$StorageAccountName,
         [Parameter()][string]$ApiBaseUrl,
-        [Parameter()][string]$BearerToken
+        [Parameter()][string]$RoleBearerToken,
+        [Parameter()][string]$TenantBearerToken
     )
     $env = Test-EnvContext
     $kv = Test-KeyVaultAccess -VaultName $VaultName
@@ -102,7 +103,8 @@ function Invoke-EphemeralSmokeTests {
         $delaySec = 3
         for ($i = 1; $i -le $attempts; $i++) {
             try {
-                $apiHealthz = Invoke-RestMethod -Uri $healthzUrl -Method GET -ErrorAction Stop
+                $headers = if ($RoleBearerToken) { @{ Authorization = "Bearer $RoleBearerToken" } } else { @{} }
+                $apiHealthz = Invoke-RestMethod -Uri $healthzUrl -Method GET -Headers $headers -ErrorAction Stop
                 break
             }
             catch {
@@ -110,10 +112,11 @@ function Invoke-EphemeralSmokeTests {
                 Start-Sleep -Seconds $delaySec
             }
         }
-        if ($BearerToken) {
+        $tokenToUse = if ($TenantBearerToken) { $TenantBearerToken } else { $RoleBearerToken }
+        if ($tokenToUse) {
             for ($i = 1; $i -le $attempts; $i++) {
                 try {
-                    $apiHealthProtected = Invoke-RestMethod -Uri $healthUrl -Headers @{ Authorization = "Bearer $BearerToken" } -Method GET -ErrorAction Stop
+                    $apiHealthProtected = Invoke-RestMethod -Uri $healthUrl -Headers @{ Authorization = "Bearer $tokenToUse" } -Method GET -ErrorAction Stop
                     break
                 }
                 catch {
@@ -123,11 +126,15 @@ function Invoke-EphemeralSmokeTests {
             }
         }
     }
+    $healthzStatus = $null
+    if ($apiHealthz -and ($apiHealthz | Get-Member -Name status -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+        $healthzStatus = $apiHealthz.status
+    }
     $healthStatus = $null
     if ($apiHealthProtected -and ($apiHealthProtected | Get-Member -Name status -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
         $healthStatus = $apiHealthProtected.status
     }
-    $success = [bool]($kv.Accessible -and $st.Accessible -and ($healthStatus -eq 'Healthy'))
+    $success = [bool]($kv.Accessible -and $st.Accessible -and ($healthzStatus -eq 'ok') -and ($healthStatus -eq 'ok'))
     [pscustomobject]@{
         Environment = $env
         KeyVault    = $kv

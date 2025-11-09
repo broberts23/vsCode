@@ -14,20 +14,33 @@ var authority = string.IsNullOrWhiteSpace(tenantId)
 
 if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience))
 {
-    builder.Services
-        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
+    var authenticationBuilder = builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme);
+
+    authenticationBuilder.AddJwtBearer(options =>
+    {
+        options.Authority = authority;
+        options.TokenValidationParameters = new TokenValidationParameters
         {
-            options.Authority = authority;
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidAudience = audience,
-                ValidateAudience = true,
-                ValidateIssuer = true,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true
-            };
-        });
+            ValidAudience = audience,
+            ValidateAudience = true,
+            ValidateIssuer = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true
+        };
+    });
+
+    authenticationBuilder.AddJwtBearer("TenantBearer", options =>
+    {
+        options.Authority = authority;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateAudience = false,
+            ValidateIssuer = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true
+        };
+    });
+
     builder.Services.AddAuthorization(options =>
     {
         // Scope-based policy (Swagger.Read)
@@ -47,12 +60,22 @@ if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience
                 var rolesAlt = ctx.User.FindAll("roles").Select(c => c.Value).ToArray();
                 return roles.Contains("Swagger.Admin") || rolesAlt.Contains("Swagger.Admin");
             }));
+
+        // Tenant-wide token policy (any valid token from the tenant)
+        options.AddPolicy("TenantToken", policy =>
+        {
+            policy.AddAuthenticationSchemes("TenantBearer");
+            policy.RequireAuthenticatedUser();
+        });
     });
+}
+else
+{
+    builder.Services.AddAuthorization();
 }
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
@@ -60,7 +83,7 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
 
-app.MapGet("/healthz", () => Results.Json(new
+var healthzEndpoint = app.MapGet("/healthz", () => Results.Json(new
 {
     status = "ok",
     time = DateTimeOffset.UtcNow.ToString("o"),
@@ -71,6 +94,8 @@ if (!string.IsNullOrWhiteSpace(authority))
 {
     app.UseAuthentication();
     app.UseAuthorization();
+
+    healthzEndpoint.RequireAuthorization("SwaggerAdmin");
 
     app.MapGet("/health", (ClaimsPrincipal user) =>
     {
@@ -83,7 +108,7 @@ if (!string.IsNullOrWhiteSpace(authority))
             name,
             audience = aud
         });
-    }).RequireAuthorization(new AuthorizeAttribute());
+    }).RequireAuthorization(new AuthorizeAttribute { Policy = "TenantToken" });
 
     // Mock data API (requires Swagger.Read)
     app.MapGet("/api/mock", () =>
