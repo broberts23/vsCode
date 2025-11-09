@@ -1,6 +1,4 @@
-# Ephemeral PR Environment with Microsoft Graph Bicep: Scopes, App Roles & Minimal API Health Testing
-
-## Introduction
+# Ephemeral PR Environment with Microsoft Graph Bicep
 
 This project demonstrates an end-to-end ephemeral pull request (PR) environment pattern using:
 
@@ -11,7 +9,7 @@ This project demonstrates an end-to-end ephemeral pull request (PR) environment 
 * PowerShell automation for post‑deploy Graph operations (federated credential, app role assignment, ephemeral test users lifecycle).
 * Smoke tests validating Web App (service) readiness, role claim propagation, authenticated access, and data-plane RBAC for Key Vault and Storage.
 
-The design focus here is NOT deep functional testing of business endpoints. Instead, it highlights how identity artifacts (scopes, roles, group membership, users) can be created and wired programmatically as part of an ephemeral environment. The only required application tests are:
+The design focus here is *NOT* deep functional testing of business endpoints, although the smoke tests could easily be extentended to include more comprehensive API surface validation.  Instead, it highlights how identity artifacts (scopes, roles, group membership, users) can be created and wired programmatically as part of an ephemeral environment. The only required application tests are:
 
 * A role-gated `/healthz` endpoint (requires `Swagger.Admin` application role) proving role claim emission and authorization works.
 * An authenticated `/health` endpoint (accepts any valid v2 token for the application) proving basic bearer auth wiring works.
@@ -187,9 +185,9 @@ The project intentionally provisions OAuth2 scopes and an app role to show how t
 2. Assigned programmatically (role to group) post-deployment.
 
 However:
-* CI pipelines do NOT depend on or validate `Swagger.Read` / `Swagger.Write` scopes today (scope policy is illustrative).
-* The `/api/mock` and `/swagger` endpoints are not part of required automated tests.
-* Test users exist so a human reviewer (during the PR window) could optionally sign in and verify roles/scopes manually.
+* CI pipelines do NOT depend on or validate Swagger.Read / Swagger.Write scopes today (scope policy is illustrative).
+* The /api/mock and /swagger endpoints are not part of the automated testing and are merely placeholders to demonstrate how the testing framework could be used.
+* Test users exist so a human reviewer (during the PR window) could optionally sign in and verify roles/scopes manually. They could also be used for user-based delegated claim auth validation.
 
 Automated testing focuses solely on:
 * Role claim propagation for `Swagger.Admin` (`/healthz` access).
@@ -223,23 +221,6 @@ Automated testing focuses solely on:
 3. Review results in the PR summary and artifacts. Merge when checks pass.
 4. Apply the Destroy label when you’re done.
     - CI deletes test users, revokes app role assignments, deletes the tester group, service principal, application, and the resource group.
-
-## Potential Future Enhancements
-* Add delegated token acquisition (device code flow) to validate `scp` claim presence in user tokens (if you later want automated scope testing).
-* Implement preAuthorizedApplications in application manifest for zero-consent user token acquisition.
-* Introduce TTL scan job to clean orphaned PR resource groups/users if a workflow run is interrupted or "Destroy" label is never applied.
-* Encrypt or secret-manage test user credentials (Key Vault + GitHub OIDC retrieval) for improved hygiene; avoid emitting plaintext to artifacts.
-* Pester unit tests for PowerShell scripts (Mock Graph calls, test error paths).
-* PSScriptAnalyzer configuration file (`.pssad.json`) to suppress false positives and enforce coding standards.
-* Federated credential creation in Bicep (if Microsoft.Graph.federatedIdentityCredential@beta becomes available).
-* Conditional destroy (not just label-driven) to clean up on PR merge/close as fallback.
-
-## Running Locally (Conceptual)
-The workflow automates end-to-end; local reproduction would require:
-1. Azure login: `az login`.
-2. Deploy Bicep with a test RG.
-3. Publish & deploy Web API (or run locally with `dotnet run` and manually set `AzureAd__TenantId` & `AzureAd__Audience`).
-4. Run scripts individually (ensure you have `az account get-access-token --resource-type ms-graph`).
 
 ## Conclusion
 
