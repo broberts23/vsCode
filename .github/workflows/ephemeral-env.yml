@@ -122,11 +122,11 @@ jobs:
           $clientId = '${{ secrets.AZURE_CLIENT_ID }}'
           $roleToken = $null
           $roleTokenError = $null
-          try { $roleToken = az account get-access-token --resource "$clientId" --query accessToken -o tsv }
+          try { $roleToken = az account get-access-token --resource "$aud" --query accessToken -o tsv }
           catch { $roleTokenError = $_.Exception.Message }
           $tenantToken = $null
           $tenantTokenError = $null
-          try { $tenantToken = az account get-access-token --resource-type ms-graph --query accessToken -o tsv }
+          try { $tenantToken = az account get-access-token --resource "https://management.azure.com/.default" --query accessToken -o tsv }
           catch { $tenantTokenError = $_.Exception.Message }
           . project-bicep-graph/scripts/SmokeTests.ps1
           try {
