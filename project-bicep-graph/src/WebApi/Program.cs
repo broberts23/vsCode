@@ -35,7 +35,7 @@ if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience
         options.Authority = authority;
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateAudience = false,
+            ValidateAudience = true,
             ValidateIssuer = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true
