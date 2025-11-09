@@ -129,7 +129,7 @@ jobs:
           }
           $tenantToken = $null
           $tenantTokenError = $null
-          try { $tenantToken = az account get-access-token --resource "https://management.azure.com/.default" --query accessToken -o tsv }
+          try { $tenantToken = az account get-access-token --resource-type ms-graph --query accessToken -o tsv }
           catch { $tenantTokenError = $_.Exception.Message }
           . project-bicep-graph/scripts/SmokeTests.ps1
           try {
