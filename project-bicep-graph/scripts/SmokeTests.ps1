@@ -108,7 +108,8 @@ function Invoke-EphemeralSmokeTests {
                 break
             }
             catch {
-                if ($i -eq $attempts) { $apiHealthz = [pscustomobject]@{ error = $_.Exception.Message; attempts = $attempts } }
+                $status = $_.Exception.Response.StatusCode.value__
+                if ($i -eq $attempts) { $apiHealthz = [pscustomobject]@{ error = $_.Exception.Message; attempts = $attempts; statusCode = $status } }
                 Start-Sleep -Seconds $delaySec
             }
         }
@@ -120,7 +121,8 @@ function Invoke-EphemeralSmokeTests {
                     break
                 }
                 catch {
-                    if ($i -eq $attempts) { $apiHealthProtected = [pscustomobject]@{ error = $_.Exception.Message; attempts = $attempts } }
+                    $status = $_.Exception.Response.StatusCode.value__
+                    if ($i -eq $attempts) { $apiHealthProtected = [pscustomobject]@{ error = $_.Exception.Message; attempts = $attempts; statusCode = $status } }
                     Start-Sleep -Seconds $delaySec
                 }
             }

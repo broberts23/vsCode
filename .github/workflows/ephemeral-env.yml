@@ -30,7 +30,7 @@ jobs:
           az deployment group create \
             --resource-group pr-${{ github.event.number }}-rg \
             --template-file project-bicep-graph/infra/main.bicep \
-            --parameters prNumber=${{ github.event.number }} location='eastus' runnerPrincipalObjectId=$RUNNER_SP_OBJECTID clientId='${{ secrets.AZURE_CLIENT_ID }}' \
+            --parameters prNumber=${{ github.event.number }} location='eastus' runnerPrincipalObjectId=$RUNNER_SP_OBJECTID \
             --query properties.outputs --output json > env-outputs.json
       - name: Display Deployment Outputs
         run: cat env-outputs.json
@@ -124,6 +124,9 @@ jobs:
           $roleTokenError = $null
           try { $roleToken = az account get-access-token --resource "$aud" --query accessToken -o tsv }
           catch { $roleTokenError = $_.Exception.Message }
+          if (-not $roleToken) {
+            try { $roleToken = az account get-access-token --resource "$(jq -r '.appId.value' env-outputs.json)" --query accessToken -o tsv } catch { }
+          }
           $tenantToken = $null
           $tenantTokenError = $null
           try { $tenantToken = az account get-access-token --resource "https://management.azure.com/.default" --query accessToken -o tsv }
