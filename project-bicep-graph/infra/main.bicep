@@ -29,10 +29,12 @@ module appInfra 'modules/appInfra.bicep' = {
     location: location
     servicePrincipalObjectId: identity.outputs.servicePrincipalObjectId
     createdAt: createdAt
-    appId: identity.outputs.appId
+    appAudience: identity.outputs.appAudience
     runnerPrincipalObjectId: runnerPrincipalObjectId
+    clientId: identity.outputs.appId
   }
 }
+    // clientId is now passed as identity.outputs.appId
 
 // Placeholder outputs aggregating modules.
 output appId string = identity.outputs.appId
@@ -45,12 +47,11 @@ output webAppUrl string = appInfra.outputs.webAppUrl
 output webAppName string = appInfra.outputs.webAppName
 output keyVaultName string = appInfra.outputs.keyVaultName
 output storageAccountName string = appInfra.outputs.storageAccountName
-@secure()
 output swaggerScopes object = identity.outputs.swaggerScopes
-@secure()
 output swaggerAdminRoleId string = identity.outputs.swaggerAdminRoleId
 output testGroupDisplayName string = identity.outputs.testGroupDisplayName
 output testGroupObjectId string = identity.outputs.testGroupObjectId
+output appAudience string = identity.outputs.appAudience
 
 // Federation step (if implemented in Bicep later) would be an additional module.
 // For now rely on scripts/GraphFederation.ps1 using Graph REST API.

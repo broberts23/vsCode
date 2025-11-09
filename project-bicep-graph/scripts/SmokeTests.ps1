@@ -11,24 +11,58 @@ Returns: Structured objects (do NOT format output).
 
 function Test-EnvContext {
     [CmdletBinding()] [OutputType([pscustomobject])] param()
-    $context = try { Get-AzContext } catch { $null }
+    $context = try { Get-AzContext -ErrorAction SilentlyContinue } catch { $null }
+    $subscriptionId = $null
+    $tenantId = $null
+    $accountId = $null
+    if ($null -ne $context) {
+        # Use safe navigation for nested properties; avoid "$context?" token under StrictMode
+        $subscriptionId = $context.Subscription?.Id
+        $tenantId = $context.Tenant?.Id
+        $accountId = $context.Account?.Id
+    }
     [pscustomobject]@{
-        SubscriptionId = $context?.Subscription.Id
-        TenantId       = $context?.Tenant.Id
-        Account        = $context?.Account.Id
+        SubscriptionId = $subscriptionId
+        TenantId       = $tenantId
+        Account        = $accountId
         RetrievedAt    = (Get-Date).ToString('o')
         ContextPresent = [bool]$context
     }
+}
+
+function New-Url {
+    [CmdletBinding()] [OutputType([string])] param(
+        [Parameter(Mandatory)][string]$BaseUrl,
+        [Parameter(Mandatory)][string]$RelativePath
+    )
+    $b = $BaseUrl.TrimEnd('/')
+    $p = $RelativePath.TrimStart('/')
+    return "$b/$p"
+}
+
+function Invoke-AzCliJson {
+    [CmdletBinding()] [OutputType([object])] param(
+        [Parameter(Mandatory)][string]$CommandLine
+    )
+    # Execute az and parse JSON safely
+    $output = & az $CommandLine.Split(' ') 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "az $CommandLine failed: $output"
+    }
+    try { return $output | ConvertFrom-Json } catch { return $null }
 }
 
 function Test-StorageAccess {
     [CmdletBinding()] [OutputType([pscustomobject])] param(
         [Parameter(Mandatory)][string]$StorageAccountName
     )
-    $result = [pscustomobject]@{ StorageAccountName = $StorageAccountName; Accessible = $false; Error = $null }
+    $result = [pscustomobject]@{ StorageAccountName = $StorageAccountName; Accessible = $false; Error = $null; ContainerCount = $null }
     try {
-        $keys = Get-AzStorageAccountKey -Name $StorageAccountName -ResourceGroupName (Get-AzResourceGroup | Select-Object -First 1 -ExpandProperty ResourceGroupName) -ErrorAction Stop
-        if ($keys) { $result.Accessible = $true }
+        # Use data-plane check via Azure AD: list containers without keys
+        $containers = Invoke-AzCliJson -CommandLine "storage container list --account-name $StorageAccountName --auth-mode login -o json"
+        $count = if ($containers) { ($containers | Measure-Object).Count } else { 0 }
+        $result.ContainerCount = $count
+        $result.Accessible = $true
     }
     catch { $result.Error = $_.Exception.Message }
     return $result
@@ -40,9 +74,10 @@ function Test-KeyVaultAccess {
     )
     $result = [pscustomobject]@{ VaultName = $VaultName; Accessible = $false; Error = $null; SecretCount = $null }
     try {
-        $secrets = Get-AzKeyVaultSecret -VaultName $VaultName -ErrorAction Stop
+        # Use az CLI data-plane operation with RBAC
+        $secrets = Invoke-AzCliJson -CommandLine "keyvault secret list --vault-name $VaultName -o json"
         $result.Accessible = $true
-        $result.SecretCount = ($secrets | Measure-Object).Count
+        $result.SecretCount = if ($secrets) { ($secrets | Measure-Object).Count } else { 0 }
     }
     catch { $result.Error = $_.Exception.Message }
     return $result
@@ -53,7 +88,8 @@ function Invoke-EphemeralSmokeTests {
         [Parameter(Mandatory)][string]$VaultName,
         [Parameter(Mandatory)][string]$StorageAccountName,
         [Parameter()][string]$ApiBaseUrl,
-        [Parameter()][string]$BearerToken
+        [Parameter()][string]$AdminBearerToken,
+        [Parameter()][string]$UserBearerToken
     )
     $env = Test-EnvContext
     $kv = Test-KeyVaultAccess -VaultName $VaultName
@@ -61,22 +97,52 @@ function Invoke-EphemeralSmokeTests {
     $apiHealthz = $null
     $apiHealthProtected = $null
     if ($ApiBaseUrl) {
-        try {
-            $apiHealthz = Invoke-RestMethod -Uri (Join-Path $ApiBaseUrl 'healthz') -Method GET -ErrorAction Stop
-        }
-        catch { $apiHealthz = [pscustomobject]@{ error = $_.Exception.Message } }
-        if ($BearerToken) {
+        $healthzUrl = New-Url -BaseUrl $ApiBaseUrl -RelativePath 'healthz'
+        $healthUrl = New-Url -BaseUrl $ApiBaseUrl -RelativePath 'health'
+        $attempts = 5
+        $delaySec = 3
+        for ($i = 1; $i -le $attempts; $i++) {
             try {
-                $apiHealthProtected = Invoke-RestMethod -Uri (Join-Path $ApiBaseUrl 'health') -Headers @{ Authorization = "Bearer $BearerToken" } -Method GET -ErrorAction Stop
+                $headers = if ($AdminBearerToken) { @{ Authorization = "Bearer $AdminBearerToken" } } else { @{} }
+                $apiHealthz = Invoke-RestMethod -Uri $healthzUrl -Method GET -Headers $headers -ErrorAction Stop
+                break
             }
-            catch { $apiHealthProtected = [pscustomobject]@{ error = $_.Exception.Message } }
+            catch {
+                $status = $_.Exception.Response.StatusCode.value__
+                if ($i -eq $attempts) { $apiHealthz = [pscustomobject]@{ error = $_.Exception.Message; attempts = $attempts; statusCode = $status } }
+                Start-Sleep -Seconds $delaySec
+            }
+        }
+        $tokenToUse = if ($UserBearerToken) { $UserBearerToken } else { $AdminBearerToken }
+        if ($tokenToUse) {
+            for ($i = 1; $i -le $attempts; $i++) {
+                try {
+                    $apiHealthProtected = Invoke-RestMethod -Uri $healthUrl -Headers @{ Authorization = "Bearer $tokenToUse" } -Method GET -ErrorAction Stop
+                    break
+                }
+                catch {
+                    $status = $_.Exception.Response.StatusCode.value__
+                    if ($i -eq $attempts) { $apiHealthProtected = [pscustomobject]@{ error = $_.Exception.Message; attempts = $attempts; statusCode = $status } }
+                    Start-Sleep -Seconds $delaySec
+                }
+            }
         }
     }
+    $healthzStatus = $null
+    if ($apiHealthz -and ($apiHealthz | Get-Member -Name status -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+        $healthzStatus = $apiHealthz.status
+    }
+    $healthStatus = $null
+    if ($apiHealthProtected -and ($apiHealthProtected | Get-Member -Name status -MemberType NoteProperty -ErrorAction SilentlyContinue)) {
+        $healthStatus = $apiHealthProtected.status
+    }
+    $success = [bool]($kv.Accessible -and $st.Accessible -and ($healthzStatus -eq 'ok') -and ($healthStatus -eq 'ok'))
     [pscustomobject]@{
         Environment = $env
         KeyVault    = $kv
         Storage     = $st
-        Api         = [pscustomobject]@{ Healthz = $apiHealthz; Health = $apiHealthProtected; BaseUrl = $ApiBaseUrl }
+        Api         = [pscustomobject]@{ Healthz = $apiHealthz; Health = $apiHealthProtected; BaseUrl = $ApiBaseUrl; HealthStatus = $healthStatus }
+        Success     = $success
         CompletedAt = (Get-Date).ToString('o')
     }
 }

@@ -6,8 +6,8 @@
 param prNumber int
 param location string
 param servicePrincipalObjectId string
-@description('Client/Application ID for the API (audience)')
-param appId string
+@description('Application audience/identifier URI')
+param appAudience string
 @description('ISO8601 created timestamp for tagging')
 param createdAt string = 'n/a'
 @description('Optional: service principal objectId of the GitHub runner (OIDC workload identity) to grant Key Vault Secrets User for smoke tests.')
@@ -15,6 +15,9 @@ param runnerPrincipalObjectId string = ''
 
 @description('Optional storage account name override.')
 param storageName string = toLower(replace('st${uniqueString(resourceGroup().id, string(prNumber))}', '-', ''))
+
+@description('Client ID of the application (app ID).')
+param clientId string
 
 var kvName = toLower('kv-${uniqueString(resourceGroup().id, string(prNumber))}')
 var planName = toLower('plan-${uniqueString(resourceGroup().id, string(prNumber))}')
@@ -25,7 +28,7 @@ var tags = {
 }
 
 // Storage Account (placeholder properties simplified)
-resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+resource storage 'Microsoft.Storage/storageAccounts@2025-01-01' = {
   name: storageName
   location: location
   sku: {
@@ -36,7 +39,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
 }
 
 // Key Vault (placeholder minimal)
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
   name: kvName
   location: location
   properties: {
@@ -53,9 +56,9 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 }
 
 // Role assignment placeholders — assign minimal roles (adjust roleDefinitionId GUIDs appropriately).
-// Example GUIDs: Key Vault Secrets User (b86a8fe4-44ce-4b36-8b83-4cda283ebc46) or Key Vault Secrets Officer (b5a9f5a8-0c42-4a6f-8346-6a1ef56e9631)
+// Example GUIDs: Key Vault Secrets User (4633458b-17de-408a-b874-0445c86b69e6
 @description('Role definition ID to assign on Key Vault scope')
-param keyVaultRoleDefinitionId string = 'b86a8fe4-44ce-4b36-8b83-4cda283ebc46'
+param keyVaultRoleDefinitionId string = '4633458b-17de-408a-b874-0445c86b69e6'
 
 resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(keyVault.id, servicePrincipalObjectId, keyVaultRoleDefinitionId)
@@ -79,18 +82,18 @@ resource kvRunnerRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04
 }
 
 // App Service Plan (Free tier for demo)
-resource apiPlan 'Microsoft.Web/serverfarms@2022-09-01' = {
+resource apiPlan 'Microsoft.Web/serverfarms@2024-11-01' = {
   name: planName
   location: location
   sku: {
-    name: 'F1'
-    tier: 'Free'
+    name: 'B1'
+    tier: 'Basic'
   }
   tags: tags
 }
 
 // Web App hosting the API (expects container or code deployment separately)
-resource apiSite 'Microsoft.Web/sites@2022-09-01' = {
+resource apiSite 'Microsoft.Web/sites@2024-11-01' = {
   name: webName
   location: location
   properties: {
@@ -104,7 +107,11 @@ resource apiSite 'Microsoft.Web/sites@2022-09-01' = {
         }
         {
           name: 'AzureAd__Audience'
-          value: 'api://${appId}'
+          value: appAudience
+        }
+        {
+          name: 'AzureAd__ClientId'
+          value: clientId
         }
       ]
     }

@@ -84,7 +84,9 @@ function Add-GroupMember {
         [string]$Token
     )
     $body = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$MemberObjectId" }
-    return Invoke-Graph -Method POST -Uri "https://graph.microsoft.com/v1.0/groups/$GroupId/members/$ref" -Token $Token -Body $body
+    # Use literal $ref segment; PowerShell tries to treat $ref as a variable inside double quotes.
+    $memberRefUri = "https://graph.microsoft.com/v1.0/groups/$GroupId/members/`$ref"
+    return Invoke-Graph -Method POST -Uri $memberRefUri -Token $Token -Body $body
 }
 
 $groupId = $env:GROUP_OBJECT_ID

@@ -27,8 +27,8 @@ $GroupDisplayName = $env:GROUP_DISPLAY_NAME
 $GroupObjectId = $env:GROUP_OBJECT_ID
 $ApplicationAppId = $env:APPLICATION_APP_ID  # Consumer application (runner) appId to receive application permission assignment
 $ApplicationSpObjectId = $env:APPLICATION_SP_OBJECTID # Optional direct SP objectId override
-$WhatIf = [bool]::Parse($env:WHATIF  ) 2>$null
-$ConfirmFlag = [bool]::Parse($env:CONFIRM ) 2>$null
+$WhatIf = $env:WHATIF -eq 'true'
+$ConfirmFlag = $env:CONFIRM -eq 'true'
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -107,10 +107,24 @@ function Get-ExistingAssignment {
         [string]$AppRoleId,
         [string]$Token
     )
-    $filter = [System.Web.HttpUtility]::UrlEncode("principalId eq $PrincipalId and appRoleId eq $AppRoleId")
-    $uri = "https://graph.microsoft.com/v1.0/servicePrincipals/$ResourceSpId/appRoleAssignedTo?`$filter=$filter"
+    # Some Graph relationship endpoints do not support filtering on multiple properties; fetch and filter client-side.
+    $uri = "https://graph.microsoft.com/v1.0/servicePrincipals/$ResourceSpId/appRoleAssignedTo"
+    $assignments = @()
     $resp = Invoke-GraphGet -Uri $uri -Token $Token
-    return $resp.value
+    if ($resp.value) { $assignments += $resp.value }
+    $nextLink = $null
+    if ($resp -and ($resp.PSObject.Properties.Name -contains '@odata.nextLink')) {
+        $nextLink = $resp.'@odata.nextLink'
+    }
+    while ($nextLink) {
+        $resp = Invoke-GraphGet -Uri $nextLink -Token $Token
+        if ($resp.value) { $assignments += $resp.value }
+        if ($resp -and ($resp.PSObject.Properties.Name -contains '@odata.nextLink')) {
+            $nextLink = $resp.'@odata.nextLink'
+        }
+        else { $nextLink = $null }
+    }
+    return $assignments | Where-Object { $_.principalId -eq $PrincipalId -and $_.appRoleId -eq $AppRoleId }
 }
 
 function New-AppRoleAssignment {

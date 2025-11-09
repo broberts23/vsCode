@@ -1,7 +1,7 @@
 name: Ephemeral PR Environment
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, labeled]
 
 jobs:
   provision:
@@ -9,6 +9,7 @@ jobs:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
+    if: github.event.action != 'labeled'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,10 +37,15 @@ jobs:
       - name: Build WebApi
         run: |
           dotnet publish project-bicep-graph/src/WebApi/WebApi.csproj -c Release -o publish
+      - name: Zip Publish Directory
+        run: |
+          cd publish
+          zip -r ../publish.zip .
+          cd -
       - name: Deploy WebApi to App Service
         run: |
           WEBAPP_NAME=$(jq -r '.webAppName.value' env-outputs.json)
-          az webapp deploy --resource-group pr-${{ github.event.number }}-rg --name "$WEBAPP_NAME" --src-path publish --type zip
+          az webapp deploy --resource-group pr-${{ github.event.number }}-rg --name "$WEBAPP_NAME" --src-path publish.zip --type zip
       - name: Assign Swagger.Admin role to test group (if present)
         shell: pwsh
         run: |
@@ -47,13 +53,16 @@ jobs:
           $spId = $o.servicePrincipalObjectId.value
           $roleId = $o.swaggerAdminRoleId.value
           $grpName = $o.testGroupDisplayName.value
+          $grpId = $o.testGroupObjectId.value
           if ([string]::IsNullOrWhiteSpace($grpName)) {
             Write-Host 'No test group provided; skipping role assignment.'
           } else {
             $env:RESOURCE_SP_OBJECTID = $spId
             $env:APP_ROLE_ID = $roleId
             $env:GROUP_DISPLAY_NAME = $grpName
+            $env:GROUP_OBJECT_ID = $grpId
             $env:APPLICATION_APP_ID = '${{ secrets.AZURE_CLIENT_ID }}'
+            $env:APPLICATION_SP_OBJECTID = $env:RUNNER_SP_OBJECTID
             pwsh -File project-bicep-graph/scripts/Assign-AppRoleToGroup.ps1 | Tee-Object -FilePath approle-assignment.json
             Get-Content approle-assignment.json
           }
@@ -87,6 +96,7 @@ jobs:
       id-token: write
       contents: read
     runs-on: ubuntu-latest
+    if: github.event.action != 'labeled'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -105,24 +115,68 @@ jobs:
         shell: pwsh
         run: |
           $o = Get-Content env-outputs.json | ConvertFrom-Json
-          $appId = $o.appId.value
+          $aud = $o.appAudience.value
           $kv = $o.keyVaultName.value
           $st = $o.storageAccountName.value
           $api = $o.webAppUrl.value
-          $token = az account get-access-token --resource "api://$appId" --query accessToken -o tsv
+          $clientId = '${{ secrets.AZURE_CLIENT_ID }}'
+          $adminToken = $null
+          $adminTokenError = $null
+          try { $adminToken = az account get-access-token --scope "$aud/.default" --query accessToken -o tsv }
+          catch { $adminTokenError = $_.Exception.Message }
+          if (-not $adminToken) {
+            try { $adminToken = az account get-access-token --scope "$(jq -r '.appId.value' env-outputs.json)/.default" --query accessToken -o tsv } catch { }
+          }
+          $userToken = $adminToken # same principal; keep for future differentiation
           . project-bicep-graph/scripts/SmokeTests.ps1
-          $resultObject = Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -BearerToken $token
+          try {
+            $resultObject = Invoke-EphemeralSmokeTests -VaultName $kv -StorageAccountName $st -ApiBaseUrl $api -AdminBearerToken $adminToken -UserBearerToken $userToken
+          }
+          catch {
+            $err = $_.Exception.Message
+            $resultObject = [pscustomobject]@{
+              Success     = $false
+              Error       = "Smoke tests failed: $err"
+              Environment = $null
+              KeyVault    = [pscustomobject]@{ Accessible = $false; Error = "Invoke-EphemeralSmokeTests failed: $err" }
+              Storage     = [pscustomobject]@{ Accessible = $false; Error = "Invoke-EphemeralSmokeTests failed: $err" }
+              Api         = [pscustomobject]@{ Healthz = $null; Health = $null; BaseUrl = $api; HealthStatus = $null }
+              CompletedAt = (Get-Date).ToString('o')
+            }
+          }
           $json = $resultObject | ConvertTo-Json -Depth 8
           $json | Out-File smoke-results.json
           $obj = $json | ConvertFrom-Json
+          $authConfigured = if ($obj.PSObject.Properties.Name -contains 'Api' -and $obj.Api -and $obj.Api.PSObject.Properties.Name -contains 'Healthz' -and $obj.Api.Healthz -and $obj.Api.Healthz.PSObject.Properties.Name -contains 'authConfigured') { $obj.Api.Healthz.authConfigured } else { 'Error' }
+          $healthzStatus = if ($obj.PSObject.Properties.Name -contains 'Api' -and $obj.Api -and $obj.Api.PSObject.Properties.Name -contains 'Healthz' -and $obj.Api.Healthz -and $obj.Api.Healthz.PSObject.Properties.Name -contains 'status') { $obj.Api.Healthz.status } else { 'Error' }
+          $healthStatus = if ($obj.PSObject.Properties.Name -contains 'Api' -and $obj.Api -and $obj.Api.PSObject.Properties.Name -contains 'Health' -and $obj.Api.Health -and $obj.Api.Health.PSObject.Properties.Name -contains 'status') { $obj.Api.Health.status } else { 'Error' }
+          $overall = if ($obj.PSObject.Properties.Name -contains 'Success') { [bool]$obj.Success } else { $false }
           echo "### Smoke Test Summary" >> $env:GITHUB_STEP_SUMMARY
           echo "| Check | Result |" >> $env:GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $env:GITHUB_STEP_SUMMARY
-          echo "| API Auth Configured | $($obj.Api.Healthz.authConfigured) |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| Protected API /health | $($obj.Api.Health.status) |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| Key Vault Accessible | $($obj.KeyVault.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
-          echo "| Storage Accessible | $($obj.Storage.Accessible) |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| API Auth Configured | $authConfigured |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Admin API /healthz | $healthzStatus |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Protected API /health | $healthStatus |" >> $env:GITHUB_STEP_SUMMARY
+          $kvAccessible = if ($obj.PSObject.Properties.Name -contains 'KeyVault' -and $obj.KeyVault -and $obj.KeyVault.PSObject.Properties.Name -contains 'Accessible') { $obj.KeyVault.Accessible } else { 'Error' }
+          $stAccessible = if ($obj.PSObject.Properties.Name -contains 'Storage' -and $obj.Storage -and $obj.Storage.PSObject.Properties.Name -contains 'Accessible') { $obj.Storage.Accessible } else { 'Error' }
+          echo "| Key Vault Accessible | $kvAccessible |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Storage Accessible | $stAccessible |" >> $env:GITHUB_STEP_SUMMARY
+          echo "| Overall | $overall |" >> $env:GITHUB_STEP_SUMMARY
+          if (-not $overall) { Write-Error "Smoke tests failed. See smoke-results.json for details." }
+      - name: Ensure Smoke Results Exists
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not (Test-Path smoke-results.json)) {
+            $fallback = [pscustomobject]@{
+              Success = $false
+              Error   = 'Smoke test step failed before results were written.'
+              When    = (Get-Date).ToString('o')
+            }
+            $fallback | ConvertTo-Json -Depth 4 | Out-File smoke-results.json
+          }
       - name: Upload Smoke Results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-results
@@ -130,7 +184,7 @@ jobs:
 
   destroy:
     needs: smoke-tests
-    if: github.event.pull_request.merged == true || github.event.action == 'closed'
+    if: github.event.action == 'labeled' && contains(github.event.pull_request.labels.*.name, 'destroy')
     permissions:
       id-token: write
       contents: read

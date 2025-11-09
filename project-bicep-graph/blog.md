@@ -9,7 +9,12 @@ This project demonstrates an end-to-end ephemeral pull request (PR) environment 
 * GitHub Actions OIDC workload identity federation (no client secrets) to deploy and test.
 * PowerShell automation for post‑deploy Graph operations (federated credential, app role assignment, ephemeral test users lifecycle).
 
-The design focus here is NOT deep functional testing of business endpoints. Instead, it highlights how identity artifacts (scopes, roles, group membership, users) can be created and wired programmatically as part of an ephemeral environment. The only required application test is a protected `/health` endpoint call to prove authentication/authorization plumbing works. Swagger/UI endpoints and role-gated API surface are intentionally optional and can be explored manually with the generated test identities while a PR is open.
+The design focus here is NOT deep functional testing of business endpoints. Instead, it highlights how identity artifacts (scopes, roles, group membership, users) can be created and wired programmatically as part of an ephemeral environment. The only required application tests are:
+
+* A role-gated `/healthz` endpoint (requires `Swagger.Admin` application role) proving role claim emission and authorization works.
+* An authenticated `/health` endpoint (accepts any valid v2 token for the application) proving basic bearer auth wiring works.
+
+Swagger/UI endpoints and scope-gated API surface are intentionally optional and can be explored manually with the generated test identities while a PR is open.
 
 ## Goals vs Non‑Goals
 
@@ -17,7 +22,7 @@ The design focus here is NOT deep functional testing of business endpoints. Inst
 |--------|------|----------|
 | Infrastructure | Rapid, reproducible PR environment spin-up & teardown | Long-lived shared dev environment |
 | Identity Automation | Programmatically create app, service principal, scopes, role, group, test users | End‑user production auth flows |
-| Testing Scope | Validate auth wiring via `/healthz` (unauth) & `/health` (auth) | Automated Swagger / scope matrix tests |
+| Testing Scope | Validate auth wiring via `/healthz` (admin role) & `/health` (any authenticated token) | Automated Swagger / scope matrix tests |
 | App Roles | Demonstrate creation + assignment | Enforcing complex RBAC logic in code |
 | Scopes | Show deterministic GUID-based scopes | Full delegated consent workflow automation |
 | Users | Ephemeral test accounts for optional manual exploration | Persistent test directory population |
@@ -26,37 +31,54 @@ The design focus here is NOT deep functional testing of business endpoints. Inst
 
 ### Identity Layer (Bicep Graph Beta)
 * Application + Service Principal created via `Microsoft.Graph/*@beta` resources.
+* Application identifier URI (audience) declared as `api://pr-<prNumber>-<uniqueSuffix>` deterministically; output as `appAudience` for token acquisition and API configuration.
 * Two OAuth2 permission scopes defined: `Swagger.Read`, `Swagger.Write` (deterministic IDs via `guid()` seeding).
 * One application role `Swagger.Admin` (allowed for User & Application principals) with deterministic ID.
 * Security group `grp-<pr>-<suffix>-testers` created unconditionally for ephemeral test accounts; app is configured with `groupMembershipClaims: SecurityGroup` so role/group claims flow into user tokens (if requested interactively later).
-* Secure outputs (`@secure()`) applied to scope and role identifiers to avoid log leakage.
+* Outputs: `appId` (clientId), `appObjectId`, `servicePrincipalObjectId`, `appAudience` (identifier URI), scope IDs, role ID, group display name and objectId.
 
 ### Infrastructure Layer
-* Storage Account (demo) and Key Vault (RBAC permission model) deployed.
-* Web App (Minimal API) + Free App Service Plan.
-* Minimal RBAC role assignment on Key Vault for the service principal (configurable role definition id parameter).
+* Storage Account (Standard_LRS, StorageV2 kind) and Key Vault (RBAC permission model, soft delete enabled) deployed.
+* Web App (Minimal API .NET 8) + Basic App Service Plan (B1 tier).
+* RBAC role assignments:
+  * Service principal (API) granted "Key Vault Secrets User" on Key Vault.
+  * GitHub runner service principal (OIDC workload identity) optionally granted "Key Vault Secrets User" for smoke test access.
+* App settings: `AzureAd__TenantId` (subscription tenant), `AzureAd__Audience` (app audience URI from Bicep output), `AzureAd__ClientId` (application appId for secondary accepted audience).
 
-### Application (Minimal API)
+### Application (Minimal API) — Standardized v2 Authentication
 * Endpoints:
-  * `/healthz` — unauthenticated heartbeat (also reports whether auth is configured).
-  * `/health` — authenticated; requires any valid token for the application (no specific scope policy enforced here in CI).
-  * `/api/mock` — requires `Swagger.Read` scope (policy keeps example of scope-based gating, but CI does not exercise it).
-  * `/swagger` redirect — protected by `Swagger.Admin` role (demonstrates role-based policy enforcement; optional manual use).
-* Authentication pipeline (JWT Bearer) configured via environment variables: `AzureAd__TenantId`, `AzureAd__Audience`.
+  * `/healthz` — role-protected heartbeat; requires `Swagger.Admin` role to authorize (verifies role assignment propagation in CI).
+  * `/health` — requires any authenticated bearer token issued by the tenant for this application (no scope enforcement in CI).
+  * `/api/mock` — requires `Swagger.Read` scope (demonstrates scope-based policy; not exercised automatically).
+  * `/swagger` redirect — protected by `Swagger.Admin` role (manual exploration only).
+* Authentication pipeline (single JWT Bearer scheme) configured via environment variables: `AzureAd__TenantId`, `AzureAd__Audience`, `AzureAd__ClientId`.
+  * Uses v2 authority: `https://login.microsoftonline.com/<tenantId>/v2.0`.
+  * Accepts either the identifier URI (`AzureAd__Audience`) or the `clientId` as valid audience (`ValidAudiences = [ audience, clientId ]`).
+  * Explicit issuer validation (`https://login.microsoftonline.com/<tenantId>/v2.0`) prevents cross‑version token mismatches.
+  * Policies:
+    * `SwaggerAdmin` — role claim (`roles` or `http://schemas.microsoft.com/ws/2008/06/identity/claims/role`) contains `Swagger.Admin`.
+    * `SwaggerRead` — scope claim (`scp`) contains `Swagger.Read`.
+    * `AnyAuthenticated` — generic authenticated user (used for `/health`).
+* Rationale for v2-only standardization: avoids issuer/audience ambiguity between v1 (`https://sts.windows.net/...`) and v2 (`https://login.microsoftonline.com/...`), simplifies smoke testing token acquisition, and ensures consistent claim shape (e.g., consolidated `scp` multi‑space scope string).
 
 ### Automation Scripts (`scripts/`)
-* `GraphFederation.ps1` — Creates a federated credential binding GitHub pull_request OIDC subject to the app (workload identity).
-* `Assign-AppRoleToGroup.ps1` — Assigns the `Swagger.Admin` app role to the tester group (role assignment path for users vs app principals demonstration).
-* `Create-TestUsers.ps1` — Generates ephemeral test users, adds them to the tester group, outputs credentials (JSON artifact). Uses SecureString internally before emitting password for artifact (demo only; recommend stronger secret handling in production).
-* `Delete-TestUsers.ps1` — Cleans up users with the PR-specific prefix on teardown.
-* `SmokeTests.ps1` — Performs minimal health validation: obtains application token (client credential) and exercises `/healthz` and `/health` with/without auth.
+* **`Assign-AppRoleToGroup.ps1`** — Assigns the `Swagger.Admin` app role to the tester group using Graph REST API. Supports group lookup by display name or direct objectId (preferred). Safely handles pagination and property existence checks to avoid Graph API filter limitations. Also assigns application permission to the runner SP if provided.
+* **`Create-TestUsers.ps1`** — Generates ephemeral test users with aliasing pattern `pr<PR_NUMBER>tester<index><6hex>`, sets SecureString passwords, adds each user to the tester group via Graph `/members/$ref`, outputs JSON with plaintext passwords for artifact (demo only; production should use Key Vault or avoid password-based auth).
+* **`Delete-TestUsers.ps1`** — Cleans up users matching the PR prefix heuristic (mailNickname, displayName). Deletes users from directory; group membership implicitly removed.
+* **`Cleanup-GraphEphemeral.ps1`** — Removes app role assignments (group + runner SP principals), deletes security group, service principal, and application. Uses client-side filtering to work around Graph filter limitations on relationship endpoints. Outputs JSON summary of deletion operations (type, id, status, error).
+* **`SmokeTests.ps1`** — Dot-sourceable PowerShell module; `Invoke-EphemeralSmokeTests` function validates environment context, Key Vault access (Get-AzKeyVaultSecret), Storage access (Get-AzStorageAccountKey), and API endpoints (`/healthz` with admin role token, `/health` with any app token). Returns structured object; captures HTTP status codes for diagnostics and gracefully handles missing properties (stores null/error objects) under StrictMode.
 
-### GitHub Actions Workflow (`workflows/ephemeral-env.yml`)
+### GitHub Actions Workflow (`.github/workflows/ephemeral-env.yml`)
 * Jobs: `provision` → `smoke-tests` → `destroy`.
-* Provision: Deploys Bicep, builds/publishes API, deploys ZIP to Web App, creates federated credential, assigns app role, creates test users, uploads artifacts.
-* Smoke Tests: Downloads infra outputs, obtains application token (no delegated scopes), calls health endpoints (only `/health` requires auth) and records summary.
-* Destroy: Deletes ephemeral test users and resource group (asynchronously) when PR closes or merges.
-* Artifacts: `env-outputs.json`, `federation.json`, `test-users.json`, `smoke-results.json`.
+* **Provision**: Checks out repo; logs in via OIDC; resolves runner service principal objectId; creates resource group; deploys Bicep (identity + infrastructure); builds and publishes .NET 8 Minimal API; zips and deploys to App Service; assigns `Swagger.Admin` app role to tester group; creates ephemeral test users; uploads artifacts.
+* **Smoke Tests**: Downloads infra outputs; acquires a v2 access token using `<identifierUri>/.default` (fallback to `<clientId>/.default` if needed) ensuring correct issuer/audience; sources `SmokeTests.ps1` and runs `Invoke-EphemeralSmokeTests` to validate `/healthz` (role-gated via admin token), `/health` (any authenticated token), Key Vault access (RBAC), and Storage access (RBAC); generates a concise summary (auth/config and API/resource checks); outputs structured JSON and preserves artifacts even on failure.
+* **Destroy**: Triggered only when "Destroy" label is applied to the PR; downloads artifacts from `provision` job; logs in via OIDC; deletes test users; cleans up Graph objects (app role assignments, group, service principal, application); deletes resource group asynchronously.
+* **Artifacts**: `env-outputs.json` (Bicep outputs), `test-users.json` (ephemeral account credentials), `smoke-results.json` (test results structure).
+* **Triggers & Conditions**:
+  - Runs on PR `opened`, `reopened`, and `labeled` events.
+  - `provision` and `smoke-tests` run only on PR open/reopen (`github.event.action != 'labeled'`).
+  - `destroy` runs only when "Destroy" label is added (`github.event.action == 'labeled' && contains(...labels...*.name, 'Destroy')`).
+* **PR Merge Protection**: Configure branch protection rules in GitHub repository settings to require `provision` and `smoke-tests` status checks to pass before merging. This prevents merging until the pipeline completes successfully, ensuring resources are validated before integration. The pipeline can run independently of merge; resources persist until the "Destroy" label is applied.
 
 ## Clarification: App Roles & Swagger Scopes Are Demonstrative
 
@@ -65,11 +87,13 @@ The project intentionally provisions OAuth2 scopes and an app role to show how t
 2. Assigned programmatically (role to group) post-deployment.
 
 However:
-* CI pipelines do NOT depend on or validate `Swagger.Read` / `Swagger.Write` scopes today.
+* CI pipelines do NOT depend on or validate `Swagger.Read` / `Swagger.Write` scopes today (scope policy is illustrative).
 * The `/api/mock` and `/swagger` endpoints are not part of required automated tests.
-* Test users exist so a human reviewer (during the PR window) could optionally sign in (via a chosen flow outside this repo) and verify roles/scopes manually.
+* Test users exist so a human reviewer (during the PR window) could optionally sign in and verify roles/scopes manually.
 
-This matches your statement: automated testing focuses solely on `/health` (and basic `/healthz`) while scopes, roles, users, and group membership are illustrative identity automation artifacts.
+Automated testing focuses solely on:
+* Role claim propagation for `Swagger.Admin` (`/healthz` access).
+* Basic bearer auth wiring (`/health` access) with v2 tokens.
 
 ## Ephemeral Identity Lifecycle
 * Group always created (no conditional logic) simplifying downstream steps.
@@ -87,24 +111,33 @@ This matches your statement: automated testing focuses solely on `/health` (and 
 | Capability | Status | Notes |
 |------------|--------|-------|
 | App + SP creation via Graph Bicep | Implemented | Beta resource types; deterministic naming & tags |
-| Custom OAuth2 scopes (Swagger.Read/Write) | Implemented | Deterministic GUIDs |
+| Application audience URI (`identifierUris`) | Implemented | Deterministic `api://pr-<prNumber>-<uniqueSuffix>`; stable for token requests |
+| Custom OAuth2 scopes (Swagger.Read/Write) | Implemented | Deterministic GUIDs; declared in api.oauth2PermissionScopes |
 | Application role (Swagger.Admin) | Implemented | Assigned to tester group post-deploy |
-| Security group for test users | Implemented | Always created; objectId output |
-| Ephemeral test user creation & deletion | Implemented | Lifecycle integrated in workflow |
-| Federated credential (GitHub OIDC) | Implemented | Script-driven creation |
-| Web API deployment (zip) | Implemented | Minimal API .NET 8 | 
-| `/healthz` (no auth) & `/health` (auth) | Implemented | Smoke test covers both |
+| Security group for test users | Implemented | Always created; objectId output for member management |
+| Ephemeral test user creation & deletion | Implemented | Lifecycle integrated in workflow; pattern-based cleanup |
+| Web API deployment (zip) | Implemented | .NET 8 Minimal API with JWT Bearer auth |
+| `/healthz` (Swagger.Admin role) & `/health` (AnyAuthenticated) | Implemented | Smoke test covers role-gated + generic auth; returns status & user info |
+| `/api/mock` (Swagger.Read scope) | Implemented | Policy-protected; not exercised in smoke tests |
+| `/swagger` (Swagger.Admin role) | Implemented | Redirects to Swagger UI; protected by role; not tested in CI |
 | Scope or role-based automated tests | Not in scope | Intentional—manual exploration only |
-| Secure outputs for scope/role IDs | Implemented | `@secure()` in Bicep |
-| Artifact publication (env/test users/federation/smoke) | Implemented | For traceability |
-| Automatic per-PR teardown | Implemented | Resource group + users removed |
+| Secure outputs for scope/role IDs | Not in recent change | Can be re-added if log leakage is a concern |
+| Artifact publication (env/test users/smoke) | Implemented | JSON artifacts for traceability |
+| Per-PR resource lifecycle control | Implemented | Provision on PR open/reopen; destroy on "Destroy" label |
+| GitHub OIDC workload identity | Implemented | Runner SP auto-resolved and granted Key Vault access |
+| API audience wiring | Implemented | `appAudience` output used in App Service config and token acquisition |
+| StrictMode-compliant PowerShell | Implemented | Safe property checks; no null-conditional operator abuse |
+| Error-resilient smoke tests | Implemented | Missing API properties handled gracefully; summary generation continues |
 
 ## Potential Future Enhancements (Optional)
-* Add delegated token acquisition (device code) to validate `scp` claim presence (if you later want automated scope testing).
-* Implement preAuthorizedApplications in manifest for zero-consent user token acquisition.
-* Introduce TTL scan job to clean orphaned PR resource groups/users if a workflow run is interrupted.
-* Encrypt or secret-manage test user credentials (Key Vault + GitHub OIDC retrieval) for improved hygiene.
-* Pester tests for scripts (Mock Graph calls) + PSScriptAnalyzer configuration baseline.
+* Add delegated token acquisition (device code flow) to validate `scp` claim presence in user tokens (if you later want automated scope testing).
+* Implement preAuthorizedApplications in application manifest for zero-consent user token acquisition.
+* Introduce TTL scan job to clean orphaned PR resource groups/users if a workflow run is interrupted or "Destroy" label is never applied.
+* Encrypt or secret-manage test user credentials (Key Vault + GitHub OIDC retrieval) for improved hygiene; avoid emitting plaintext to artifacts.
+* Pester unit tests for PowerShell scripts (Mock Graph calls, test error paths).
+* PSScriptAnalyzer configuration file (`.pssad.json`) to suppress false positives and enforce coding standards.
+* Federated credential creation in Bicep (if Microsoft.Graph.federatedIdentityCredential@beta becomes available).
+* Conditional destroy (not just label-driven) to clean up on PR merge/close as fallback.
 
 ## Running Locally (Conceptual)
 The workflow automates end-to-end; local reproduction would require:

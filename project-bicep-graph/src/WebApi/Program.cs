@@ -8,26 +8,31 @@ var builder = WebApplication.CreateBuilder(args);
 // Configuration: AzureAd:TenantId, AzureAd:Audience (App ID URI or Client ID)
 var tenantId = builder.Configuration["AzureAd:TenantId"] ?? "";
 var audience = builder.Configuration["AzureAd:Audience"] ?? "";
+var clientId = builder.Configuration["AzureAd:ClientId"] ?? "";
 var authority = string.IsNullOrWhiteSpace(tenantId)
     ? null
     : $"https://login.microsoftonline.com/{tenantId}/v2.0";
 
 if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience))
 {
-    builder.Services
-        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    }).AddJwtBearer(options =>
+    {
+        options.Authority = authority;
+        options.TokenValidationParameters = new TokenValidationParameters
         {
-            options.Authority = authority;
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidAudience = audience,
-                ValidateAudience = true,
-                ValidateIssuer = true,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true
-            };
-        });
+            ValidAudiences = new[] { audience, clientId },
+            ValidateAudience = true,
+            ValidateIssuer = true,
+            ValidIssuer = $"https://login.microsoftonline.com/{tenantId}/v2.0",
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true
+        };
+    });
+
     builder.Services.AddAuthorization(options =>
     {
         // Scope-based policy (Swagger.Read)
@@ -47,7 +52,17 @@ if (!string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(audience
                 var rolesAlt = ctx.User.FindAll("roles").Select(c => c.Value).ToArray();
                 return roles.Contains("Swagger.Admin") || rolesAlt.Contains("Swagger.Admin");
             }));
+
+        // Generic authenticated policy for /health (any valid v2 token for this tenant)
+        options.AddPolicy("AnyAuthenticated", policy =>
+        {
+            policy.RequireAuthenticatedUser();
+        });
     });
+}
+else
+{
+    builder.Services.AddAuthorization();
 }
 
 builder.Services.AddEndpointsApiExplorer();
@@ -59,7 +74,7 @@ var app = builder.Build();
 app.UseSwagger();
 app.UseSwaggerUI();
 
-app.MapGet("/healthz", () => Results.Json(new
+var healthzEndpoint = app.MapGet("/healthz", () => Results.Json(new
 {
     status = "ok",
     time = DateTimeOffset.UtcNow.ToString("o"),
@@ -70,6 +85,8 @@ if (!string.IsNullOrWhiteSpace(authority))
 {
     app.UseAuthentication();
     app.UseAuthorization();
+
+    healthzEndpoint.RequireAuthorization("SwaggerAdmin");
 
     app.MapGet("/health", (ClaimsPrincipal user) =>
     {
@@ -82,7 +99,7 @@ if (!string.IsNullOrWhiteSpace(authority))
             name,
             audience = aud
         });
-    }).RequireAuthorization(new AuthorizeAttribute());
+    }).RequireAuthorization("AnyAuthenticated");
 
     // Mock data API (requires Swagger.Read)
     app.MapGet("/api/mock", () =>
