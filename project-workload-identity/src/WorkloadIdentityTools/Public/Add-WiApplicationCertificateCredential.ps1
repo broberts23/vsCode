@@ -27,26 +27,28 @@ Proof-of-possession JWT generated with existing key (required when existing key 
 .OUTPUTS
 Key credential object.
 #>
+
 Function Add-WiApplicationCertificateCredential {
-    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     [OutputType([psobject])]
     Param(
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F-]{36}$')][string]$ApplicationId,
         [Parameter(Mandatory)][ValidateScript({ Test-Path $_ })][string]$CertificatePath,
         [Parameter()][string]$DisplayName = 'RotatedCert',
         [Parameter()][DateTime]$EndDate = (Get-Date).ToUniversalTime().AddDays(180),
-        [Parameter()][ValidateSet('Verify','Sign')][string]$Usage = 'Verify',
-        [Parameter()][ValidateSet('AsymmetricX509Cert','X509CertAndPassword')][string]$Type = 'AsymmetricX509Cert',
+        [Parameter()][ValidateSet('Verify', 'Sign')][string]$Usage = 'Verify',
+        [Parameter()][ValidateSet('AsymmetricX509Cert', 'X509CertAndPassword')][string]$Type = 'AsymmetricX509Cert',
         [Parameter()][string]$Proof
     )
-    if ($PSCmdlet.ShouldProcess("App $ApplicationId","Add certificate credential $DisplayName")) {
+    if ($PSCmdlet.ShouldProcess("App $ApplicationId", "Add certificate credential $DisplayName")) {
         $bytes = [System.IO.File]::ReadAllBytes($CertificatePath)
         $keyB64 = [System.Convert]::ToBase64String($bytes)
         $keyCredential = @{ type = $Type; usage = $Usage; key = [System.Text.Encoding]::ASCII.GetBytes($keyB64); displayName = $DisplayName; endDateTime = $EndDate }
         $body = @{ keyCredential = $keyCredential; passwordCredential = $null; proof = $Proof }
         try {
             $result = Add-MgApplicationKey -ApplicationId $ApplicationId -BodyParameter $body
-        } catch {
+        }
+        catch {
             Throw "Failed to add application key: $($_.Exception.Message). Ensure proof parameter is supplied if required."
         }
         return $result

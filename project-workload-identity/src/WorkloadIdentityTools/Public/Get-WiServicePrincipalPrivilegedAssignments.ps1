@@ -17,7 +17,7 @@ Function Get-WiServicePrincipalPrivilegedAssignments {
     [CmdletBinding()] 
     [OutputType([psobject])]
     Param(
-        [Parameter()][string[]]$PrivilegedRoleNames = @('Global Administrator','Privileged Role Administrator','Application Administrator','Cloud Application Administrator','Directory Writers','User Administrator')
+        [Parameter()][string[]]$PrivilegedRoleNames = @('Global Administrator', 'Privileged Role Administrator', 'Application Administrator', 'Cloud Application Administrator', 'Directory Writers', 'User Administrator')
     )
     if (-not (Get-Command -Name Get-MgDirectoryRole -ErrorAction SilentlyContinue)) {
         Throw 'Get-MgDirectoryRole not available. Install Microsoft.Graph.DirectoryRoles module.'
@@ -30,12 +30,12 @@ Function Get-WiServicePrincipalPrivilegedAssignments {
         foreach ($m in $members) {
             if ($m.'@odata.type' -like '*servicePrincipal*') {
                 $results.Add([PSCustomObject]@{
-                    RoleId             = $role.Id
-                    RoleDisplayName    = $role.DisplayName
-                    ServicePrincipalId = $m.Id
-                    AppId              = $m.AppId
-                    DisplayName        = $m.DisplayName
-                })
+                        RoleId             = $role.Id
+                        RoleDisplayName    = $role.DisplayName
+                        ServicePrincipalId = $m.Id
+                        AppId              = $m.AppId
+                        DisplayName        = $m.DisplayName
+                    })
             }
         }
     }

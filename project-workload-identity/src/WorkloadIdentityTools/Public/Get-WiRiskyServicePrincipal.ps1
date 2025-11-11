@@ -21,11 +21,13 @@ Function Get-WiRiskyServicePrincipal {
         try {
             $sp = Get-MgIdentityProtectionRiskyServicePrincipal
             return $sp
-        } catch {
+        }
+        catch {
             Write-Warning "Failed to retrieve risky service principals: $($_.Exception.Message)"
             return @()
         }
-    } else {
+    }
+    else {
         Write-Warning 'Get-MgIdentityProtectionRiskyServicePrincipal not found. Ensure Microsoft.Graph.Identity.SignIns (beta) module installed.'
         return @()
     }

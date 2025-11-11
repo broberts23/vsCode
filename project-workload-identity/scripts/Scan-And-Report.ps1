@@ -2,10 +2,11 @@
 #Requires -Version 7.4
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-<#!
+<#
 .SYNOPSIS
 Run a full workload identity scan and generate JSON/CSV outputs.
-#!>
+#>
+
 [CmdletBinding()] Param(
     [Parameter(Mandatory)][string]$TenantId,
     [Parameter()][string[]]$Scopes = @('Application.Read.All','Directory.Read.All'),

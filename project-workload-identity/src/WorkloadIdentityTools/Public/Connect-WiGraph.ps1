@@ -38,7 +38,8 @@ Function Connect-WiGraph {
     Test-ModulePresent -Name 'Microsoft.Graph'
     try {
         $connection = Connect-MgGraph -Scopes $Scopes -TenantId $TenantId
-    } catch {
+    }
+    catch {
         Throw "Failed to connect to Graph: $($_.Exception.Message)"
     }
     if (-not $NoWelcome) {

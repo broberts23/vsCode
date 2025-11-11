@@ -45,7 +45,7 @@ Function Get-WiApplicationCredentialInventory {
             CredentialType  = $CredentialType
             StartDate       = $StartDate
             EndDate         = $EndDate
-            DaysUntilExpiry = if ($EndDate) { [math]::Round(($EndDate - (Get-Date)).TotalDays,0) } else { $null }
+            DaysUntilExpiry = if ($EndDate) { [math]::Round(($EndDate - (Get-Date)).TotalDays, 0) } else { $null }
             LongLived       = if ($EndDate -and $StartDate) { ($EndDate - $StartDate).TotalDays -gt 180 } else { $false }
             NearExpiry      = if ($EndDate) { ($EndDate - (Get-Date)).TotalDays -lt 30 } else { $false }
             RiskLevel       = $RiskLevel
@@ -57,7 +57,8 @@ Function Get-WiApplicationCredentialInventory {
         if ($Filter) { $params.Filter = $Filter }
         if ($All) { $params.All = $true }
         $apps = Get-MgApplication @params
-    } catch {
+    }
+    catch {
         Throw "Failed to retrieve applications: $($_.Exception.Message)"
     }
     $results = New-Object System.Collections.Generic.List[object]

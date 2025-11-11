@@ -24,7 +24,7 @@ Audience; default api://AzureADTokenExchange per docs.
 Federated identity credential object.
 #>
 Function New-WiFederatedCredential {
-    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     [OutputType([psobject])]
     Param(
         [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F-]{36}$')][string]$ApplicationId,
@@ -33,11 +33,12 @@ Function New-WiFederatedCredential {
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$Subject,
         [Parameter()][ValidateNotNullOrEmpty()][string]$Audience = 'api://AzureADTokenExchange'
     )
-    if ($PSCmdlet.ShouldProcess("App $ApplicationId","Add federated credential $Name")) {
+    if ($PSCmdlet.ShouldProcess("App $ApplicationId", "Add federated credential $Name")) {
         $body = @{ name = $Name; issuer = $Issuer; subject = $Subject; audiences = @($Audience) }
         try {
             $fid = New-MgApplicationFederatedIdentityCredential -ApplicationId $ApplicationId -BodyParameter $body
-        } catch {
+        }
+        catch {
             Throw "Failed to create federated credential: $($_.Exception.Message)"
         }
         return $fid
