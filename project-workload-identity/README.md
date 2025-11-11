@@ -1,65 +1,98 @@
-# Workload Identity Automation — federated workload IDs + CI/CD integration
+# Workload Identity Risk and Remediation Toolkit
 
-Summary
--------
-Replace long-lived service principal secrets with federated workload identities for GitHub Actions and AKS workloads. Show how to create federated credentials, configure OIDC flows from GitHub and Kubernetes workloads, and validate secretless access patterns across CI/CD and runtime.
+This project provides a PowerShell 7.4 toolkit to help organizations locate and remediate high-risk Microsoft Entra applications and service principals, and to implement workload identity lifecycle management (WILM). It aligns with Microsoft Learn guidance for protecting identities, secrets, engineering systems, and monitoring risky workload identities.
 
-Key Entra docs
--------------
-- Workload Identity Federation overview: https://learn.microsoft.com/en-us/azure/active-directory/workload-identities/workload-identity-federation-overview
+Source guidance: Configure Microsoft Entra for increased security (Protect identities and secrets)
+https://learn.microsoft.com/entra/fundamentals/configure-security#protect-identities-and-secrets
 
-Technologies
-------------
-- Bicep for app registrations and federated credentials
-- GitHub Actions OIDC provider configuration
-- AKS Workload Identity (aad-pod-identity replacement) or Azure AD Workload Identity integration
-- PowerShell or bash scripts for validation
+## Objectives
+1. Discover risky workload identities (applications and service principals) and credential posture.
+2. Inventory client secrets, certificates, expirations, rotation intervals, and flag long-lived (>180 days) or near-expiring (<30 days) credentials.
+3. Recommend and assist migration from client secrets to federated identity credentials or short-lived certificates.
+4. Detect and report privileged role assignments and high-privilege Microsoft Graph permissions (Directory.ReadWrite.All, Application.ReadWrite.All, etc.).
+5. Assess tenant consent posture (user consent restrictions, admin consent workflow, authorization policy settings).
+6. Produce machine-readable JSON/CSV reports, plus an optional remediation plan artifact.
+7. Provide helper cmdlets to add federated identity credentials and certificate-based credentials, encouraging secretless patterns.
 
-Deliverables
-------------
-- `infra/` Bicep templates that create app registrations and federated credentials
-- `ci/` GitHub Actions example using OIDC to obtain tokens
-- `k8s/` example manifests for AKS workload identity and demo pod
-- `scripts/` validation scripts that confirm tokens and permissions
+## Module Overview
+Module name: `WorkloadIdentityTools`
 
-Implementation steps (expanded)
--------------------------------
-1. Plan target trust relationships
-   - Decide which actors will be trusted: GitHub repositories (repo-level OIDC), a GitHub organization, and AKS service accounts.
-   - Define required app roles or resource scopes the workloads will need.
+Public cmdlets (initial wave):
+| Cmdlet | Purpose |
+|--------|---------|
+| Connect-WiGraph | Auth wrapper for Microsoft Graph with explicit scopes. |
+| Get-WiRiskyServicePrincipal | Retrieve risky service principals (Identity Protection). |
+| Get-WiApplicationCredentialInventory | Inventory app secrets & certs, compute risk scores. |
+| Get-WiServicePrincipalPrivilegedAssignments | Identify privileged directory role assignments. |
+| Get-WiHighPrivilegeAppPermissions | Flag applications with high-privilege app permissions. |
+| Get-WiTenantConsentSettings | Report consent and authorization policy posture. |
+| New-WiFederatedCredential | Create federated identity credentials (OIDC workload identity). |
+| Add-WiApplicationCertificateCredential | Add/rotate certificate credentials (short-lived). |
 
-2. Bicep to create App Registration and Federated Credential (infra/)
-   - Create an App Registration for the demo application and add federated credentials using the Microsoft Graph or Bicep resource types.
-   - Emit values that the CI and AKS manifests will consume (clientId, tenantId, federated credential IDs).
+> Note: Some Microsoft Graph Identity Protection workload identity risk APIs are in preview; when beta endpoints are required, prefer Microsoft.Graph.Beta modules with clear preview disclaimers.
 
-3. GitHub Actions OIDC login (ci/)
-   - Create a sample workflow that uses the `azure/login` action with `client-id` and `tenant-id` replaced by federated app values to obtain tokens via OIDC — no secrets stored.
-   - Demonstrate using the token to run az CLI commands or to call Azure REST APIs.
+## Key Microsoft Learn References
+Authentication: Connect-MgGraph — https://learn.microsoft.com/powershell/microsoftgraph/authentication/connect-mggraph?view=graph-powershell-1.0
+Applications: Get-MgApplication — https://learn.microsoft.com/powershell/module/microsoft.graph.applications/get-mgapplication?view=graph-powershell-1.0
+Federated Credentials: New-MgApplicationFederatedIdentityCredential — https://learn.microsoft.com/powershell/module/microsoft.graph.applications/new-mgapplicationfederatedidentitycredential?view=graph-powershell-1.0
+Add Certificate Key: Add-MgApplicationKey — https://learn.microsoft.com/powershell/module/microsoft.graph.applications/add-mgapplicationkey?view=graph-powershell-1.0
+Authorization Policy (Consent): Get-MgPolicyAuthorizationPolicy — https://learn.microsoft.com/powershell/module/microsoft.graph.identity.signins/get-mgpolicyauthorizationpolicy?view=graph-powershell-1.0
 
-4. AKS workload integration (k8s/)
-   - Provide manifests showing how to create a Kubernetes ServiceAccount bound to an Azure federated credential and a sample pod that requests a token to access Key Vault or Storage.
+## Permissions (Least Privilege Baselines)
+Read-only discovery:
+- Application.Read.All, Directory.Read.All, Policy.Read.All, AuditLog.Read.All (optional), IdentityRiskyServicePrincipal.Read.All (preview)
 
-5. Validation scripts (scripts/)
-   - Add scripts that verify the token is valid, review claims (iss/aud/exp), and call Microsoft Graph or Azure Resource Manager to perform a read/write action.
+Remediation (adding credentials, migrations):
+- Application.ReadWrite.All (or Application.ReadWrite.OwnedBy where feasible)
+- Policy.ReadWrite.Authorization (if adjusting consent settings)
 
-6. Documentation and migration guidance
-   - Include migration notes showing how to transition from service principals to workload identity, how to remove secrets, and how to audit and roll back if needed.
+Privileged role and app permission enumeration may require Directory.Read.All.
 
-7. Tests and CI
-   - Unit-test any helper scripts and create an end-to-end GitHub Action that runs the OIDC login and performs a simple ARM read operation.
+## Security Principles
+- Prefer managed identities or certificate-based service principals for automation pipelines.
+- Avoid client secrets; migrate to federated credentials (OIDC) or short-lived certificates.
+- Ensure periodic rotation (<180 days) and queue proactive rotation if <30 days remaining.
+- No secrets stored in code. Use SecretManagement: https://learn.microsoft.com/powershell/utility-modules/secretmanagement/overview
+- Enforce user/admin consent restrictions per guidance.
 
-Demo / validation
------------------
-- Show a GitHub Action that performs an ARM deployment using OIDC without secrets and an AKS pod that reads a secret from Key Vault using workload identity.
+## Quick Start
+```powershell
+#!/usr/bin/env pwsh
+Requires -Version 7.4
+Import-Module ./src/WorkloadIdentityTools/WorkloadIdentityTools.psd1
+Connect-WiGraph -Scopes @('Application.Read.All','Directory.Read.All') -TenantId '00000000-0000-0000-0000-000000000000'
+$inventory = Get-WiApplicationCredentialInventory -All
+$inventory | Where-Object { $_.RiskLevel -eq 'High' } | Format-Table DisplayName, CredentialType, DaysUntilExpiry, RiskReasons
+```
 
-Estimated effort
-----------------
-- MVP: 3–6 days.
+## Report Outputs
+`Get-WiApplicationCredentialInventory` returns objects with fields:
+- ApplicationId, DisplayName
+- CredentialId, CredentialType (Secret|Certificate|Federated)
+- StartDate, EndDate, DaysUntilExpiry
+- LongLived (bool), NearExpiry (bool)
+- RiskLevel (None|Low|Medium|High)
+- RiskReasons (string[])
 
-Why this fits your portfolio
----------------------------
-This project directly extends your API Authentication and AKS posts and demonstrates modern, secretless authentication techniques that are highly sought after.
+## Remediation Patterns
+1. Replace client secret with federated credential (GitHub Actions, Azure Workload Identity Federation, etc.).
+2. Shorten certificate lifetime; enforce rotation pipeline (Add-WiApplicationCertificateCredential).
+3. Remove unused/high-privilege app permissions.
+4. Remove privileged role assignments from workload identities (use PIM activation JIT, outside scope here but flagged).
 
-Next steps
-----------
-- I can scaffold `infra/`, `ci/`, `k8s/` and `scripts/` with stub files and a working sample GitHub Actions workflow.
+## Roadmap (Next Iterations)
+- Integration with Identity Protection risky workload identity APIs (beta) and risk triage automation.
+- Advanced consent policy diff & recommended settings output.
+- Optional Bicep IaC for federated credential onboarding pipelines.
+- Pester test expansion with Mocks for Graph cmdlets.
+- CSV and markdown executive summary generation.
+
+## Testing
+Basic Pester tests validate exported functions and risk scoring logic. Extend with Mocks for Graph calls.
+Pester docs: https://learn.microsoft.com/powershell/scripting/testing/overview?view=powershell-7.4
+
+## Disclaimer
+Preview or beta Graph endpoints are subject to change. Always validate in a test tenant before production rollout. Apply least privilege and comply with organizational security policies.
+
+## License
+MIT
