@@ -27,6 +27,13 @@ Write-Information 'Collecting consent settings...' -InformationAction Continue
 $consent = Get-WiTenantConsentSettings
 Write-Information 'Collecting risky service principals (if available)...' -InformationAction Continue
 $risky = Get-WiRiskyServicePrincipal
+Write-Information 'Collecting beta risky workload triage (if permissions allow)...' -InformationAction Continue
+try {
+    $riskyTriage = Get-WiRiskyServicePrincipalTriageReport
+} catch {
+    Write-Verbose "Beta triage unavailable: $($_.Exception.Message)"
+    $riskyTriage = $null
+}
 
 $summary = [PSCustomObject]@{
     Timestamp = (Get-Date).ToUniversalTime()
@@ -45,6 +52,7 @@ $privRoles | ConvertTo-Json -Depth 4 | Out-File (Join-Path $OutputPath 'privileg
 $hiPerms | ConvertTo-Json -Depth 4 | Out-File (Join-Path $OutputPath 'high-privilege-app-permissions.json') -Encoding UTF8
 $consent | ConvertTo-Json -Depth 4 | Out-File (Join-Path $OutputPath 'consent-settings.json') -Encoding UTF8
 $risky | ConvertTo-Json -Depth 4 | Out-File (Join-Path $OutputPath 'risky-service-principals.json') -Encoding UTF8
+$riskyTriage | ConvertTo-Json -Depth 6 | Out-File (Join-Path $OutputPath 'risky-service-principal-triage.json') -Encoding UTF8
 $summary | ConvertTo-Json -Depth 4 | Out-File (Join-Path $OutputPath 'scan-summary.json') -Encoding UTF8
 
 Write-Information "Scan complete. Output saved to $OutputPath" -InformationAction Continue

@@ -31,6 +31,24 @@ Public cmdlets (initial wave):
 
 > Note: Some Microsoft Graph Identity Protection workload identity risk APIs are in preview; when beta endpoints are required, prefer Microsoft.Graph.Beta modules with clear preview disclaimers.
 
+Preview/beta risky workload identity cmdlets:
+| Cmdlet | Purpose |
+|--------|---------|
+| Get-WiBetaRiskyServicePrincipal | List risky workload identities (beta). Docs: https://learn.microsoft.com/en-us/graph/api/identityprotectionroot-list-riskyserviceprincipals?view=graph-rest-beta |
+| Get-WiBetaRiskyServicePrincipalHistory | Get risk history for a risky service principal (beta). Docs: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-list-history?view=graph-rest-beta |
+| Confirm-WiRiskyServicePrincipalCompromised | Mark service principals as compromised (beta). Docs: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-confirmcompromised?view=graph-rest-beta |
+| Dismiss-WiRiskyServicePrincipal | Dismiss risk for service principals (beta). Docs: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-dismiss?view=graph-rest-beta |
+| Get-WiRiskyServicePrincipalTriageReport | Build a triage summary for risky workload identities. |
+
+Approved-verb wrappers (preferred):
+| Cmdlet | Purpose |
+|--------|---------|
+| Set-WiRiskyServicePrincipalCompromised | Preferred wrapper for confirming compromised risky SPs (replaces Confirm-WiRiskyServicePrincipalCompromised). |
+| Clear-WiRiskyServicePrincipalRisk | Preferred wrapper for dismissing risk (replaces Dismiss-WiRiskyServicePrincipal). |
+
+Deprecation notice:
+- Confirm-WiRiskyServicePrincipalCompromised and Dismiss-WiRiskyServicePrincipal are deprecated and will be removed in a future release. Use the approved-verb wrappers above.
+
 ## Key Microsoft Learn References
 Authentication: Connect-MgGraph — https://learn.microsoft.com/powershell/microsoftgraph/authentication/connect-mggraph?view=graph-powershell-1.0
 Applications: Get-MgApplication — https://learn.microsoft.com/powershell/module/microsoft.graph.applications/get-mgapplication?view=graph-powershell-1.0
@@ -43,6 +61,9 @@ Read-only discovery:
 - Application.Read.All, Directory.Read.All, Policy.Read.All, AuditLog.Read.All (optional), IdentityRiskyServicePrincipal.Read.All (preview)
 
 Remediation (adding credentials, migrations):
+Risk actions (beta risky workload identities):
+- IdentityRiskyServicePrincipal.Read.All for read. For actions: IdentityRiskyServicePrincipal.ReadWrite.All. Supported roles include Security Administrator (for actions) and Security Reader/Operator/Global Reader (for read). See: list riskyServicePrincipals (beta) permissions: https://learn.microsoft.com/en-us/graph/api/identityprotectionroot-list-riskyserviceprincipals?view=graph-rest-beta#permissions and confirmCompromised: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-confirmcompromised?view=graph-rest-beta#permissions
+
 - Application.ReadWrite.All (or Application.ReadWrite.OwnedBy where feasible)
 - Policy.ReadWrite.Authorization (if adjusting consent settings)
 
@@ -63,6 +84,11 @@ Import-Module ./src/WorkloadIdentityTools/WorkloadIdentityTools.psd1
 Connect-WiGraph -Scopes @('Application.Read.All','Directory.Read.All') -TenantId '00000000-0000-0000-0000-000000000000'
 $inventory = Get-WiApplicationCredentialInventory -All
 $inventory | Where-Object { $_.RiskLevel -eq 'High' } | Format-Table DisplayName, CredentialType, DaysUntilExpiry, RiskReasons
+
+# Risky workload identities (beta)
+Connect-WiGraph -Scopes @('IdentityRiskyServicePrincipal.Read.All') -TenantId '00000000-0000-0000-0000-000000000000'
+$triage = Get-WiRiskyServicePrincipalTriageReport
+$triage.Distribution.ByRiskLevel | Format-Table
 ```
 
 ## Report Outputs
