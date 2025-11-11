@@ -8,8 +8,8 @@ Describe 'Risky Service Principal Triage Report' {
         InModuleScope WorkloadIdentityTools {
             Mock -CommandName Get-WiBetaRiskyServicePrincipal -MockWith {
                 @(
-                    [PSCustomObject]@{ Id='1'; DisplayName='App1'; AppId='a1'; RiskLevel='high'; RiskState='atRisk'; RiskDetail='none'; RiskLastUpdatedDateTime=(Get-Date) },
-                    [PSCustomObject]@{ Id='2'; DisplayName='App2'; AppId='a2'; RiskLevel='low'; RiskState='dismissed'; RiskDetail='none'; RiskLastUpdatedDateTime=(Get-Date).AddDays(-1) }
+                    [PSCustomObject]@{ Id = '1'; DisplayName = 'App1'; AppId = 'a1'; RiskLevel = 'high'; RiskState = 'atRisk'; RiskDetail = 'none'; RiskLastUpdatedDateTime = (Get-Date) },
+                    [PSCustomObject]@{ Id = '2'; DisplayName = 'App2'; AppId = 'a2'; RiskLevel = 'low'; RiskState = 'dismissed'; RiskDetail = 'none'; RiskLastUpdatedDateTime = (Get-Date).AddDays(-1) }
                 )
             }
             $report = Get-WiRiskyServicePrincipalTriageReport

@@ -16,7 +16,7 @@ Docs:
 - dismiss (beta): https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-dismiss?view=graph-rest-beta
 #>
 Function Dismiss-WiRiskyServicePrincipal {
-    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     Param(
         [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)][ValidateNotNullOrEmpty()][string[]]$ServicePrincipalId
     )
@@ -27,7 +27,7 @@ Function Dismiss-WiRiskyServicePrincipal {
     Process { $ServicePrincipalId | ForEach-Object { $buffer.Add($_) } }
     End {
         if ($buffer.Count -eq 0) { return }
-        if ($PSCmdlet.ShouldProcess("$($buffer.Count) service principals","Dismiss risk")) {
+        if ($PSCmdlet.ShouldProcess("$($buffer.Count) service principals", "Dismiss risk")) {
             $body = @{ servicePrincipalIds = $buffer.ToArray() }
             Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/beta/identityProtection/riskyServicePrincipals/dismiss' -Body ($body | ConvertTo-Json) -ContentType 'application/json' -ErrorAction Stop | Out-Null
         }

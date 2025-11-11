@@ -18,8 +18,6 @@
         'Add-WiApplicationCertificateCredential',
         'Get-WiBetaRiskyServicePrincipal',
         'Get-WiBetaRiskyServicePrincipalHistory',
-        'Confirm-WiRiskyServicePrincipalCompromised',
-        'Dismiss-WiRiskyServicePrincipal',
         'Set-WiRiskyServicePrincipalCompromised',
         'Clear-WiRiskyServicePrincipalRisk',
         'Get-WiRiskyServicePrincipalTriageReport'

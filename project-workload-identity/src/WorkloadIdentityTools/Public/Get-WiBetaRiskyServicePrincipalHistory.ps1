@@ -31,13 +31,13 @@ Function Get-WiBetaRiskyServicePrincipalHistory {
         $resp = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
         foreach ($v in $resp.value) {
             $items.Add([PSCustomObject]@{
-                RiskLevel               = $v.riskLevel
-                RiskState               = $v.riskState
-                RiskDetail              = $v.riskDetail
-                RiskLastUpdatedDateTime = $v.riskLastUpdatedDateTime
-                Activity                = $v.activity
-                InitiatedBy             = $v.initiatedBy
-            })
+                    RiskLevel               = $v.riskLevel
+                    RiskState               = $v.riskState
+                    RiskDetail              = $v.riskDetail
+                    RiskLastUpdatedDateTime = $v.riskLastUpdatedDateTime
+                    Activity                = $v.activity
+                    InitiatedBy             = $v.initiatedBy
+                })
         }
         $uri = $resp.'@odata.nextLink'
     } while ($uri)

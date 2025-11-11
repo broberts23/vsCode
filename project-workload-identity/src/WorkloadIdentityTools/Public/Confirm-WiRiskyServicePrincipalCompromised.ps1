@@ -16,7 +16,7 @@ Docs:
 - confirmCompromised (beta): https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-confirmcompromised?view=graph-rest-beta
 #>
 Function Confirm-WiRiskyServicePrincipalCompromised {
-    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     Param(
         [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)][ValidateNotNullOrEmpty()][string[]]$ServicePrincipalId
     )
@@ -27,7 +27,7 @@ Function Confirm-WiRiskyServicePrincipalCompromised {
     Process { $ServicePrincipalId | ForEach-Object { $buffer.Add($_) } }
     End {
         if ($buffer.Count -eq 0) { return }
-        if ($PSCmdlet.ShouldProcess("$($buffer.Count) service principals","Confirm compromised")) {
+        if ($PSCmdlet.ShouldProcess("$($buffer.Count) service principals", "Confirm compromised")) {
             $body = @{ servicePrincipalIds = $buffer.ToArray() }
             Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/beta/identityProtection/riskyServicePrincipals/confirmCompromised' -Body ($body | ConvertTo-Json) -ContentType 'application/json' -ErrorAction Stop | Out-Null
         }

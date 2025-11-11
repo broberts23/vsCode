@@ -26,8 +26,8 @@ Function Get-WiBetaRiskyServicePrincipal {
     [CmdletBinding()] 
     [OutputType([psobject])]
     Param(
-        [Parameter()][ValidateSet('low','medium','high','hidden','none')][string]$RiskLevel,
-        [Parameter()][ValidateSet('none','confirmedSafe','remediated','dismissed','atRisk','confirmedCompromised')][string]$RiskState
+        [Parameter()][ValidateSet('low', 'medium', 'high', 'hidden', 'none')][string]$RiskLevel,
+        [Parameter()][ValidateSet('none', 'confirmedSafe', 'remediated', 'dismissed', 'atRisk', 'confirmedCompromised')][string]$RiskState
     )
     $base = 'https://graph.microsoft.com/beta/identityProtection/riskyServicePrincipals'
     $filters = @()
@@ -41,17 +41,17 @@ Function Get-WiBetaRiskyServicePrincipal {
         $value = $resp.value
         foreach ($v in $value) {
             $items.Add([PSCustomObject]@{
-                Id                        = $v.id
-                DisplayName               = $v.displayName
-                AppId                     = $v.appId
-                RiskLevel                 = $v.riskLevel
-                RiskState                 = $v.riskState
-                RiskDetail                = $v.riskDetail
-                RiskLastUpdatedDateTime   = $v.riskLastUpdatedDateTime
-                AccountEnabled            = $v.accountEnabled
-                IsProcessing              = $v.isProcessing
-                ServicePrincipalType      = $v.servicePrincipalType
-            })
+                    Id                      = $v.id
+                    DisplayName             = $v.displayName
+                    AppId                   = $v.appId
+                    RiskLevel               = $v.riskLevel
+                    RiskState               = $v.riskState
+                    RiskDetail              = $v.riskDetail
+                    RiskLastUpdatedDateTime = $v.riskLastUpdatedDateTime
+                    AccountEnabled          = $v.accountEnabled
+                    IsProcessing            = $v.isProcessing
+                    ServicePrincipalType    = $v.servicePrincipalType
+                })
         }
         $uri = $resp.'@odata.nextLink'
     } while ($uri)

@@ -20,8 +20,8 @@ Function Get-WiRiskyServicePrincipalTriageReport {
     if (-not $risky) { $risky = @() }
     elseif ($risky -isnot [System.Collections.IEnumerable]) { $risky = @($risky) }
     $total = ($risky | Measure-Object).Count
-    $byLevel = if ($total -gt 0) { $risky | Group-Object RiskLevel | ForEach-Object { [PSCustomObject]@{ RiskLevel=$_.Name; Count=$_.Count } } } else { @() }
-    $byState = if ($total -gt 0) { $risky | Group-Object RiskState | ForEach-Object { [PSCustomObject]@{ RiskState=$_.Name; Count=$_.Count } } } else { @() }
+    $byLevel = if ($total -gt 0) { $risky | Group-Object RiskLevel | ForEach-Object { [PSCustomObject]@{ RiskLevel = $_.Name; Count = $_.Count } } } else { @() }
+    $byState = if ($total -gt 0) { $risky | Group-Object RiskState | ForEach-Object { [PSCustomObject]@{ RiskState = $_.Name; Count = $_.Count } } } else { @() }
     $topHigh = if ($total -gt 0) { $risky | Where-Object { $_.RiskLevel -eq 'high' } | Sort-Object RiskLastUpdatedDateTime -Descending | Select-Object -First 50 Id, DisplayName, AppId, RiskLevel, RiskState, RiskDetail, RiskLastUpdatedDateTime } else { @() }
     $recs = @()
     if ($total -gt 0) {
@@ -30,12 +30,12 @@ Function Get-WiRiskyServicePrincipalTriageReport {
         if ((($risky | Where-Object { $_.RiskState -eq 'confirmedCompromised' }) | Measure-Object).Count -gt 0) { $recs += 'Ensure remediations complete: rotate creds, remove unnecessary permissions, enforce CA policies.' }
     }
     return [PSCustomObject]@{
-        Summary = [PSCustomObject]@{ Total=$total }
-        Distribution = [PSCustomObject]@{
+        Summary         = [PSCustomObject]@{ Total = $total }
+        Distribution    = [PSCustomObject]@{
             ByRiskLevel = $byLevel
             ByRiskState = $byState
         }
-        TopHighRisk = $topHigh
+        TopHighRisk     = $topHigh
         Recommendations = $recs
     }
 }

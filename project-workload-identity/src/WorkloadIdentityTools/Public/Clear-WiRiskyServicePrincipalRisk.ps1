@@ -9,7 +9,7 @@ Calls underlying Dismiss-WiRiskyServicePrincipal for backward compatibility.
 Use this cmdlet instead of the deprecated Dismiss-WiRiskyServicePrincipal.
 #>
 Function Clear-WiRiskyServicePrincipalRisk {
-    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='Medium')]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     Param(
         [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)][ValidateNotNullOrEmpty()][string[]]$ServicePrincipalId
     )

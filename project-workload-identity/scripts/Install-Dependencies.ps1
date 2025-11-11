@@ -23,7 +23,8 @@ Install-IfMissing -Name Microsoft.Graph -Version '2.14.0'
 try {
     Install-IfMissing -Name Microsoft.Graph.Beta -Version '2.14.0'
     Write-Information 'Installed Microsoft.Graph.Beta (preview APIs subject to change).' -InformationAction Continue
-} catch {
+}
+catch {
     Write-Warning "Failed to install Microsoft.Graph.Beta: $($_.Exception.Message)"
 }
 Write-Information 'Module installation complete.' -InformationAction Continue

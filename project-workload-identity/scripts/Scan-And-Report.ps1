@@ -9,7 +9,7 @@ Run a full workload identity scan and generate JSON/CSV outputs.
 
 [CmdletBinding()] Param(
     [Parameter(Mandatory)][string]$TenantId,
-    [Parameter()][string[]]$Scopes = @('Application.Read.All','Directory.Read.All'),
+    [Parameter()][string[]]$Scopes = @('Application.Read.All', 'Directory.Read.All'),
     [Parameter()][string]$OutputPath = './out'
 )
 Import-Module (Join-Path $PSScriptRoot '../src/WorkloadIdentityTools/WorkloadIdentityTools.psd1')
@@ -30,7 +30,8 @@ $risky = Get-WiRiskyServicePrincipal
 Write-Information 'Collecting beta risky workload triage (if permissions allow)...' -InformationAction Continue
 try {
     $riskyTriage = Get-WiRiskyServicePrincipalTriageReport
-} catch {
+}
+catch {
     Write-Verbose "Beta triage unavailable: $($_.Exception.Message)"
     $riskyTriage = $null
 }
@@ -39,7 +40,7 @@ $summary = [PSCustomObject]@{
     Timestamp = (Get-Date).ToUniversalTime()
     TenantId  = $TenantId
     Counts    = [PSCustomObject]@{
-        Credentials = $inventory.Count
+        Credentials                 = $inventory.Count
         PrivilegedServicePrincipals = $privRoles.Count
         HighPrivilegeApplications   = $hiPerms.Count
         RiskyServicePrincipals      = ($risky | Measure-Object).Count

@@ -5,7 +5,7 @@ Import-Module (Join-Path $PSScriptRoot '../../src/WorkloadIdentityTools/Workload
 
 Describe 'Module Load' {
     It 'Exports expected functions' {
-    $expected = 'Connect-WiGraph','Get-WiRiskyServicePrincipal','Get-WiApplicationCredentialInventory','Get-WiServicePrincipalPrivilegedAssignments','Get-WiHighPrivilegeAppPermissions','Get-WiTenantConsentSettings','New-WiFederatedCredential','Add-WiApplicationCertificateCredential','Get-WiBetaRiskyServicePrincipal','Get-WiBetaRiskyServicePrincipalHistory','Confirm-WiRiskyServicePrincipalCompromised','Dismiss-WiRiskyServicePrincipal','Set-WiRiskyServicePrincipalCompromised','Clear-WiRiskyServicePrincipalRisk','Get-WiRiskyServicePrincipalTriageReport'
+        $expected = 'Connect-WiGraph', 'Get-WiRiskyServicePrincipal', 'Get-WiApplicationCredentialInventory', 'Get-WiServicePrincipalPrivilegedAssignments', 'Get-WiHighPrivilegeAppPermissions', 'Get-WiTenantConsentSettings', 'New-WiFederatedCredential', 'Add-WiApplicationCertificateCredential', 'Get-WiBetaRiskyServicePrincipal', 'Get-WiBetaRiskyServicePrincipalHistory', 'Set-WiRiskyServicePrincipalCompromised', 'Clear-WiRiskyServicePrincipalRisk', 'Get-WiRiskyServicePrincipalTriageReport'
         foreach ($fn in $expected) { (Get-Command -Name $fn -ErrorAction Stop) | Should -Not -BeNullOrEmpty }
     }
 }

@@ -9,7 +9,7 @@ Calls underlying Confirm-WiRiskyServicePrincipalCompromised for backward compati
 Use this cmdlet instead of the deprecated Confirm-WiRiskyServicePrincipalCompromised.
 #>
 Function Set-WiRiskyServicePrincipalCompromised {
-    [CmdletBinding(SupportsShouldProcess=$true, ConfirmImpact='High')]
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     Param(
         [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)][ValidateNotNullOrEmpty()][string[]]$ServicePrincipalId
     )
