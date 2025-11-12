@@ -5,29 +5,43 @@
         "location": {
             "value": "eastus"
         },
-        "containerGroupName": {
-            "value": "gh-runner-cg"
+        "baseName": {
+            "value": "gh-runner"
+        },
+        "tags": {
+            "value": {
+                "project": "github-runner"
+            }
         },
         "containerImage": {
-            "value": "ghcr.io/actions/runner:latest"
+            "value": "ghcr.io/myorg/github-runner:1.0.0"
         },
-        "cpuCores": {
-            "value": 1
+        "containerCpu": {
+            "value": "2.0"
         },
-        "memoryInGb": {
-            "value": 2
+        "containerMemory": {
+            "value": "4Gi"
         },
-        "containerEnv": {
-            "value": [
-                {
-                    "name": "RUNNER_NAME",
-                    "value": "gha-runner"
-                },
-                {
-                    "name": "RUNNER_LABELS",
-                    "value": "self-hosted,azure"
-                }
-            ]
+        "runnerLabels": {
+            "value": "self-hosted,azure-container-apps"
+        },
+        "githubOwner": {
+            "value": "myorg"
+        },
+        "githubRepo": {
+            "value": "my-repository"
+        },
+        "githubPatSecretValue": {
+            "value": "<replace-with-secure-pat>"
+        },
+        "deployContainerRegistry": {
+            "value": true
+        },
+        "acrName": {
+            "value": "ghrunneracr1234"
+        },
+        "acrSku": {
+            "value": "Standard"
         }
     }
 }

@@ -1,0 +1,824 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.38.33.27573",
+      "templateHash": "7463900000920114237"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "metadata": {
+        "description": "Azure region for all resources."
+      }
+    },
+    "baseName": {
+      "type": "string",
+      "defaultValue": "gh-runner",
+      "metadata": {
+        "description": "Project-friendly base name used for resource naming."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags applied to all resources."
+      }
+    },
+    "logAnalyticsRetentionInDays": {
+      "type": "int",
+      "defaultValue": 30,
+      "metadata": {
+        "description": "Retention in days for Log Analytics workspace."
+      }
+    },
+    "containerAppEnvironmentName": {
+      "type": "string",
+      "defaultValue": "[format('{0}-env', parameters('baseName'))]",
+      "metadata": {
+        "description": "Name for Container Apps managed environment."
+      }
+    },
+    "workloadProfileName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional workload profile type name (e.g., Consumption, D4). Leave empty to use default serverless profile."
+      }
+    },
+    "containerImage": {
+      "type": "string",
+      "metadata": {
+        "description": "Fully qualified container image path (e.g., myacr.azurecr.io/github-actions-runner:1.0)."
+      }
+    },
+    "containerCpu": {
+      "type": "string",
+      "defaultValue": "2.0",
+      "metadata": {
+        "description": "Container CPU cores (expressed as string to support decimal values)."
+      }
+    },
+    "containerMemory": {
+      "type": "string",
+      "defaultValue": "4Gi",
+      "metadata": {
+        "description": "Container memory allocation (e.g., 4Gi)."
+      }
+    },
+    "runnerLabels": {
+      "type": "string",
+      "defaultValue": "self-hosted,azure-container-apps",
+      "metadata": {
+        "description": "Job runner labels (comma-separated string)."
+      }
+    },
+    "githubOwner": {
+      "type": "string",
+      "metadata": {
+        "description": "GitHub repository owner (organization or user)."
+      }
+    },
+    "githubRepo": {
+      "type": "string",
+      "metadata": {
+        "description": "GitHub repository name."
+      }
+    },
+    "githubPatSecretName": {
+      "type": "string",
+      "defaultValue": "personal-access-token",
+      "metadata": {
+        "description": "Secret name used to store GitHub PAT (resolved via Container Apps secrets)."
+      }
+    },
+    "githubPatSecretValue": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Secret value for GitHub PAT. Provide via secure parameter or reference to Key Vault in production."
+      }
+    },
+    "additionalEnv": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "Optional additional environment variables passed to the runner container."
+      }
+    },
+    "minExecutions": {
+      "type": "int",
+      "defaultValue": 0,
+      "metadata": {
+        "description": "Minimum job executions triggered per polling interval."
+      }
+    },
+    "maxExecutions": {
+      "type": "int",
+      "defaultValue": 10,
+      "metadata": {
+        "description": "Maximum job executions triggered per polling interval."
+      }
+    },
+    "pollingInterval": {
+      "type": "int",
+      "defaultValue": 30,
+      "metadata": {
+        "description": "Polling interval (seconds) for the GitHub runner KEDA scaler."
+      }
+    },
+    "targetWorkflowQueueLength": {
+      "type": "int",
+      "defaultValue": 1,
+      "metadata": {
+        "description": "Target workflow queue length before scaling additional executions."
+      }
+    },
+    "userAssignedIdentityId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional user-assigned managed identity resource ID for the job and registry access."
+      }
+    },
+    "deployContainerRegistry": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Set to true to deploy a new Azure Container Registry; set false to reuse an existing registry."
+      }
+    },
+    "existingAcrLoginServer": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Existing ACR login server (required if deployContainerRegistry is false)."
+      }
+    },
+    "existingAcrResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Existing ACR resource ID (required if deployContainerRegistry is false)."
+      }
+    },
+    "acrName": {
+      "type": "string",
+      "defaultValue": "[format('{0}acr', parameters('baseName'))]",
+      "metadata": {
+        "description": "When deploying a new ACR, specify the name (must be globally unique)."
+      }
+    },
+    "acrSku": {
+      "type": "string",
+      "defaultValue": "Basic",
+      "metadata": {
+        "description": "SKU for new ACR (Basic, Standard, Premium)."
+      }
+    }
+  },
+  "variables": {
+    "locationNormalized": "[toLower(replace(parameters('location'), ' ', ''))]",
+    "workspaceName": "[format('{0}-{1}-law', parameters('baseName'), variables('locationNormalized'))]",
+    "logAnalyticsResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]",
+    "newAcrLoginServer": "[format('{0}.azurecr.io', toLower(parameters('acrName')))]",
+    "newAcrResourceId": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+    "registryLoginServer": "[if(parameters('deployContainerRegistry'), variables('newAcrLoginServer'), parameters('existingAcrLoginServer'))]",
+    "registryResourceId": "[if(parameters('deployContainerRegistry'), variables('newAcrResourceId'), parameters('existingAcrResourceId'))]",
+    "baseRunnerEnv": [
+      {
+        "name": "GH_URL",
+        "value": "[format('https://github.com/{0}/{1}', parameters('githubOwner'), parameters('githubRepo'))]"
+      },
+      {
+        "name": "REGISTRATION_TOKEN_API_URL",
+        "value": "[format('https://api.github.com/repos/{0}/{1}/actions/runners/registration-token', parameters('githubOwner'), parameters('githubRepo'))]"
+      },
+      {
+        "name": "RUNNER_LABELS",
+        "value": "[parameters('runnerLabels')]"
+      },
+      {
+        "name": "GITHUB_PAT",
+        "secretRef": "[parameters('githubPatSecretName')]"
+      }
+    ],
+    "runnerEnv": "[concat(variables('baseRunnerEnv'), parameters('additionalEnv'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-log', parameters('baseName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[variables('workspaceName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "retentionInDays": {
+            "value": "[parameters('logAnalyticsRetentionInDays')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.38.33.27573",
+              "templateHash": "290703619016051873"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "retentionInDays": {
+              "type": "int",
+              "defaultValue": 30
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2023-09-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": "[parameters('retentionInDays')]"
+              }
+            }
+          ],
+          "outputs": {
+            "customerId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', parameters('name')), '2023-09-01').customerId]"
+            },
+            "workspaceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('name'))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-env', parameters('baseName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[parameters('containerAppEnvironmentName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "logAnalyticsCustomerId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-log', parameters('baseName'))), '2025-04-01').outputs.customerId.value]"
+          },
+          "logAnalyticsSharedKey": {
+            "value": "[listKeys(variables('logAnalyticsResourceId'), '2023-09-01').primarySharedKey]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "workloadProfileName": {
+            "value": "[parameters('workloadProfileName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.38.33.27573",
+              "templateHash": "3355476158048016885"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "logAnalyticsCustomerId": {
+              "type": "string"
+            },
+            "logAnalyticsSharedKey": {
+              "type": "securestring"
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "workloadProfileName": {
+              "type": "string",
+              "defaultValue": ""
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.App/managedEnvironments",
+              "apiVersion": "2025-01-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "appLogsConfiguration": {
+                  "destination": "log-analytics",
+                  "logAnalyticsConfiguration": {
+                    "customerId": "[parameters('logAnalyticsCustomerId')]",
+                    "sharedKey": "[parameters('logAnalyticsSharedKey')]"
+                  }
+                },
+                "workloadProfiles": "[if(empty(parameters('workloadProfileName')), createArray(), createArray(createObject('name', parameters('workloadProfileName'), 'workloadProfileType', 'D4')))]"
+              }
+            }
+          ],
+          "outputs": {
+            "environmentId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/managedEnvironments', parameters('name'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-log', parameters('baseName')))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployContainerRegistry')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-acr', parameters('baseName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[parameters('acrName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "sku": {
+            "value": "[parameters('acrSku')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "principalId": "[if(empty(parameters('userAssignedIdentityId')), createObject('value', ''), createObject('value', reference(parameters('userAssignedIdentityId'), '2018-11-30', 'Full').principalId))]",
+          "principalType": {
+            "value": "ServicePrincipal"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.38.33.27573",
+              "templateHash": "10551590093599864671"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "sku": {
+              "type": "string",
+              "defaultValue": "Basic",
+              "allowedValues": [
+                "Basic",
+                "Standard",
+                "Premium"
+              ]
+            },
+            "adminUserEnabled": {
+              "type": "bool",
+              "defaultValue": false
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            },
+            "principalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Optional principal to grant AcrPull permissions to (e.g. user-assigned managed identity)."
+              }
+            },
+            "principalType": {
+              "type": "string",
+              "defaultValue": "ServicePrincipal",
+              "allowedValues": [
+                "ServicePrincipal",
+                "User",
+                "Group",
+                "ForeignGroup"
+              ]
+            }
+          },
+          "variables": {
+            "acrPullRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-07-01",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "[parameters('sku')]"
+              },
+              "properties": {
+                "adminUserEnabled": "[parameters('adminUserEnabled')]",
+                "publicNetworkAccess": "Enabled"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('principalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[format('Microsoft.ContainerRegistry/registries/{0}', parameters('name'))]",
+              "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', parameters('name')), parameters('principalId'), variables('acrPullRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[variables('acrPullRoleId')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "[parameters('principalType')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ContainerRegistry/registries', parameters('name'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "registryId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('name'))]"
+            },
+            "loginServer": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('name')), '2023-07-01').loginServer]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-job', parameters('baseName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "name": {
+            "value": "[format('{0}-job', parameters('baseName'))]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "environmentId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-env', parameters('baseName'))), '2025-04-01').outputs.environmentId.value]"
+          },
+          "image": {
+            "value": "[parameters('containerImage')]"
+          },
+          "containerCpu": {
+            "value": "[parameters('containerCpu')]"
+          },
+          "containerMemory": {
+            "value": "[parameters('containerMemory')]"
+          },
+          "containerEnv": {
+            "value": "[variables('runnerEnv')]"
+          },
+          "jobSecrets": {
+            "value": [
+              {
+                "name": "[parameters('githubPatSecretName')]",
+                "value": "[parameters('githubPatSecretValue')]"
+              }
+            ]
+          },
+          "registries": "[if(empty(variables('registryLoginServer')), createObject('value', createArray()), createObject('value', createArray(createObject('server', variables('registryLoginServer'), 'identity', if(empty(parameters('userAssignedIdentityId')), 'system', parameters('userAssignedIdentityId'))))))]",
+          "systemAssigned": {
+            "value": true
+          },
+          "userAssignedIdentityId": {
+            "value": "[parameters('userAssignedIdentityId')]"
+          },
+          "parallelism": {
+            "value": 1
+          },
+          "replicaCompletionCount": {
+            "value": 1
+          },
+          "replicaRetryLimit": {
+            "value": 0
+          },
+          "replicaTimeout": {
+            "value": 1800
+          },
+          "minExecutions": {
+            "value": "[parameters('minExecutions')]"
+          },
+          "maxExecutions": {
+            "value": "[parameters('maxExecutions')]"
+          },
+          "pollingInterval": {
+            "value": "[parameters('pollingInterval')]"
+          },
+          "scaleRuleMetadata": {
+            "value": {
+              "githubAPIURL": "https://api.github.com",
+              "owner": "[parameters('githubOwner')]",
+              "repos": "[parameters('githubRepo')]",
+              "runnerScope": "repo",
+              "labels": "[parameters('runnerLabels')]",
+              "targetWorkflowQueueLength": "[string(parameters('targetWorkflowQueueLength'))]"
+            }
+          },
+          "scaleRuleAuth": {
+            "value": [
+              {
+                "triggerParameter": "personalAccessToken",
+                "secretRef": "[parameters('githubPatSecretName')]"
+              }
+            ]
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.38.33.27573",
+              "templateHash": "1060442642575681003"
+            }
+          },
+          "parameters": {
+            "name": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "environmentId": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "containerCpu": {
+              "type": "string",
+              "defaultValue": "2.0",
+              "metadata": {
+                "description": "Container CPU in cores (supports values such as 0.5, 1.0, 2.0)."
+              }
+            },
+            "containerMemory": {
+              "type": "string",
+              "defaultValue": "4Gi"
+            },
+            "containerEnv": {
+              "type": "array",
+              "defaultValue": []
+            },
+            "jobSecrets": {
+              "type": "array",
+              "defaultValue": []
+            },
+            "registries": {
+              "type": "array",
+              "defaultValue": []
+            },
+            "systemAssigned": {
+              "type": "bool",
+              "defaultValue": true,
+              "metadata": {
+                "description": "Enable system-assigned managed identity for the job."
+              }
+            },
+            "userAssignedIdentityId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Optional single user-assigned managed identity resource ID to associate with the job."
+              }
+            },
+            "parallelism": {
+              "type": "int",
+              "defaultValue": 1,
+              "metadata": {
+                "description": "Parallelism determines how many replicas run per execution."
+              }
+            },
+            "replicaCompletionCount": {
+              "type": "int",
+              "defaultValue": 1,
+              "metadata": {
+                "description": "Number of replicas required to report success before the job execution is marked successful."
+              }
+            },
+            "replicaRetryLimit": {
+              "type": "int",
+              "defaultValue": 0,
+              "metadata": {
+                "description": "Maximum retry count for failed replicas."
+              }
+            },
+            "replicaTimeout": {
+              "type": "int",
+              "defaultValue": 1800,
+              "metadata": {
+                "description": "Maximum execution time in seconds per replica."
+              }
+            },
+            "minExecutions": {
+              "type": "int",
+              "defaultValue": 0,
+              "metadata": {
+                "description": "Minimum executions triggered per polling interval."
+              }
+            },
+            "maxExecutions": {
+              "type": "int",
+              "defaultValue": 10,
+              "metadata": {
+                "description": "Maximum executions triggered per polling interval."
+              }
+            },
+            "pollingInterval": {
+              "type": "int",
+              "defaultValue": 30,
+              "metadata": {
+                "description": "KEDA polling interval in seconds."
+              }
+            },
+            "scaleRuleMetadata": {
+              "type": "object",
+              "metadata": {
+                "description": "Scale rule metadata such as owner, repos, runnerScope, labels, githubAPIURL, targetWorkflowQueueLength."
+              }
+            },
+            "scaleRuleAuth": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Scale rule secret auth configuration such as personalAccessToken=secretref:personal-access-token."
+              }
+            },
+            "command": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Optional environment variables to override command arguments."
+              }
+            },
+            "args": {
+              "type": "array",
+              "defaultValue": []
+            }
+          },
+          "variables": {
+            "identityType": "[if(parameters('systemAssigned'), if(empty(parameters('userAssignedIdentityId')), 'SystemAssigned', 'SystemAssigned,UserAssigned'), if(empty(parameters('userAssignedIdentityId')), 'None', 'UserAssigned'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.App/jobs",
+              "apiVersion": "2025-10-02-preview",
+              "name": "[parameters('name')]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "[variables('identityType')]",
+                "userAssignedIdentities": "[if(empty(parameters('userAssignedIdentityId')), createObject(), createObject(format('{0}', parameters('userAssignedIdentityId')), createObject()))]"
+              },
+              "properties": {
+                "environmentId": "[parameters('environmentId')]",
+                "configuration": {
+                  "triggerType": "Event",
+                  "replicaRetryLimit": "[parameters('replicaRetryLimit')]",
+                  "replicaTimeout": "[parameters('replicaTimeout')]",
+                  "secrets": "[parameters('jobSecrets')]",
+                  "registries": "[parameters('registries')]",
+                  "eventTriggerConfig": {
+                    "parallelism": "[parameters('parallelism')]",
+                    "replicaCompletionCount": "[parameters('replicaCompletionCount')]",
+                    "scale": {
+                      "minExecutions": "[parameters('minExecutions')]",
+                      "maxExecutions": "[parameters('maxExecutions')]",
+                      "pollingInterval": "[parameters('pollingInterval')]",
+                      "rules": [
+                        {
+                          "name": "github-runner",
+                          "type": "github-runner",
+                          "metadata": "[parameters('scaleRuleMetadata')]",
+                          "auth": "[parameters('scaleRuleAuth')]"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "runner",
+                      "image": "[parameters('image')]",
+                      "env": "[parameters('containerEnv')]",
+                      "command": "[parameters('command')]",
+                      "args": "[parameters('args')]",
+                      "resources": {
+                        "cpu": "[json(parameters('containerCpu'))]",
+                        "memory": "[parameters('containerMemory')]"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "outputs": {
+            "jobId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/jobs', parameters('name'))]"
+            },
+            "principalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.App/jobs', parameters('name')), '2025-10-02-preview', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-env', parameters('baseName')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "containerAppsEnvironmentId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-env', parameters('baseName'))), '2025-04-01').outputs.environmentId.value]"
+    },
+    "containerAppsJobId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-job', parameters('baseName'))), '2025-04-01').outputs.jobId.value]"
+    },
+    "logAnalyticsWorkspaceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-log', parameters('baseName'))), '2025-04-01').outputs.workspaceId.value]"
+    },
+    "containerRegistryId": {
+      "type": "string",
+      "value": "[variables('registryResourceId')]"
+    },
+    "containerRegistryLoginServer": {
+      "type": "string",
+      "value": "[variables('registryLoginServer')]"
+    }
+  }
+}
