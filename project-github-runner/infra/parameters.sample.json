@@ -1,0 +1,33 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "value": "eastus"
+        },
+        "containerGroupName": {
+            "value": "gh-runner-cg"
+        },
+        "containerImage": {
+            "value": "ghcr.io/actions/runner:latest"
+        },
+        "cpuCores": {
+            "value": 1
+        },
+        "memoryInGb": {
+            "value": 2
+        },
+        "containerEnv": {
+            "value": [
+                {
+                    "name": "RUNNER_NAME",
+                    "value": "gha-runner"
+                },
+                {
+                    "name": "RUNNER_LABELS",
+                    "value": "self-hosted,azure"
+                }
+            ]
+        }
+    }
+}
