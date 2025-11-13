@@ -1,0 +1,50 @@
+name: Demo Self-Hosted Runner Fan-Out
+
+on:
+  workflow_dispatch:
+    inputs:
+      scaleDemo:
+        description: 'Run nine parallel jobs to exercise self-hosted runner scale-out'
+        required: false
+        default: 'true'
+
+jobs:
+  fanout:
+    name: Runner demo ${{ matrix.instance }}
+    runs-on:
+      - self-hosted
+      - azure-container-apps
+    environment: Demo
+    strategy:
+      matrix:
+        instance:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 7
+          - 8
+          - 9
+      max-parallel: 9
+      fail-fast: false
+    steps:
+      - name: Display runner identity
+        shell: pwsh
+        run: |
+          Write-Output "Container Apps runner hostname: $env:HOSTNAME"
+          Write-Output "Matrix instance: ${{ matrix.instance }}"
+
+      - name: Validate PowerShell version
+        shell: pwsh
+        run: |
+          $version = $PSVersionTable.PSVersion.ToString()
+          Write-Output "PowerShell version: $version"
+
+      - name: Simulate workload
+        shell: pwsh
+        run: |
+          Write-Output 'Starting simulated workload (approx. 30 seconds)...'
+          Start-Sleep -Seconds 30
+          Write-Output 'Simulated workload complete.'

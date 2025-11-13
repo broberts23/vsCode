@@ -62,6 +62,23 @@ Flow:
 4) The runner registers with GitHub, picks up the job, executes steps, and exits.
 5) ACA marks the execution complete. With no pending work, future polls result in zero executions.
 
+## Demo GitHub Actions pipeline
+
+To make the experience tangible, the repository includes `.github/workflows/demo-self-hosted-runner.yml`. You can dispatch the workflow from the **Actions** tab and it will schedule nine parallel jobs using a matrix strategy:
+
+- Each matrix instance targets the `self-hosted` and `azure-container-apps` labels, ensuring jobs land on the Container Apps runners created by the Bicep deployment.
+- `max-parallel: 9` allows all jobs to execute concurrently, forcing the KEDA scaler to scale the job to nine containers (bounded by `maxExecutions`).
+- Steps inside each job record the runner host name, verify PowerShell 7.4, and simulate a short workload to keep the container running long enough for scale observation.
+
+When you trigger the workflow:
+
+1. GitHub places nine jobs in the queue (`RUNNER_LABELS` must match the workflow).
+2. The scaler detects the queue depth (`targetWorkflowQueueLength` defaults to `1`) and schedules up to nine executions within the Container Apps environment.
+3. Each execution registers as an ephemeral runner, processes its portion of the matrix, and exits.
+4. You can monitor progress with `az containerapp job execution list --name <jobName> --resource-group <rg>` (https://learn.microsoft.com/cli/azure/containerapp/job/execution) and inspect job output through Log Analytics queries.
+
+This pipeline provides a repeatable way to validate scale-out, confirm network access, and capture telemetry before onboarding production workloads.
+
 ## Networking uplift and VNet integration
 
 Enterprise deployments often require private networking, static routing requirements, or traffic inspection. The `network/vnet.bicep` module provisions a virtual network, delegated subnet, and optional custom NSG rules so the Container Apps environment can attach directly to your address space. During deployment, the main Bicep template passes the subnet resource ID to the environment module, enabling [VNet integration](https://learn.microsoft.com/en-us/azure/container-apps/custom-virtual-networks?tabs=bicep).

@@ -203,6 +203,7 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
 - Author Pester 5.x tests targeting deployment scripts; use [Pester overview](https://learn.microsoft.com/powershell/scripting/testing/overview?view=powershell-7.4) as reference.
 - Implement smoke tests to verify runner registration, PAT validity, and scaling events.
 - Consider integration tests that queue synthetic workflows and assert log outputs.
+- Trigger the sample GitHub Actions workflow at `.github/workflows/demo-self-hosted-runner.yml` via the **Run workflow** button in GitHub. It fans out to nine matrix jobs (`max-parallel: 9`) targeting the `self-hosted, azure-container-apps` labels, which exercises horizontal scale-out of the Container Apps job. Monitor executions with `az containerapp job execution list --name <jobName> --resource-group <rg>` (https://learn.microsoft.com/cli/azure/containerapp/job/execution) and observe logs in Log Analytics to confirm all nine runners complete successfully.
 
 ## 10. Troubleshooting Guide
 | Symptom | Diagnostic steps | Resolution |
