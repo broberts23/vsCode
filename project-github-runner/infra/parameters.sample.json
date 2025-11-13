@@ -34,6 +34,24 @@
         "githubPatSecretValue": {
             "value": "<replace-with-secure-pat>"
         },
+        "virtualNetworkAddressPrefix": {
+            "value": "10.10.0.0/16"
+        },
+        "containerAppsSubnetPrefix": {
+            "value": "10.10.0.0/23"
+        },
+        "platformReservedCidr": {
+            "value": "10.200.0.0/24"
+        },
+        "platformReservedDnsIp": {
+            "value": "10.200.0.10"
+        },
+        "dockerBridgeCidr": {
+            "value": "172.16.0.0/16"
+        },
+        "internalEnvironment": {
+            "value": false
+        },
         "deployContainerRegistry": {
             "value": true
         },

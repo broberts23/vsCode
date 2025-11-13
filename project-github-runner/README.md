@@ -15,6 +15,7 @@ Deploy ephemeral GitHub Actions runners on Azure Container Apps jobs using infra
 | --- | --- | --- |
 | Identity | User-assigned managed identity (optional) | Authenticates Container Apps job to pull private images and call Azure APIs. |
 | Compute | Azure Container Apps environment & jobs | Event-driven jobs host ephemeral GitHub Actions runners. See [Jobs in Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/jobs). |
+| Network | Azure Virtual Network + delegated subnet & NSG | Provides private connectivity for the Container Apps environment and restricts ingress/egress per [Custom virtual networks for Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/custom-virtual-networks?tabs=bicep). |
 | Image Registry | Azure Container Registry | Stores hardened runner images; configured for ARM audience tokens for managed identity pulls. |
 | Secrets | Azure Key Vault or PowerShell SecretManagement | Stores GitHub PAT or app key used for scaler authentication. |
 | Observability | Log Analytics workspace & Azure Monitor | Captures job execution history, container logs, and scaling metrics. |
@@ -44,7 +45,10 @@ project-github-runner/
 ├─ README.md                     # Deployment guide (this file)
 ├─ infra/
 │  ├─ parameters.sample.json     # Template for parameter overrides
-│  └─ containerapps/             # Reserved for Bicep modules (job, env, registry)
+│  ├─ main.bicep                 # Composes workspace, environment, (optional) ACR, and the job
+│  ├─ containerapps/             # Bicep modules (job, env, registry)
+│  └─ network/
+│     └─ vnet.bicep              # Virtual network, delegated subnet, and NSG for Container Apps
 └─ scripts/
    ├─ ContainerApps-Deploy-Job.ps1        # Creates Container Apps job via Azure CLI
    ├─ ContainerInit.ps1                   # Optional container init hook to install modules
@@ -110,24 +114,36 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
 
 6. **Deploy infrastructure**
         ```powershell
+        # Construct full image reference and deploy
+        $FULL_IMAGE = "$ACR_NAME.azurecr.io/$IMAGE_NAME"
+
         ./scripts/Deploy-GitHubRunner.ps1 `
           -ResourceGroupName $RESOURCE_GROUP `
           -Location $LOCATION `
           -GitHubRepo $GITHUB_REPO `
           -TemplatePath ./infra/main.bicep `
           -TemplateParameters @{
-            location        = @{ value = $LOCATION }
-            containerAppEnv = @{ value = $ENVIRONMENT }
-            acrName         = @{ value = $ACR_NAME }
-            jobName         = @{ value = $JOB_NAME }
-            imageName       = @{ value = $IMAGE_NAME }
+            location                 = @{ value = $LOCATION }
+            baseName                 = @{ value = 'gh-runner' }              # optional; controls resource names
+            containerImage           = @{ value = $FULL_IMAGE }              # required
+            deployContainerRegistry  = @{ value = $true }                    # or false if using existing ACR
+            acrName                  = @{ value = $ACR_NAME }                # when creating a new ACR
+            githubPatSecretValue     = @{ value = '<secure-pat-or-use-secretmanagement>' }
+            virtualNetworkAddressPrefix = @{ value = '10.10.0.0/16' }
+            containerAppsSubnetPrefix  = @{ value = '10.10.0.0/23' }
+            platformReservedCidr       = @{ value = '10.200.0.0/24' }
+            platformReservedDnsIp      = @{ value = '10.200.0.10' }
+            dockerBridgeCidr           = @{ value = '172.16.0.0/16' }
+            internalEnvironment        = @{ value = $false }
+            # The script infers githubOwner/githubRepo from -GitHubRepo automatically
           }
         ```
-	This script:
+    This script:
 	- Ensures the resource group exists via [`New-AzResourceGroup`](https://learn.microsoft.com/powershell/module/az.resources/new-azresourcegroup?view=azps-latest).
 	- Deploys Bicep using [`New-AzResourceGroupDeployment`](https://learn.microsoft.com/powershell/module/az.resources/new-azresourcegroupdeployment?view=azps-latest).
-	- Optionally retrieves a GitHub runner registration token to inject as environment variable.
+  - Optionally retrieves a GitHub runner registration token and injects it as `RUNNER_TOKEN` environment variable.
 	- Adds a federated credential to the job’s managed identity using Microsoft Graph (beta) if identity outputs are available.
+	- Applies virtual network defaults when `-TemplateParameters` omits them; override as needed per [Networking parameters](https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash#networking-parameters).
 
 7. **Provision Container Apps job (alternate)**
 	If you need to regenerate the job definition on the fly or prototype outside Bicep, use `ContainerApps-Deploy-Job.ps1` to generate the equivalent Azure CLI command and optionally execute it.
@@ -149,12 +165,22 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
 | Parameter | Description | Source |
 | --- | --- | --- |
 | `location` | Azure region for all resources; align with Container Apps availability. | Bicep parameter |
-| `containerAppEnv` | Name for the Container Apps managed environment. | Bicep parameter |
-| `acrName` | Azure Container Registry name (must be globally unique). | Bicep parameter |
-| `imageName` | Runner image path (e.g. `github-actions-runner:1.0`). | Bicep / job configuration |
-| `jobName` | Container Apps job resource name. | Bicep / PowerShell script |
-| `githubPatSecretName` | Secret alias referencing PAT stored in Key Vault or SecretManagement. | Bicep / script input |
-| `miUserAssignedId` | Optional user-assigned managed identity resource ID for registry pulls. | Bicep / CLI |
+| `baseName` | Base name used to compose resource names (workspace/env/job). | Bicep parameter |
+| `containerAppEnvironmentName` | Name for the Container Apps managed environment (defaults to `${baseName}-env`). | Bicep parameter |
+| `containerImage` | Fully qualified runner image (e.g. `myacr.azurecr.io/github-actions-runner:1.0`). | Bicep parameter |
+| `acrName` | Azure Container Registry name (when creating a new ACR). | Bicep parameter |
+| `deployContainerRegistry` | Whether to create a new ACR (`true`) or use existing (`false`). | Bicep parameter |
+| `existingAcrLoginServer`/`existingAcrResourceId` | Required when reusing an existing ACR. | Bicep parameter |
+| `githubOwner`/`githubRepo` | GitHub owner and repo. The script infers these from `-GitHubRepo`. | Bicep/script |
+| `githubPatSecretName` | Secret alias used inside the job (default `personal-access-token`). | Bicep parameter |
+| `githubPatSecretValue` | Secure PAT value (or use SecretManagement/Key Vault in the script). | Bicep/script input |
+| `userAssignedIdentityId` | Optional user-assigned managed identity resource ID for registry pulls. | Bicep/CLI |
+| `virtualNetworkAddressPrefix` | Address space for the project virtual network. | Bicep parameter |
+| `containerAppsSubnetPrefix` | Dedicated subnet delegated to `Microsoft.App/environments`. | Bicep parameter |
+| `platformReservedCidr` | Internal range reserved for ACA infrastructure (Consumption environment). Must not overlap with other prefixes. | Bicep parameter; see [Networking parameters](https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash#networking-parameters) |
+| `platformReservedDnsIp` | DNS IP inside `platformReservedCidr` used by ACA infrastructure. | Bicep parameter; see [Networking parameters](https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash#networking-parameters) |
+| `dockerBridgeCidr` | Docker bridge IP range for the environment. | Bicep parameter; see [Networking parameters](https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash#networking-parameters) |
+| `internalEnvironment` | Boolean flag to deploy an internal-only environment without public ingress. | Bicep parameter; see [Networking in Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/networking?tabs=bash#accessibility-level) |
 
 **Secrets strategy**
 - Prefer Azure Key Vault or SecretManagement to avoid plaintext storage. See [SecretManagement overview](https://learn.microsoft.com/powershell/utility-modules/secretmanagement/overview).

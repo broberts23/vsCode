@@ -18,6 +18,24 @@ param logAnalyticsRetentionInDays int = 30
 @description('Name for Container Apps managed environment.')
 param containerAppEnvironmentName string = '${baseName}-env'
 
+@description('Virtual network CIDR block for the Container Apps environment.')
+param virtualNetworkAddressPrefix string = '10.10.0.0/16'
+
+@description('Subnet CIDR dedicated to the Container Apps environment (min /27).')
+param containerAppsSubnetPrefix string = '10.10.0.0/23'
+
+@description('CIDR reserved for platform infrastructure IP addresses; must not overlap with the virtual network.')
+param platformReservedCidr string = '10.200.0.0/24'
+
+@description('DNS IP address from within the platform reserved CIDR range.')
+param platformReservedDnsIp string = '10.200.0.10'
+
+@description('CIDR range for the Docker bridge network used by the environment.')
+param dockerBridgeCidr string = '172.16.0.0/16'
+
+@description('Deploy the Container Apps environment as internal only when true (no public ingress).')
+param internalEnvironment bool = false
+
 @description('Optional workload profile type name (e.g., Consumption, D4). Leave empty to use default serverless profile.')
 param workloadProfileName string = ''
 
@@ -79,9 +97,68 @@ param acrName string = '${baseName}acr'
 @description('SKU for new ACR (Basic, Standard, Premium).')
 param acrSku string = 'Basic'
 
+@description('GitHub API endpoint used by the scaler; override for GitHub Enterprise.')
+param githubApiUrl string = 'https://api.github.com'
+
+@description('Base GitHub server URL for the runner to register against.')
+param githubServerUrl string = 'https://github.com'
+
+@description('Scope used by the GitHub runner scaler (repo, org, ent).')
+@allowed([
+  'repo'
+  'org'
+  'ent'
+])
+param githubRunnerScope string = 'repo'
+
+@description('Override the comma-delimited repository list monitored by the scaler. Defaults to githubRepo when the scope is repo.')
+param githubRunnerRepositories string = ''
+
+@description('Disable default runner labels (self-hosted, linux, x64) when true.')
+param disableDefaultRunnerLabels bool = false
+
+@description('Match unlabeled GitHub jobs with unlabeled runners when true.')
+param matchUnlabeledRunnerJobs bool = false
+
+@description('Enable GitHub API etag support to reduce rate limit usage when true.')
+param enableGithubEtags bool = false
+
+@description('Optional GitHub App application ID for scaler authentication.')
+param githubAppApplicationId string = ''
+
+@description('Optional GitHub App installation ID for scaler authentication.')
+param githubAppInstallationId string = ''
+
+@description('Additional KEDA scale rule auth entries (array of objects with triggerParameter and secretRef).')
+param additionalScaleRuleAuth array = []
+
 var locationNormalized = toLower(replace(location, ' ', ''))
 var workspaceName = '${baseName}-${locationNormalized}-law'
 var logAnalyticsResourceId = resourceId('Microsoft.OperationalInsights/workspaces', workspaceName)
+var githubApiUrlNormalized = endsWith(githubApiUrl, '/')
+  ? substring(githubApiUrl, 0, max(length(githubApiUrl) - 1, 0))
+  : githubApiUrl
+var githubServerUrlNormalized = endsWith(githubServerUrl, '/')
+  ? substring(githubServerUrl, 0, max(length(githubServerUrl) - 1, 0))
+  : githubServerUrl
+var githubRepositoryUrl = '${githubServerUrlNormalized}/${githubOwner}/${githubRepo}'
+var githubRegistrationTokenApiUrl = '${githubApiUrlNormalized}/repos/${githubOwner}/${githubRepo}/actions/runners/registration-token'
+var githubScaleRepositories = empty(githubRunnerRepositories)
+  ? (githubRunnerScope == 'repo' ? githubRepo : '')
+  : githubRunnerRepositories
+
+module network 'network/vnet.bicep' = {
+  name: '${baseName}-network'
+  params: {
+    name: '${baseName}-vnet'
+    location: location
+    addressPrefix: virtualNetworkAddressPrefix
+    subnetName: '${baseName}-ca-subnet'
+    subnetPrefix: containerAppsSubnetPrefix
+    nsgName: '${baseName}-nsg'
+    tags: tags
+  }
+}
 
 module works 'containerapps/logAnalytics.bicep' = {
   name: '${baseName}-log'
@@ -104,6 +181,11 @@ module env 'containerapps/managedEnvironment.bicep' = {
     logAnalyticsSharedKey: logAnalyticsSharedKey
     tags: tags
     workloadProfileName: workloadProfileName
+    infrastructureSubnetId: network.outputs.subnetId
+    platformReservedCidr: platformReservedCidr
+    platformReservedDnsIp: platformReservedDnsIp
+    dockerBridgeCidr: dockerBridgeCidr
+    internalEnvironment: internalEnvironment
   }
 }
 
@@ -130,11 +212,11 @@ var registryResourceId = deployContainerRegistry ? newAcrResourceId : existingAc
 var baseRunnerEnv = [
   {
     name: 'GH_URL'
-    value: 'https://github.com/${githubOwner}/${githubRepo}'
+    value: githubRepositoryUrl
   }
   {
     name: 'REGISTRATION_TOKEN_API_URL'
-    value: 'https://api.github.com/repos/${githubOwner}/${githubRepo}/actions/runners/registration-token'
+    value: githubRegistrationTokenApiUrl
   }
   {
     name: 'RUNNER_LABELS'
@@ -181,25 +263,28 @@ module job 'containerapps/githubRunnerJob.bicep' = {
     minExecutions: minExecutions
     maxExecutions: maxExecutions
     pollingInterval: pollingInterval
-    scaleRuleMetadata: {
-      githubAPIURL: 'https://api.github.com'
-      owner: githubOwner
-      repos: githubRepo
-      runnerScope: 'repo'
-      labels: runnerLabels
-      targetWorkflowQueueLength: string(targetWorkflowQueueLength)
-    }
-    scaleRuleAuth: [
-      {
-        triggerParameter: 'personalAccessToken'
-        secretRef: githubPatSecretName
-      }
-    ]
+    githubOwner: githubOwner
+    githubApiUrl: githubApiUrlNormalized
+    runnerScope: githubRunnerScope
+    githubRepositories: githubScaleRepositories
+    scaleRunnerLabels: runnerLabels
+    noDefaultLabels: disableDefaultRunnerLabels
+    matchUnlabeledJobsWithUnlabeledRunners: matchUnlabeledRunnerJobs
+    enableEtags: enableGithubEtags
+    applicationId: githubAppApplicationId
+    installationId: githubAppInstallationId
+    targetWorkflowQueueLength: targetWorkflowQueueLength
+    scaleSecretName: githubPatSecretName
+    additionalScaleRuleAuth: additionalScaleRuleAuth
   }
 }
 
 output containerAppsEnvironmentId string = env.outputs.environmentId
 output containerAppsJobId string = job.outputs.jobId
+output jobPrincipalId string = job.outputs.principalId
 output logAnalyticsWorkspaceId string = works.outputs.workspaceId
 output containerRegistryId string = registryResourceId
 output containerRegistryLoginServer string = registryLoginServer
+output virtualNetworkId string = network.outputs.virtualNetworkId
+output containerAppsSubnetId string = network.outputs.subnetId
+output networkSecurityGroupId string = network.outputs.networkSecurityGroupId

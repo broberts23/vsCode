@@ -14,6 +14,50 @@ param containerEnv array = [] // Array of objects { name: string, value?: string
 param jobSecrets array = [] // Array of objects { name: string, value?: string, keyVaultUrl?: string, identity?: string }
 param registries array = [] // Array of registry credentials { server: string, identity?: string, passwordSecretRef?: string }
 
+@description('GitHub organization or user that owns the repositories monitored by the scaler.')
+param githubOwner string
+
+@description('GitHub API endpoint used by the scaler; override for GitHub Enterprise.')
+param githubApiUrl string = 'https://api.github.com'
+
+@description('Scope for the GitHub runner scaler (repo, org, or ent).')
+@allowed([
+  'repo'
+  'org'
+  'ent'
+])
+param runnerScope string = 'repo'
+
+@description('Comma-delimited list of repositories when using repo scope. Leave empty to monitor all repositories for the owner.')
+param githubRepositories string = ''
+
+@description('Optional comma-delimited list of runner labels to match when scaling.')
+param scaleRunnerLabels string = ''
+
+@description('Disable default runner labels (self-hosted, linux, x64) when set to true.')
+param noDefaultLabels bool = false
+
+@description('Match unlabeled jobs with unlabeled runners when set to true.')
+param matchUnlabeledJobsWithUnlabeledRunners bool = false
+
+@description('Enable GitHub API conditional requests using etags to reduce rate limit usage.')
+param enableEtags bool = false
+
+@description('GitHub App application ID when authenticating with a GitHub App.')
+param applicationId string = ''
+
+@description('GitHub App installation ID when authenticating with a GitHub App.')
+param installationId string = ''
+
+@description('Target workflow queue length used by the scaler before spawning additional runners.')
+param targetWorkflowQueueLength int = 1
+
+@description('Secret name that holds the personal access token or GitHub App key for scaling.')
+param scaleSecretName string = 'personal-access-token'
+
+@description('Additional scale rule auth entries (for example, GitHub App appKey).')
+param additionalScaleRuleAuth array = [] // Array of objects { triggerParameter: string, secretRef: string }
+
 @description('Enable system-assigned managed identity for the job.')
 param systemAssigned bool = true
 @description('Optional single user-assigned managed identity resource ID to associate with the job.')
@@ -35,12 +79,6 @@ param maxExecutions int = 10
 @description('KEDA polling interval in seconds.')
 param pollingInterval int = 30
 
-@description('Scale rule metadata such as owner, repos, runnerScope, labels, githubAPIURL, targetWorkflowQueueLength.')
-param scaleRuleMetadata object
-
-@description('Scale rule secret auth configuration such as personalAccessToken=secretref:personal-access-token.')
-param scaleRuleAuth array = [] // Array of objects { triggerParameter: string, secretRef: string }
-
 @description('Optional environment variables to override command arguments.')
 param command array = []
 param args array = []
@@ -48,6 +86,46 @@ param args array = []
 var identityType = systemAssigned
   ? (empty(userAssignedIdentityId) ? 'SystemAssigned' : 'SystemAssigned,UserAssigned')
   : (empty(userAssignedIdentityId) ? 'None' : 'UserAssigned')
+
+var scaleRuleMetadata = union({
+    githubAPIURL: githubApiUrl
+    owner: githubOwner
+    runnerScope: runnerScope
+    targetWorkflowQueueLength: string(targetWorkflowQueueLength)
+  },
+  empty(githubRepositories) ? {} : {
+    repos: githubRepositories
+  },
+  empty(scaleRunnerLabels) ? {} : {
+    labels: scaleRunnerLabels
+  },
+  noDefaultLabels ? {
+    noDefaultLabels: 'true'
+  } : {},
+  matchUnlabeledJobsWithUnlabeledRunners ? {
+    matchUnlabeledJobsWithUnlabeledRunners: 'true'
+  } : {},
+  enableEtags ? {
+    enableEtags: 'true'
+  } : {},
+  empty(applicationId) ? {} : {
+    applicationID: applicationId
+  },
+  empty(installationId) ? {} : {
+    installationID: installationId
+  }
+)
+
+var baseScaleRuleAuth = empty(scaleSecretName)
+  ? []
+  : [
+      {
+        triggerParameter: 'personalAccessToken'
+        secretRef: scaleSecretName
+      }
+    ]
+
+var scaleRuleAuth = concat(baseScaleRuleAuth, additionalScaleRuleAuth)
 
 resource githubRunnerJob 'Microsoft.App/jobs@2025-01-01' = {
   name: name

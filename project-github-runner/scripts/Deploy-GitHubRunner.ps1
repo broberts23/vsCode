@@ -31,7 +31,25 @@ param(
     [string] $TemplatePath = "./infra/main.bicep",
 
     [Parameter(Mandatory = $false)]
-    [hashtable] $TemplateParameters
+    [hashtable] $TemplateParameters,
+
+    [Parameter(Mandatory = $false)]
+    [string] $VirtualNetworkAddressPrefix = '10.10.0.0/16',
+
+    [Parameter(Mandatory = $false)]
+    [string] $ContainerAppsSubnetPrefix = '10.10.0.0/23',
+
+    [Parameter(Mandatory = $false)]
+    [string] $PlatformReservedCidr = '10.200.0.0/24',
+
+    [Parameter(Mandatory = $false)]
+    [string] $PlatformReservedDnsIp = '10.200.0.10',
+
+    [Parameter(Mandatory = $false)]
+    [string] $DockerBridgeCidr = '172.16.0.0/16',
+
+    [Parameter(Mandatory = $false)]
+    [bool] $InternalEnvironment = $false
 )
 
 <#
@@ -39,6 +57,7 @@ param(
 This script is a convenience wrapper. For security, avoid storing GitHub PATs in files. Use Azure Key Vault or SecretManagement for production.
 
 Az deployment docs: https://learn.microsoft.com/powershell/module/az.resources/new-azresourcegroupdeployment?view=azps-latest
+Container Apps networking parameters: https://learn.microsoft.com/azure/container-apps/vnet-custom?tabs=bash#networking-parameters
 #>
 
 Set-StrictMode -Version Latest
@@ -69,6 +88,36 @@ if (-not $TemplateParameters) {
     $TemplateParameters = @{
         location = @{ value = $Location }
     }
+}
+
+# Ensure required template parameters for GitHub owner/repo are present based on -GitHubRepo
+if (-not $TemplateParameters.githubOwner -or -not $TemplateParameters.githubRepo) {
+    if ($GitHubRepo -notmatch '^([^/]+)/([^/]+)$') {
+        throw "-GitHubRepo must be in 'owner/repo' format. Value: '$GitHubRepo'"
+    }
+    $owner, $repo = $Matches[1], $Matches[2]
+    if (-not $TemplateParameters.githubOwner) { $TemplateParameters.githubOwner = @{ value = $owner } }
+    if (-not $TemplateParameters.githubRepo) { $TemplateParameters.githubRepo = @{ value = $repo } }
+}
+
+# Populate virtual network defaults if not already provided by caller
+if (-not $TemplateParameters.virtualNetworkAddressPrefix) {
+    $TemplateParameters.virtualNetworkAddressPrefix = @{ value = $VirtualNetworkAddressPrefix }
+}
+if (-not $TemplateParameters.containerAppsSubnetPrefix) {
+    $TemplateParameters.containerAppsSubnetPrefix = @{ value = $ContainerAppsSubnetPrefix }
+}
+if (-not $TemplateParameters.platformReservedCidr) {
+    $TemplateParameters.platformReservedCidr = @{ value = $PlatformReservedCidr }
+}
+if (-not $TemplateParameters.platformReservedDnsIp) {
+    $TemplateParameters.platformReservedDnsIp = @{ value = $PlatformReservedDnsIp }
+}
+if (-not $TemplateParameters.dockerBridgeCidr) {
+    $TemplateParameters.dockerBridgeCidr = @{ value = $DockerBridgeCidr }
+}
+if (-not $TemplateParameters.internalEnvironment) {
+    $TemplateParameters.internalEnvironment = @{ value = $InternalEnvironment }
 }
 
 # Helper: resolve GitHub PAT from SecretManagement or Key Vault or parameter
@@ -141,7 +190,7 @@ if (-not $ResolvedGitHubPAT) {
 }
 
 if ($PSCmdlet.ShouldProcess($TemplatePath, 'Deploy Bicep template')) {
-    # If we have a registration token, add it to container environment variables
+    # If we have a registration token, add it to container environment variables (additionalEnv)
     if ($ResolvedGitHubPAT) {
         Write-Verbose 'Requesting GitHub runner registration token using provided PAT...'
         function Get-GitHubRegistrationToken {
@@ -164,13 +213,13 @@ if ($PSCmdlet.ShouldProcess($TemplatePath, 'Deploy Bicep template')) {
         try {
             $registrationToken = Get-GitHubRegistrationToken -Repo $GitHubRepo -Pat $ResolvedGitHubPAT
             Write-Verbose 'Registration token obtained.'
-            # inject as environment variable parameter expected by the container
-            if (-not $TemplateParameters.containerEnv) {
-                $TemplateParameters.containerEnv = @{ value = @() }
+            # inject as environment variable parameter expected by the container via 'additionalEnv'
+            if (-not $TemplateParameters.additionalEnv) {
+                $TemplateParameters.additionalEnv = @{ value = @() }
             }
-            $envList = @($TemplateParameters.containerEnv.value)
+            $envList = @($TemplateParameters.additionalEnv.value)
             $envList += @{ name = 'RUNNER_TOKEN'; value = $registrationToken }
-            $TemplateParameters.containerEnv = @{ value = $envList }
+            $TemplateParameters.additionalEnv = @{ value = $envList }
         }
         catch {
             Write-Warning "Could not obtain registration token: $_"
@@ -180,34 +229,26 @@ if ($PSCmdlet.ShouldProcess($TemplatePath, 'Deploy Bicep template')) {
     $deployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateFile $TemplatePath -TemplateParameterObject $TemplateParameters -Verbose
     Write-Output $deployment
 
-    # Try to get the principalId of the container group's system-assigned identity
+    # Try to get the principalId of the job's managed identity from template outputs
     try {
-        # If the template outputs include containerGroupIdentityPrincipalId, prefer that
-        if ($deployment.Outputs -and $deployment.Outputs.containerGroupIdentityPrincipalId) {
-            $principalId = $deployment.Outputs.containerGroupIdentityPrincipalId.value
-        }
-        else {
-            # Fallback: query the container group resource
-            $cg = Get-AzResource -ResourceType 'Microsoft.ContainerInstance/containerGroups' -ResourceGroupName $ResourceGroupName -ResourceName $TemplateParameters.containerGroupName.value -ErrorAction SilentlyContinue
-            if ($cg -and $cg.Identity -and $cg.Identity.PrincipalId) {
-                $principalId = $cg.Identity.PrincipalId
-            }
+        if ($deployment.Outputs -and $deployment.Outputs.jobPrincipalId) {
+            $principalId = $deployment.Outputs.jobPrincipalId.value
         }
     }
     catch {
-        Write-Verbose "Could not determine container group principalId: $_"
+        Write-Verbose "Could not determine job principalId from deployment outputs: $_"
         $principalId = $null
     }
 }
 
-# Create federated credential to allow GitHub OIDC for the container group's managed identity
+# Create federated credential to allow GitHub OIDC for the job's managed identity (sample)
 if ($principalId) {
     $issuer = 'https://token.actions.githubusercontent.com'
     $subject = "repo:$GitHubRepo:ref:refs/heads/main"
 
     $scriptPath = Join-Path -Path (Split-Path -Parent $MyInvocation.MyCommand.Path) -ChildPath 'Create-FederatedCredential.ps1'
     if (Test-Path $scriptPath) {
-        if ($PSCmdlet.ShouldProcess($principalId, 'Add federated credential for GitHub OIDC to managed identity')) {
+        if ($PSCmdlet.ShouldProcess($principalId, 'Add federated credential for GitHub OIDC to managed identity application')) {
             & $scriptPath -AppObjectId $principalId -Name 'github-oidc' -Issuer $issuer -Subject $subject | Write-Output
         }
     }
