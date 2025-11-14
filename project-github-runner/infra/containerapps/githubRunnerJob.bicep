@@ -58,6 +58,9 @@ param scaleSecretName string = 'personal-access-token'
 @description('Additional scale rule auth entries (for example, GitHub App appKey).')
 param additionalScaleRuleAuth array = [] // Array of objects { triggerParameter: string, secretRef: string }
 
+@description('Trigger parameter name used in the scale rule auth (for example, personalAccessToken or appKey).')
+param scaleAuthTriggerParameter string = 'personalAccessToken'
+
 @description('Enable system-assigned managed identity for the job.')
 param systemAssigned bool = true
 @description('Optional single user-assigned managed identity resource ID to associate with the job.')
@@ -116,11 +119,11 @@ var scaleRuleMetadata = union({
   }
 )
 
-var baseScaleRuleAuth = empty(scaleSecretName)
+var baseScaleRuleAuth = empty(scaleSecretName) || empty(scaleAuthTriggerParameter)
   ? []
   : [
       {
-        triggerParameter: 'personalAccessToken'
+        triggerParameter: scaleAuthTriggerParameter
         secretRef: scaleSecretName
       }
     ]

@@ -1,63 +1,75 @@
 {
-    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
-    "contentVersion": "1.0.0.0",
-    "parameters": {
-        "location": {
-            "value": "eastus"
-        },
-        "baseName": {
-            "value": "gh-runner-prod"
-        },
-        "tags": {
-            "value": {
-                "project": "github-runner",
-                "environment": "prod"
-            }
-        },
-        "containerImage": {
-            "value": "ghrunnerprodacr.azurecr.io/github-actions-runner:2.329.0"
-        },
-        "containerCpu": {
-            "value": "2.0"
-        },
-        "containerMemory": {
-            "value": "4Gi"
-        },
-        "runnerLabels": {
-            "value": "self-hosted,azure-container-apps,prod"
-        },
-        "githubOwner": {
-            "value": "myorg"
-        },
-        "githubRepo": {
-            "value": "my-repository"
-        },
-        "githubPatSecretValue": {
-            "value": "<replace-with-secure-pat>"
-        },
-        "virtualNetworkAddressPrefix": {
-            "value": "10.20.0.0/16"
-        },
-        "containerAppsSubnetPrefix": {
-            "value": "10.20.0.0/23"
-        },
-        "platformReservedCidr": {
-            "value": "10.220.0.0/24"
-        },
-        "platformReservedDnsIp": {
-            "value": "10.220.0.10"
-        },
-        "dockerBridgeCidr": {
-            "value": "172.26.0.0/16"
-        },
-        "internalEnvironment": {
-            "value": true
-        },
-        "acrName": {
-            "value": "ghrunnerprodacr"
-        },
-        "acrSku": {
-            "value": "Standard"
-        }
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+    "baseName": {
+      "value": "gh-runner-prod"
+    },
+    "tags": {
+      "value": {
+        "project": "github-runner",
+        "environment": "prod"
+      }
+    },
+    "containerImage": {
+      "value": "ghrunnerprodacr.azurecr.io/github-actions-runner:2.329.0"
+    },
+    "containerCpu": {
+      "value": "2.0"
+    },
+    "containerMemory": {
+      "value": "4Gi"
+    },
+    "runnerLabels": {
+      "value": "self-hosted,azure-container-apps,prod"
+    },
+    "githubRunnerScope": {
+      "value": "org"
+    },
+    "githubOwner": {
+      "value": "myorg"
+    },
+    "githubRepo": {
+      "value": "my-repository"
+    },
+    "githubAppApplicationId": {
+      "value": "<replace-with-github-app-id>"
+    },
+    "githubAppInstallationId": {
+      "value": "<replace-with-installation-id>"
+    },
+    "githubAppPrivateKey": {
+      "value": "-----BEGIN PRIVATE KEY-----\n<replace-with-github-app-private-key>\n-----END PRIVATE KEY-----"
+    },
+    "githubPatSecretValue": {
+      "value": ""
+    },
+    "virtualNetworkAddressPrefix": {
+      "value": "10.20.0.0/16"
+    },
+    "containerAppsSubnetPrefix": {
+      "value": "10.20.0.0/23"
+    },
+    "platformReservedCidr": {
+      "value": "10.220.0.0/24"
+    },
+    "platformReservedDnsIp": {
+      "value": "10.220.0.10"
+    },
+    "dockerBridgeCidr": {
+      "value": "172.26.0.0/16"
+    },
+    "internalEnvironment": {
+      "value": true
+    },
+    "acrName": {
+      "value": "ghrunnerprodacr"
+    },
+    "acrSku": {
+      "value": "Standard"
     }
+  }
 }

@@ -27,6 +27,7 @@ permissions:
 jobs:
   bootstrap:
     name: Bootstrap infrastructure
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || 'dev' }}
     runs-on: ubuntu-latest
     env:
       DISPATCH_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
@@ -121,7 +122,9 @@ jobs:
           parameters: |
             containerImage=${{ steps.plan.outputs.image-tag }}
             acrName=${{ steps.plan.outputs.acr-name }}
-            githubPatSecretValue=${{ secrets.GITHUB_PAT_RUNNER }}
+            githubAppApplicationId=${{ vars.GH_APP_ID }}
+            githubAppInstallationId=${{ vars.GH_APP_INSTALLATION_ID }}
+            githubAppPrivateKey=${{ secrets.GH_APP_PRIVATE_KEY }}
 
       - name: Sign in docker client to ACR
         run: |

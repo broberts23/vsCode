@@ -60,9 +60,16 @@ param githubRepo string
 @description('Secret name used to store GitHub PAT (resolved via Container Apps secrets).')
 param githubPatSecretName string = 'personal-access-token'
 
-@description('Secret value for GitHub PAT. Provide via secure parameter or reference to Key Vault in production.')
+@description('Secret value for GitHub PAT. Leave empty when using GitHub App authentication.')
 @secure()
-param githubPatSecretValue string
+param githubPatSecretValue string = ''
+
+@description('Secret name used to expose the GitHub App private key to the runner job when using GitHub App authentication.')
+param githubAppKeySecretName string = 'github-app-key'
+
+@description('GitHub App private key in PEM format. Provide when using GitHub App authentication; leave empty to fall back to PAT.')
+@secure()
+param githubAppPrivateKey string = ''
 
 @description('Optional additional environment variables passed to the runner container.')
 param additionalEnv array = []
@@ -132,14 +139,27 @@ var githubApiUrlNormalized = endsWith(githubApiUrl, '/')
 var githubServerUrlNormalized = endsWith(githubServerUrl, '/')
   ? substring(githubServerUrl, 0, max(length(githubServerUrl) - 1, 0))
   : githubServerUrl
-var githubRepositoryUrl = '${githubServerUrlNormalized}/${githubOwner}/${githubRepo}'
-var githubRegistrationTokenApiUrl = '${githubApiUrlNormalized}/repos/${githubOwner}/${githubRepo}/actions/runners/registration-token'
+var githubRunnerUrl = githubRunnerScope == 'org'
+  ? '${githubServerUrlNormalized}/${githubOwner}'
+  : (githubRunnerScope == 'ent'
+      ? '${githubServerUrlNormalized}/enterprises/${githubOwner}'
+      : '${githubServerUrlNormalized}/${githubOwner}/${githubRepo}')
+var githubRegistrationTokenApiUrl = githubRunnerScope == 'org'
+  ? '${githubApiUrlNormalized}/orgs/${githubOwner}/actions/runners/registration-token'
+  : (githubRunnerScope == 'ent'
+      ? '${githubApiUrlNormalized}/enterprises/${githubOwner}/actions/runners/registration-token'
+      : '${githubApiUrlNormalized}/repos/${githubOwner}/${githubRepo}/actions/runners/registration-token')
 var githubScaleRepositories = empty(githubRunnerRepositories)
   ? (githubRunnerScope == 'repo' ? githubRepo : '')
   : githubRunnerRepositories
+var useGithubAppAuth = !empty(githubAppApplicationId) && !empty(githubAppInstallationId) && !empty(githubAppPrivateKey)
+var usePatAuth = !empty(githubPatSecretValue)
 var userAssignedPrincipalId = empty(userAssignedIdentityId)
   ? ''
   : reference(userAssignedIdentityId, '2018-11-30', 'Full').principalId
+var sanitizedBaseName = replace(toLower(baseName), '-', '')
+var keyVaultUniqueSuffix = substring(uniqueString(resourceGroup().id, baseName), 0, 13)
+var generatedKeyVaultName = take('kv${sanitizedBaseName}${keyVaultUniqueSuffix}', 24)
 
 module network 'network/vnet.bicep' = {
   name: '${baseName}-network'
@@ -202,13 +222,51 @@ resource acrResource 'Microsoft.ContainerRegistry/registries@2023-07-01' existin
   ]
 }
 
+module keyVault 'secrets/keyVault.bicep' = if (useGithubAppAuth) {
+  name: '${baseName}-kv'
+  params: {
+    name: generatedKeyVaultName
+    location: location
+    tags: tags
+  }
+}
+
+module githubAppKeySecret 'secrets/keyVaultSecret.bicep' = if (useGithubAppAuth) {
+  name: '${baseName}-github-app-key'
+  params: {
+    vaultName: generatedKeyVaultName
+    secretName: githubAppKeySecretName
+    secretValue: githubAppPrivateKey
+    tags: tags
+  }
+}
+
+resource keyVaultResource 'Microsoft.KeyVault/vaults@2025-05-01' existing = if (useGithubAppAuth) {
+  name: generatedKeyVaultName
+}
+
+var githubAppKeySecretUri = useGithubAppAuth
+  ? reference(
+      resourceId('Microsoft.KeyVault/vaults/secrets', generatedKeyVaultName, githubAppKeySecretName),
+      '2025-05-01',
+      'Full'
+    ).properties.secretUri
+  : ''
+
 var registryLoginServer = acr.outputs.loginServer
 var registryResourceId = acr.outputs.registryId
+
+var scaleSecretName = useGithubAppAuth ? githubAppKeySecretName : (usePatAuth ? githubPatSecretName : '')
+var scaleAuthTriggerParameter = useGithubAppAuth ? 'appKey' : 'personalAccessToken'
 
 var baseRunnerEnv = [
   {
     name: 'GH_URL'
-    value: githubRepositoryUrl
+    value: githubRunnerUrl
+  }
+  {
+    name: 'GITHUB_API_URL'
+    value: githubApiUrlNormalized
   }
   {
     name: 'REGISTRATION_TOKEN_API_URL'
@@ -218,13 +276,50 @@ var baseRunnerEnv = [
     name: 'RUNNER_LABELS'
     value: runnerLabels
   }
-  {
-    name: 'GITHUB_PAT'
-    secretRef: githubPatSecretName
-  }
 ]
 
-var runnerEnv = concat(baseRunnerEnv, additionalEnv)
+var runnerAuthEnv = useGithubAppAuth
+  ? [
+      {
+        name: 'APP_ID'
+        value: githubAppApplicationId
+      }
+      {
+        name: 'APP_INSTALLATION_ID'
+        value: githubAppInstallationId
+      }
+      {
+        name: 'APP_PRIVATE_KEY'
+        secretRef: githubAppKeySecretName
+      }
+    ]
+  : (usePatAuth
+      ? [
+          {
+            name: 'GITHUB_PAT'
+            secretRef: githubPatSecretName
+          }
+        ]
+      : [])
+
+var runnerEnv = concat(baseRunnerEnv, runnerAuthEnv, additionalEnv)
+
+var jobSecrets = useGithubAppAuth
+  ? [
+      {
+        name: githubAppKeySecretName
+        keyVaultUrl: githubAppKeySecretUri
+        identity: empty(userAssignedIdentityId) ? 'system' : userAssignedIdentityId
+      }
+    ]
+  : (usePatAuth
+      ? [
+          {
+            name: githubPatSecretName
+            value: githubPatSecretValue
+          }
+        ]
+      : [])
 
 module job 'containerapps/githubRunnerJob.bicep' = {
   name: '${baseName}-job'
@@ -236,12 +331,7 @@ module job 'containerapps/githubRunnerJob.bicep' = {
     containerCpu: containerCpu
     containerMemory: containerMemory
     containerEnv: runnerEnv
-    jobSecrets: [
-      {
-        name: githubPatSecretName
-        value: githubPatSecretValue
-      }
-    ]
+    jobSecrets: jobSecrets
     registries: [
       {
         server: registryLoginServer
@@ -265,21 +355,42 @@ module job 'containerapps/githubRunnerJob.bicep' = {
     noDefaultLabels: disableDefaultRunnerLabels
     matchUnlabeledJobsWithUnlabeledRunners: matchUnlabeledRunnerJobs
     enableEtags: enableGithubEtags
-    applicationId: githubAppApplicationId
-    installationId: githubAppInstallationId
+    applicationId: useGithubAppAuth ? githubAppApplicationId : ''
+    installationId: useGithubAppAuth ? githubAppInstallationId : ''
     targetWorkflowQueueLength: targetWorkflowQueueLength
-    scaleSecretName: githubPatSecretName
+    scaleSecretName: scaleSecretName
+    scaleAuthTriggerParameter: scaleAuthTriggerParameter
     additionalScaleRuleAuth: additionalScaleRuleAuth
   }
 }
 
-var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+var acrPullRoleDefinitionId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+)
+var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '4633458b-17de-408a-b874-0445c86b69e6'
+)
 
 resource jobAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(acrName, '${baseName}-job', 'acrPull')
   scope: acrResource
   properties: {
     roleDefinitionId: acrPullRoleDefinitionId
+    principalId: job.outputs.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource jobKeyVaultSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useGithubAppAuth) {
+  name: guid(keyVaultResource.id, '${baseName}-job', 'kvSecretsUser')
+  scope: keyVaultResource
+  dependsOn: [
+    keyVault
+  ]
+  properties: {
+    roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
     principalId: job.outputs.principalId
     principalType: 'ServicePrincipal'
   }
@@ -294,3 +405,5 @@ output containerRegistryLoginServer string = registryLoginServer
 output virtualNetworkId string = network.outputs.virtualNetworkId
 output containerAppsSubnetId string = network.outputs.subnetId
 output networkSecurityGroupId string = network.outputs.networkSecurityGroupId
+output keyVaultName string = useGithubAppAuth ? generatedKeyVaultName : ''
+output githubAppKeySecretUri string = useGithubAppAuth ? githubAppKeySecretUri : ''
