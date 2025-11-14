@@ -13,7 +13,7 @@ param tags object = {}
 @description('Additional security rules to append to the NSG. Each rule should follow the Microsoft.Network/networkSecurityGroups securityRules schema.')
 param securityRules array = []
 
-resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-09-01' = {
+resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2024-10-01' = {
   name: nsgName
   location: location
   tags: tags
@@ -22,7 +22,7 @@ resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2023-09-0
   }
 }
 
-resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-09-01' = {
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-10-01' = {
   name: name
   location: location
   tags: tags

@@ -184,7 +184,7 @@ module works 'containerapps/logAnalytics.bicep' = {
   }
 }
 
-var logAnalyticsSharedKey = listKeys(logAnalyticsResourceId, '2023-09-01').primarySharedKey
+var logAnalyticsSharedKey = listKeys(logAnalyticsResourceId, '2025-02-01').primarySharedKey
 
 module env 'containerapps/managedEnvironment.bicep' = {
   name: '${baseName}-env'
@@ -215,7 +215,7 @@ module acr 'containerapps/containerRegistry.bicep' = {
   }
 }
 
-resource acrResource 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+resource acrResource 'Microsoft.ContainerRegistry/registries@2025-04-01' existing = {
   name: acrName
   dependsOn: [
     acr

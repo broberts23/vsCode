@@ -6,7 +6,7 @@ param location string
 param retentionInDays int = 30
 param tags object = {}
 
-resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+resource workspace 'Microsoft.OperationalInsights/workspaces@2025-02-01' = {
   name: name
   location: location
   tags: tags

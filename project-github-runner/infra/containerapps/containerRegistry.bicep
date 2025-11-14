@@ -22,7 +22,7 @@ param principalId string = ''
 ])
 param principalType string = 'ServicePrincipal'
 
-resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
   name: name
   location: location
   tags: tags
