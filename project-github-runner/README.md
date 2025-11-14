@@ -42,6 +42,9 @@ Deploy ephemeral GitHub Actions runners on Azure Container Apps jobs using infra
 ## 4. Repository Structure & Artifacts
 ```
 project-github-runner/
+├─ Dockerfile.github             # Dockerfile for the GitHub Actions runner image
+├─ github-actions-runner/
+│  └─ entrypoint.sh              # Container entrypoint configuring the runner
 ├─ README.md                     # Deployment guide (this file)
 ├─ infra/
 │  ├─ parameters.sample.json     # Template for parameter overrides
@@ -53,6 +56,7 @@ project-github-runner/
    ├─ ContainerApps-Deploy-Job.ps1        # Creates Container Apps job via Azure CLI
    ├─ ContainerInit.ps1                   # Optional container init hook to install modules
    ├─ Create-FederatedCredential.ps1      # Adds Entra federated credential for GitHub OIDC
+  ├─ Build-GitHubRunnerImage.ps1         # Builds/pushes the Docker image defined in Dockerfile.github
    └─ Deploy-GitHubRunner.ps1             # End-to-end deployment wrapper using Bicep
 ```
 
@@ -94,16 +98,16 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
 
 4. **Build and push runner image**
     - Create ACR: [`New-AzContainerRegistry`](https://learn.microsoft.com/powershell/module/az.containerregistry/new-azcontainerregistry?view=azps-latest).
-    - Enable ARM audience tokens if required (`az acr config authentication-as-arm update`).
-    - Trigger cloud build against sample Dockerfile (replace repository as needed):
+    - The repository includes `Dockerfile.github` and `github-actions-runner/entrypoint.sh`, which install the latest runner release (`v2.329.0`, see https://github.com/actions/runner/releases/tag/v2.329.0). Update these files if you need extra tooling.
+    - Build (and optionally push) the image using the helper script:
         ```powershell
-        az acr build `
-          --registry $ACR_NAME `
-          --image $IMAGE_NAME `
-          --file Dockerfile.github `
-          https://github.com/Azure-Samples/container-apps-ci-cd-runner-tutorial.git
+        ./scripts/Build-GitHubRunnerImage.ps1 `
+          -ImageTag "$ACR_NAME.azurecr.io/github-actions-runner:2.329.0" `
+          -RunnerVersion '2.329.0' `
+          -RunnerArchitecture 'linux-x64' `
+          -Push
         ```
-	Documentation: [Azure Container Registry build](https://learn.microsoft.com/azure/container-registry/container-registry-tutorial-quick-task).
+	This script wraps `docker build`/`docker push`, so ensure you are authenticated to your registry (for example, `az acr login --name $ACR_NAME`). Reference: [Azure Container Registry build and push](https://learn.microsoft.com/azure/container-registry/container-registry-get-started-azure-cli).
 
 5. **Customize Bicep parameters**
     ```powershell
@@ -236,3 +240,4 @@ Additional tasks:
 - Container Apps environment log configuration with Log Analytics: https://learn.microsoft.com/en-us/azure/container-apps/environment?tabs=bicep#logs
 - Creating Log Analytics workspaces: https://learn.microsoft.com/en-us/azure/azure-monitor/logs/quick-create-workspace
 - KEDA GitHub runner scaler metadata requirements (labels, queue length): https://keda.sh/docs/latest/scalers/github-runner/
+- GitHub repository for sample implementation: https://github.com/Azure-Samples/container-apps-ci-cd-runner-tutorial.git

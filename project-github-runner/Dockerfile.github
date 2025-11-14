@@ -1,0 +1,19 @@
+FROM ghcr.io/actions/actions-runner:2.329.0
+
+USER root
+
+# install curl and jq
+RUN apt-get update && apt-get install -y curl jq && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --home-dir ${RUNNER_HOME} --shell /usr/sbin/nologin runner
+
+WORKDIR ${RUNNER_HOME}
+
+COPY github-actions-runner/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+USER runner
+
+ENTRYPOINT ["./entrypoint.sh"]

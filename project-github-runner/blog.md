@@ -23,6 +23,7 @@ This repository includes Bicep modules and a composed template that deploy:
 - A virtual network, delegated subnet, and network security group that provide private connectivity for the environment per [Custom virtual networks for Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/custom-virtual-networks?tabs=bicep).
 - An Azure Container Apps event‑driven Job that runs the GitHub Actions runner image, registers with your repo/org, and exits when the workflow completes.
 - A KEDA github‑runner scaler that watches your GitHub queue and triggers job executions accordingly.
+- A container build scaffold (`Dockerfile.github`, `github-actions-runner/entrypoint.sh`, and `scripts/Build-GitHubRunnerImage.ps1`) that packages the latest upstream runner release (`v2.329.0` at https://github.com/actions/runner/releases/tag/v2.329.0) with minimal dependencies.
 
 Outputs include resource IDs, environment ID, and registry information for downstream automation.
 
@@ -78,6 +79,18 @@ When you trigger the workflow:
 4. You can monitor progress with `az containerapp job execution list --name <jobName> --resource-group <rg>` (https://learn.microsoft.com/cli/azure/containerapp/job/execution) and inspect job output through Log Analytics queries.
 
 This pipeline provides a repeatable way to validate scale-out, confirm network access, and capture telemetry before onboarding production workloads.
+
+## Container image build workflow
+
+The runner image is built locally from `Dockerfile.github`, which uses the official GitHub Actions runner base image (`ghcr.io/actions/actions-runner:2.329.0`) and adds an entrypoint script to handle registration. The `scripts/Build-GitHubRunnerImage.ps1` PowerShell script simplifies building and pushing the image to your ACR:
+
+```powershell
+./scripts/Build-GitHubRunnerImage.ps1 `
+  -ImageTag "$ACR_NAME.azurecr.io/github-actions-runner:2.329.0" `
+  -Push
+```
+
+The script wraps `docker build`/`docker push`, allowing you to target alternative architectures or versions by adjusting parameters. Authenticate to your registry (for example, `az acr login --name $ACR_NAME`) before pushing. Once the image is published, update `containerImage` in your Bicep parameters to reference the new tag and redeploy.
 
 ## Networking uplift and VNet integration
 
