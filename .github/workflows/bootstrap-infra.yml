@@ -19,14 +19,6 @@ on:
         description: Optional override for the Bicep parameters file path
         required: false
         type: string
-  push:
-    branches:
-      - main
-    paths:
-      - project-github-runner/infra/**
-      - project-github-runner/scripts/Build-GitHubRunnerImage.ps1
-      - project-github-runner/Dockerfile.github
-      - .github/workflows/bootstrap-infra.yml
 
 permissions:
   id-token: write

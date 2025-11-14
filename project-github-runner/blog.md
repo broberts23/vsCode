@@ -57,11 +57,11 @@ Components and responsibilities:
 
 Flow:
 
-1) GitHub workflow queues a job targeting your self‑hosted labels.
-2) KEDA scaler polls the GitHub API and detects queued work.
-3) ACA starts N job executions (bounded by min/max per interval). Each execution creates a pod with the runner container.
-4) The runner registers with GitHub, picks up the job, executes steps, and exits.
-5) ACA marks the execution complete. With no pending work, future polls result in zero executions.
+1. GitHub workflow queues a job targeting your self‑hosted labels.
+2. KEDA scaler polls the GitHub API and detects queued work.
+3. ACA starts N job executions (bounded by min/max per interval). Each execution creates a pod with the runner container.
+4. The runner registers with GitHub, picks up the job, executes steps, and exits.
+5. ACA marks the execution complete. With no pending work, future polls result in zero executions.
 
 ## Demo GitHub Actions pipeline
 
@@ -146,11 +146,11 @@ Reference: https://keda.sh/docs/latest/scalers/github-runner/
 
 When a job execution starts, ACA launches the runner container with environment variables and secrets provided by Bicep. The runner process performs the following steps:
 
-1) Exchanges the PAT (secret) for a short‑lived registration token via GitHub REST: `POST /repos/{owner}/{repo}/actions/runners/registration-token` (or org/ent variant). The job template includes `REGISTRATION_TOKEN_API_URL` and `GH_URL`/repo for clarity.
-2) Configures the runner with your labels and repository/organization context.
-3) Registers the runner; it shows up as an online self‑hosted runner in GitHub.
-4) Waits for a workflow job assignment; when received, executes all steps.
-5) On completion, the container exits. Ephemeral patterns typically remove the runner registration automatically on shutdown.
+1. Exchanges the PAT (secret) for a short‑lived registration token via GitHub REST: `POST /repos/{owner}/{repo}/actions/runners/registration-token` (or org/ent variant). The job template includes `REGISTRATION_TOKEN_API_URL` and `GH_URL`/repo for clarity.
+2. Configures the runner with your labels and repository/organization context.
+3. Registers the runner; it shows up as an online self‑hosted runner in GitHub.
+4. Waits for a workflow job assignment; when received, executes all steps.
+5. On completion, the container exits. Ephemeral patterns typically remove the runner registration automatically on shutdown.
 
 This lifecycle ensures no idle, permanently registered VMs—each execution is purpose‑built and disposed.
 
@@ -223,11 +223,11 @@ Required repository secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCR
 
 ## Example flow (putting it all together)
 
-1) Deploy the Bicep template to your resource group with required parameters.
-2) Confirm the Container Apps environment and Job exist; check the job template for env/secret wiring.
-3) Update your GitHub workflow to use `runs-on: [self-hosted, azure-container-apps, <your-labels>]`.
-4) Queue a workflow. Within ~`pollingInterval` seconds, KEDA should trigger job executions. Watch executions and logs in the portal or via CLI.
-5) On completion, runners exit; when no work is queued, subsequent polls result in zero executions.
+1. Deploy the Bicep template to your resource group with required parameters.
+2. Confirm the Container Apps environment and Job exist; check the job template for env/secret wiring.
+3. Update your GitHub workflow to use `runs-on: [self-hosted, azure-container-apps, <your-labels>]`.
+4. Queue a workflow. Within ~`pollingInterval` seconds, KEDA should trigger job executions. Watch executions and logs in the portal or via CLI.
+5. On completion, runners exit; when no work is queued, subsequent polls result in zero executions.
 
 ## Troubleshooting tips
 
