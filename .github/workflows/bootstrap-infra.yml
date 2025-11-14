@@ -1,0 +1,161 @@
+name: Bootstrap Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment key
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+      imageTagSuffix:
+        description: Optional override for the container image tag suffix
+        required: false
+        type: string
+      parametersFile:
+        description: Optional override for the Bicep parameters file path
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - project-github-runner/infra/**
+      - project-github-runner/scripts/Build-GitHubRunnerImage.ps1
+      - project-github-runner/Dockerfile.github
+      - .github/workflows/bootstrap-infra.yml
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  bootstrap:
+    name: Bootstrap infrastructure
+    runs-on: ubuntu-latest
+    env:
+      DISPATCH_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || '' }}
+      DISPATCH_IMAGE_TAG_SUFFIX: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.imageTagSuffix || '' }}
+      DISPATCH_PARAMETERS_FILE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.parametersFile || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve deployment configuration
+        id: plan
+        run: |
+          set -euo pipefail
+
+          ENVIRONMENT="${DISPATCH_ENVIRONMENT}"
+          if [ -z "$ENVIRONMENT" ]; then
+            ENVIRONMENT="dev"
+          fi
+
+          case "$ENVIRONMENT" in
+            dev)
+              RESOURCE_GROUP="rg-github-runner-dev"
+              LOCATION="eastus"
+              ACR_NAME="ghrunnerdevacr"
+              PARAMETERS_FILE="project-github-runner/infra/parameters.sample.json"
+              ;;
+            prod)
+              RESOURCE_GROUP="rg-github-runner-prod"
+              LOCATION="eastus"
+              ACR_NAME="ghrunnerprodacr"
+              PARAMETERS_FILE="project-github-runner/infra/parameters.prod.json"
+              ;;
+            *)
+              echo "Unsupported environment '$ENVIRONMENT'" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -n "${DISPATCH_PARAMETERS_FILE}" ]; then
+            PARAMETERS_FILE="${DISPATCH_PARAMETERS_FILE}"
+          fi
+
+          if [ ! -f "$PARAMETERS_FILE" ]; then
+            echo "Parameters file '$PARAMETERS_FILE' not found." >&2
+            exit 1
+          fi
+
+          IMAGE_TAG_SUFFIX="${DISPATCH_IMAGE_TAG_SUFFIX}"
+          if [ -z "$IMAGE_TAG_SUFFIX" ]; then
+            IMAGE_TAG_SUFFIX="v${{ github.run_number }}"
+          fi
+
+          IMAGE_TAG="${ACR_NAME}.azurecr.io/github-actions-runner:${IMAGE_TAG_SUFFIX}"
+
+          printf 'environment=%s\n' "$ENVIRONMENT" >>"$GITHUB_OUTPUT"
+          printf 'resource-group=%s\n' "$RESOURCE_GROUP" >>"$GITHUB_OUTPUT"
+          printf 'location=%s\n' "$LOCATION" >>"$GITHUB_OUTPUT"
+          printf 'acr-name=%s\n' "$ACR_NAME" >>"$GITHUB_OUTPUT"
+          printf 'parameters-file=%s\n' "$PARAMETERS_FILE" >>"$GITHUB_OUTPUT"
+          printf 'image-tag=%s\n' "$IMAGE_TAG" >>"$GITHUB_OUTPUT"
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure resource group exists
+        uses: azure/cli@v2
+        with:
+          azcliversion: latest
+          inlineScript: |
+            set -euo pipefail
+            az group create \
+              --name "${{ steps.plan.outputs.resource-group }}" \
+              --location "${{ steps.plan.outputs.location }}"
+
+      - name: Deploy infrastructure (Bicep)
+        id: deploy
+        uses: azure/bicep-deploy@v2
+        with:
+          type: deployment
+          operation: create
+          scope: resourceGroup
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resource-group-name: ${{ steps.plan.outputs.resource-group }}
+          location: ${{ steps.plan.outputs.location }}
+          name: github-runner-${{ steps.plan.outputs.environment }}
+          template-file: project-github-runner/infra/main.bicep
+          parameters-file: ${{ steps.plan.outputs.parameters-file }}
+          parameters: |
+            containerImage=${{ steps.plan.outputs.image-tag }}
+            acrName=${{ steps.plan.outputs.acr-name }}
+            githubPatSecretValue=${{ secrets.GITHUB_PAT_RUNNER }}
+
+      - name: Sign in docker client to ACR
+        run: |
+          set -euo pipefail
+          az acr login --name "${{ steps.plan.outputs.acr-name }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push runner image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: project-github-runner
+          file: project-github-runner/Dockerfile.github
+          push: true
+          tags: ${{ steps.plan.outputs.image-tag }}
+
+      - name: Publish bootstrap summary
+        run: |
+          cat <<'EOF' >>"$GITHUB_STEP_SUMMARY"
+          ### Bootstrap deployment summary
+
+          - Environment: `${{ steps.plan.outputs.environment }}`
+          - Resource group: `${{ steps.plan.outputs.resource-group }}`
+          - Container image: `${{ steps.plan.outputs.image-tag }}`
+          - Container Apps job: `${{ steps.deploy.outputs.containerAppsJobId }}`
+          - Container Apps environment: `${{ steps.deploy.outputs.containerAppsEnvironmentId }}`
+          EOF

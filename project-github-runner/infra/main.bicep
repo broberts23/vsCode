@@ -1,5 +1,5 @@
 // Main deployment template for project-github-runner
-// Composes Log Analytics, Container Apps environment, optional ACR, and the GitHub runner job.
+// Composes Log Analytics, Container Apps environment, ACR, and the GitHub runner job.
 
 targetScope = 'resourceGroup'
 
@@ -82,15 +82,6 @@ param targetWorkflowQueueLength int = 1
 @description('Optional user-assigned managed identity resource ID for the job and registry access.')
 param userAssignedIdentityId string = ''
 
-@description('Set to true to deploy a new Azure Container Registry; set false to reuse an existing registry.')
-param deployContainerRegistry bool = true
-
-@description('Existing ACR login server (required if deployContainerRegistry is false).')
-param existingAcrLoginServer string = ''
-
-@description('Existing ACR resource ID (required if deployContainerRegistry is false).')
-param existingAcrResourceId string = ''
-
 @description('When deploying a new ACR, specify the name (must be globally unique).')
 param acrName string = '${baseName}acr'
 
@@ -146,6 +137,9 @@ var githubRegistrationTokenApiUrl = '${githubApiUrlNormalized}/repos/${githubOwn
 var githubScaleRepositories = empty(githubRunnerRepositories)
   ? (githubRunnerScope == 'repo' ? githubRepo : '')
   : githubRunnerRepositories
+var userAssignedPrincipalId = empty(userAssignedIdentityId)
+  ? ''
+  : reference(userAssignedIdentityId, '2018-11-30', 'Full').principalId
 
 module network 'network/vnet.bicep' = {
   name: '${baseName}-network'
@@ -189,25 +183,27 @@ module env 'containerapps/managedEnvironment.bicep' = {
   }
 }
 
-module acr 'containerapps/containerRegistry.bicep' = if (deployContainerRegistry) {
+module acr 'containerapps/containerRegistry.bicep' = {
   name: '${baseName}-acr'
   params: {
     name: acrName
     location: location
     sku: acrSku
     tags: tags
-    principalId: empty(userAssignedIdentityId)
-      ? ''
-      : reference(userAssignedIdentityId, '2018-11-30', 'Full').principalId
+    principalId: userAssignedPrincipalId
     principalType: 'ServicePrincipal'
   }
 }
 
-var newAcrLoginServer = '${toLower(acrName)}.azurecr.io'
-var newAcrResourceId = resourceId('Microsoft.ContainerRegistry/registries', acrName)
+resource acrResource 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: acrName
+  dependsOn: [
+    acr
+  ]
+}
 
-var registryLoginServer = deployContainerRegistry ? newAcrLoginServer : existingAcrLoginServer
-var registryResourceId = deployContainerRegistry ? newAcrResourceId : existingAcrResourceId
+var registryLoginServer = acr.outputs.loginServer
+var registryResourceId = acr.outputs.registryId
 
 var baseRunnerEnv = [
   {
@@ -246,14 +242,12 @@ module job 'containerapps/githubRunnerJob.bicep' = {
         value: githubPatSecretValue
       }
     ]
-    registries: empty(registryLoginServer)
-      ? []
-      : [
-          {
-            server: registryLoginServer
-            identity: empty(userAssignedIdentityId) ? 'system' : userAssignedIdentityId
-          }
-        ]
+    registries: [
+      {
+        server: registryLoginServer
+        identity: empty(userAssignedIdentityId) ? 'system' : userAssignedIdentityId
+      }
+    ]
     systemAssigned: true
     userAssignedIdentityId: userAssignedIdentityId
     parallelism: 1
@@ -276,6 +270,18 @@ module job 'containerapps/githubRunnerJob.bicep' = {
     targetWorkflowQueueLength: targetWorkflowQueueLength
     scaleSecretName: githubPatSecretName
     additionalScaleRuleAuth: additionalScaleRuleAuth
+  }
+}
+
+var acrPullRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+
+resource jobAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(acrName, '${baseName}-job', 'acrPull')
+  scope: acrResource
+  properties: {
+    roleDefinitionId: acrPullRoleDefinitionId
+    principalId: job.outputs.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 

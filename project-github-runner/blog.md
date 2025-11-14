@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This post is a practical deep dive into running self‑hosted GitHub Actions runners on Azure Container Apps (ACA). The goal: ephemeral, on‑demand compute that scales up only when there are GitHub workflow jobs in the queue and scales to zero when idle. You’ll see how the resources fit together (Log Analytics, Container Apps environment, optional Azure Container Registry), how the runner containers register with GitHub, how workflows target these runners, and how KEDA automatically scales job executions based on load.
+This post is a practical deep dive into running self‑hosted GitHub Actions runners on Azure Container Apps (ACA). The goal: ephemeral, on‑demand compute that scales up only when there are GitHub workflow jobs in the queue and scales to zero when idle. You’ll see how the resources fit together (Log Analytics, Container Apps environment, Azure Container Registry), how the runner containers register with GitHub, how workflows target these runners, and how KEDA automatically scales job executions based on load.
 
 If you maintain repositories that need custom tooling, access to private networks, or predictable performance characteristics, self‑hosted runners on ACA jobs give you serverless elasticity with infrastructure‑as‑code repeatability.
 
@@ -19,7 +19,7 @@ This repository includes Bicep modules and a composed template that deploy:
 
 - A Log Analytics workspace for Container Apps logging.
 - A Container Apps environment configured to push logs to the workspace.
-- An optional Azure Container Registry (ACR) with AcrPull role assignment to a managed identity.
+- An Azure Container Registry (ACR) that the template provisions and assigns `AcrPull` to the runner job’s managed identity.
 - A virtual network, delegated subnet, and network security group that provide private connectivity for the environment per [Custom virtual networks for Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/custom-virtual-networks?tabs=bicep).
 - An Azure Container Apps event‑driven Job that runs the GitHub Actions runner image, registers with your repo/org, and exits when the workflow completes.
 - A KEDA github‑runner scaler that watches your GitHub queue and triggers job executions accordingly.
@@ -32,11 +32,11 @@ Outputs include resource IDs, environment ID, and registry information for downs
 ```
 project-github-runner/
   infra/
-    main.bicep                      # Composes all modules and the job
+    main.bicep                      # Composes environment, ACR, and the job
     containerapps/
       logAnalytics.bicep            # Log Analytics workspace
       managedEnvironment.bicep      # Container Apps environment
-      containerRegistry.bicep       # Optional ACR with AcrPull assignment
+      containerRegistry.bicep       # ACR with AcrPull assignment
       githubRunnerJob.bicep         # Event-driven job + KEDA scaler wiring
     network/
       vnet.bicep                    # Virtual network, subnet delegation, and NSG for ACA
@@ -90,7 +90,7 @@ The runner image is built locally from `Dockerfile.github`, which uses the offic
   -Push
 ```
 
-The script wraps `docker build`/`docker push`, allowing you to target alternative architectures or versions by adjusting parameters. Authenticate to your registry (for example, `az acr login --name $ACR_NAME`) before pushing. Once the image is published, update `containerImage` in your Bicep parameters to reference the new tag and redeploy.
+The script wraps `docker build`/`docker push`, allowing you to target alternative architectures or versions by adjusting parameters. Authenticate to your registry (for example, `az acr login --name $ACR_NAME`) before pushing. Because the Bicep deployment provisions the Azure Container Registry and grants the job managed identity `AcrPull`, update `containerImage` in your Bicep parameters to reference the new tag and redeploy.
 
 ## Networking uplift and VNet integration
 
@@ -110,7 +110,7 @@ By managing the VNet resources in Bicep you can apply Azure Policy, configure di
 
 - `logAnalytics.bicep` provisions a workspace (retention configurable). Outputs: `customerId`, `workspaceId`.
 - `managedEnvironment.bicep` creates the Container Apps environment and connects it to Log Analytics (`appLogsConfiguration`).
-- `containerRegistry.bicep` creates ACR (optional) and assigns `AcrPull` to a supplied principal (e.g., user‑assigned managed identity).
+- `containerRegistry.bicep` creates ACR and assigns `AcrPull` to a supplied principal (for example, a user‑assigned managed identity).
 - `githubRunnerJob.bicep` defines an event‑driven Job resource (`Microsoft.App/jobs`) with:
   - Container image, CPU/memory, and environment variables for runner bootstrap.
   - Secrets: a PAT (or App key) exposed to the container via secretRef.
@@ -205,9 +205,21 @@ The composed `infra/main.bicep` exposes these key parameters (non‑exhaustive):
 - Secrets: `githubPatSecretName`, `githubPatSecretValue`.
 - Scaling: `minExecutions`, `maxExecutions`, `pollingInterval`, `targetWorkflowQueueLength`.
 - Scaler tuning: `githubApiUrl`, `githubRunnerScope`, `githubRunnerRepositories`, `disableDefaultRunnerLabels`, `matchUnlabeledRunnerJobs`, `enableGithubEtags`, GitHub App IDs, and `additionalScaleRuleAuth`.
-- Registry & identity: `deployContainerRegistry`, `existingAcrLoginServer`, `userAssignedIdentityId`.
+- Registry & identity: `acrName`, `userAssignedIdentityId`.
 
 The `containerapps/githubRunnerJob.bicep` module renders the `rules: [ { type: 'github-runner', metadata, auth } ]` block and builds metadata/auth maps from your parameters, keeping the job specification clean and auditable.
+
+## GitHub Actions bootstrap workflow
+
+The repository now includes `.github/workflows/bootstrap-infra.yml`, a GitHub Actions pipeline that automates the deployment sequence:
+
+- Triggered by updates to infrastructure assets (Bicep files, runner Dockerfile) on `main` or by manual dispatch with environment-specific inputs.
+- Resolves the resource group, Azure region, Azure Container Registry, and parameters file, then authenticates with OpenID Connect using [`azure/login@v2`](https://github.com/Azure/login) configured per [Deploy Bicep with GitHub Actions](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-github-actions).
+- Ensures the target resource group exists via `az group create` (see [`az group create`](https://learn.microsoft.com/cli/azure/group?view=azure-cli-latest#az-group-create)) and deploys `infra/main.bicep` using [`azure/bicep-deploy@v2`](https://github.com/Azure/bicep-deploy).
+- Authenticates Docker to ACR (`az acr login`) and builds/pushes the runner image with [`docker/build-push-action@v6`](https://github.com/docker/build-push-action#usage), tagging images with a suffix such as `v${{ github.run_number }}`.
+- Appends a job summary containing the image URL plus the container app job/environment IDs output from the template.
+
+Required repository secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (for OIDC auth) and `GITHUB_PAT_RUNNER` (passed to `githubPatSecretValue`). When dispatching manually you can supply a custom parameters file—e.g., `infra/parameters.prod.json`—to align with environment-specific naming, or adjust the case statement in the workflow to map additional environments.
 
 ## Example flow (putting it all together)
 

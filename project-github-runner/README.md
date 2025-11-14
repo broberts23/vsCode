@@ -48,16 +48,16 @@ project-github-runner/
 ├─ README.md                     # Deployment guide (this file)
 ├─ infra/
 │  ├─ parameters.sample.json     # Template for parameter overrides
-│  ├─ main.bicep                 # Composes workspace, environment, (optional) ACR, and the job
+│  ├─ main.bicep                 # Composes workspace, environment, ACR, and the job
 │  ├─ containerapps/             # Bicep modules (job, env, registry)
 │  └─ network/
 │     └─ vnet.bicep              # Virtual network, delegated subnet, and NSG for Container Apps
 └─ scripts/
-   ├─ ContainerApps-Deploy-Job.ps1        # Creates Container Apps job via Azure CLI
-   ├─ ContainerInit.ps1                   # Optional container init hook to install modules
-   ├─ Create-FederatedCredential.ps1      # Adds Entra federated credential for GitHub OIDC
+  ├─ ContainerApps-Deploy-Job.ps1        # Creates Container Apps job via Azure CLI
+  ├─ ContainerInit.ps1                   # Optional container init hook to install modules
+  ├─ Create-FederatedCredential.ps1      # Adds Entra federated credential for GitHub OIDC
   ├─ Build-GitHubRunnerImage.ps1         # Builds/pushes the Docker image defined in Dockerfile.github
-   └─ Deploy-GitHubRunner.ps1             # End-to-end deployment wrapper using Bicep
+  └─ Deploy-GitHubRunner.ps1             # End-to-end deployment wrapper using Bicep
 ```
 
 > **Action**: Copy `infra/parameters.sample.json` to `infra/parameters.dev.json` (or similar) and adjust per environment. Keep secrets external to source control.
@@ -65,7 +65,14 @@ project-github-runner/
 ## 5. Deployment Workflow (End-to-End)
 All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository root.
 
-1. **Authenticate & prepare Azure environment**
+1. **Install/Update Az modules**
+    ```powershell
+    Install-Module -Name Az -Scope CurrentUser -Force
+    Update-Module -Name Az.App -ErrorAction SilentlyContinue
+    ```
+    Reference: [`Install-Module`](https://learn.microsoft.com/powershell/module/powershellget/install-module?view=powershell-7.4), [`Update-Module`](https://learn.microsoft.com/powershell/module/powershellget/update-module?view=powershell-7.4).
+
+2. **Authenticate & prepare Azure environment**
     ```powershell
     # Sign in interactively
     Connect-AzAccount
@@ -75,48 +82,27 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
     Register-AzResourceProvider -ProviderNamespace Microsoft.OperationalInsights
     ```
 
-2. **Install/Update Az modules**
-    ```powershell
-    Install-Module -Name Az -Scope CurrentUser -Force
-    Update-Module -Name Az.App -ErrorAction SilentlyContinue
-    ```
-    Reference: [`Install-Module`](https://learn.microsoft.com/powershell/module/powershellget/install-module?view=powershell-7.4), [`Update-Module`](https://learn.microsoft.com/powershell/module/powershellget/update-module?view=powershell-7.4).
-
 3. **Set environment context**
     ```powershell
     $RESOURCE_GROUP = 'rg-github-runner-dev'
     $LOCATION       = 'eastus'
     $ENVIRONMENT    = 'env-github-runner'
     $ACR_NAME       = 'ghrunnerdevacr'
-    $IMAGE_NAME     = 'github-actions-runner:1.0'
+    $IMAGE_NAME     = 'github-actions-runner:2.329.0'
     $JOB_NAME       = 'github-actions-runner-job'
     $REPO_OWNER     = 'your-org'
     $REPO_NAME      = 'your-repo'
     $GITHUB_REPO    = "$REPO_OWNER/$REPO_NAME"
     ```
 
-
-4. **Build and push runner image**
-    - Create ACR: [`New-AzContainerRegistry`](https://learn.microsoft.com/powershell/module/az.containerregistry/new-azcontainerregistry?view=azps-latest).
-    - The repository includes `Dockerfile.github` and `github-actions-runner/entrypoint.sh`, which install the latest runner release (`v2.329.0`, see https://github.com/actions/runner/releases/tag/v2.329.0). Update these files if you need extra tooling.
-    - Build (and optionally push) the image using the helper script:
-        ```powershell
-        ./scripts/Build-GitHubRunnerImage.ps1 `
-          -ImageTag "$ACR_NAME.azurecr.io/github-actions-runner:2.329.0" `
-          -RunnerVersion '2.329.0' `
-          -RunnerArchitecture 'linux-x64' `
-          -Push
-        ```
-	This script wraps `docker build`/`docker push`, so ensure you are authenticated to your registry (for example, `az acr login --name $ACR_NAME`). Reference: [Azure Container Registry build and push](https://learn.microsoft.com/azure/container-registry/container-registry-get-started-azure-cli).
-
-5. **Customize Bicep parameters**
+4. **Customize Bicep parameters**
     ```powershell
     Copy-Item -Path ./infra/parameters.sample.json -Destination ./infra/parameters.dev.json -Force
     # Edit the copy to set values (location, environment name, ACR details, secrets references, etc.)
     ```
 	Bicep concepts: [Bicep overview](https://learn.microsoft.com/azure/azure-resource-manager/bicep/overview).
 
-6. **Deploy infrastructure**
+5. **Deploy infrastructure**
         ```powershell
         # Construct full image reference and deploy
         $FULL_IMAGE = "$ACR_NAME.azurecr.io/$IMAGE_NAME"
@@ -130,8 +116,7 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
             location                 = @{ value = $LOCATION }
             baseName                 = @{ value = 'gh-runner' }              # optional; controls resource names
             containerImage           = @{ value = $FULL_IMAGE }              # required
-            deployContainerRegistry  = @{ value = $true }                    # or false if using existing ACR
-            acrName                  = @{ value = $ACR_NAME }                # when creating a new ACR
+            acrName                  = @{ value = $ACR_NAME }
             githubPatSecretValue     = @{ value = '<secure-pat-or-use-secretmanagement>' }
             virtualNetworkAddressPrefix = @{ value = '10.10.0.0/16' }
             containerAppsSubnetPrefix  = @{ value = '10.10.0.0/23' }
@@ -148,6 +133,18 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
   - Optionally retrieves a GitHub runner registration token and injects it as `RUNNER_TOKEN` environment variable.
 	- Adds a federated credential to the job’s managed identity using Microsoft Graph (beta) if identity outputs are available.
 	- Applies virtual network defaults when `-TemplateParameters` omits them; override as needed per [Networking parameters](https://learn.microsoft.com/en-us/azure/container-apps/vnet-custom?tabs=bash#networking-parameters).
+  - Provisions Azure Container Registry, grants the job’s managed identity `AcrPull`, and wires the registry into the Container Apps job so no manual ACR setup is required.
+
+6. **Build and push runner image**
+    - The repository includes `Dockerfile.github` and `github-actions-runner/entrypoint.sh`, which install the latest runner release (`v2.329.0`, see https://github.com/actions/runner/releases/tag/v2.329.0). Update these files if you need extra tooling.
+    - Build (and optionally push) the image using the helper script after authenticating to the registry (for example, `az acr login --name $ACR_NAME`):
+        ```powershell
+        ./scripts/Build-GitHubRunnerImage.ps1 `
+          -ImageTag "$ACR_NAME.azurecr.io/github-actions-runner:2.329.0" `
+          -Push
+        ```
+	This script wraps `docker build`/`docker push`. The Bicep deployment automatically provisions the Azure Container Registry, so ensure the tag aligns with the `acrName` parameter.
+
 
 7. **Provision Container Apps job (alternate)**
 	If you need to regenerate the job definition on the fly or prototype outside Bicep, use `ContainerApps-Deploy-Job.ps1` to generate the equivalent Azure CLI command and optionally execute it.
@@ -165,6 +162,27 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
 	- Monitor job status: `az containerapp job execution list --name $JOB_NAME --resource-group $RESOURCE_GROUP --output table`
 	- Review logs in Log Analytics queries or via portal.
 
+### GitHub Actions bootstrap workflow
+
+The repository ships with `.github/workflows/bootstrap-infra.yml`, a GitHub Actions pipeline that automates the baseline deployment and container build steps described above.
+
+- **Triggers**
+  - Runs on pushes to `main` that touch `infra/**`, the runner Dockerfile, or the workflow file itself.
+  - Supports manual dispatch with inputs for `environment`, optional image tag suffix, and a parameter file override so you can bootstrap dev/stage/prod independently.
+- **Execution flow**
+  1. Resolves environment metadata (resource group, Azure region, ACR name, parameters file) and builds a fully qualified image tag.
+  2. Authenticates to Azure with OpenID Connect via [`azure/login@v2`](https://github.com/Azure/login) using federated credentials created per [Deploy Bicep with GitHub Actions](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-github-actions).
+  3. Ensures the target resource group exists using `az group create` (see [`az group create`](https://learn.microsoft.com/cli/azure/group?view=azure-cli-latest#az-group-create)).
+  4. Deploys `infra/main.bicep` through [`azure/bicep-deploy@v2`](https://github.com/Azure/bicep-deploy), passing the computed container image reference and ACR name.
+  5. Logs Docker into Azure Container Registry (`az acr login`) and builds/pushes the runner image with [`docker/build-push-action@v6`](https://github.com/docker/build-push-action#usage).
+  6. Publishes a run summary enumerating the resource group, image tag, and `Microsoft.App/jobs` output identifiers.
+- **Required GitHub secrets**
+  - `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`: service principal values tied to your federated credential trust that power `azure/login` (see [Configure deployment credentials](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-github-actions?tabs=CLI%2Copenid#configure-the-github-secrets)).
+  - `GITHUB_PAT_RUNNER`: the PAT consumed by the Bicep parameter `githubPatSecretValue`; keep scopes scoped to `Actions:Read`, `Administration:ReadWrite`, and `Metadata:Read`.
+- **Optional inputs**
+  - Provide a bespoke parameters file (for example `infra/parameters.prod.json`) when dispatching the workflow to align with environment-specific names, or update the lookup table in the workflow to match your naming standards.
+  - Override the default image tag suffix (defaults to `v${{ github.run_number }}`) when integrating with release pipelines.
+
 ## 6. Configuration Guidance
 | Parameter | Description | Source |
 | --- | --- | --- |
@@ -172,9 +190,7 @@ All commands assume PowerShell 7.4 (`pwsh`) with execution from the repository r
 | `baseName` | Base name used to compose resource names (workspace/env/job). | Bicep parameter |
 | `containerAppEnvironmentName` | Name for the Container Apps managed environment (defaults to `${baseName}-env`). | Bicep parameter |
 | `containerImage` | Fully qualified runner image (e.g. `myacr.azurecr.io/github-actions-runner:1.0`). | Bicep parameter |
-| `acrName` | Azure Container Registry name (when creating a new ACR). | Bicep parameter |
-| `deployContainerRegistry` | Whether to create a new ACR (`true`) or use existing (`false`). | Bicep parameter |
-| `existingAcrLoginServer`/`existingAcrResourceId` | Required when reusing an existing ACR. | Bicep parameter |
+| `acrName` | Azure Container Registry name created by the deployment. Must be globally unique. | Bicep parameter |
 | `githubOwner`/`githubRepo` | GitHub owner and repo. The script infers these from `-GitHubRepo`. | Bicep/script |
 | `githubPatSecretName` | Secret alias used inside the job (default `personal-access-token`). | Bicep parameter |
 | `githubPatSecretValue` | Secure PAT value (or use SecretManagement/Key Vault in the script). | Bicep/script input |
