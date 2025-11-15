@@ -103,7 +103,8 @@ jobs:
           inlineScript: |
             set -euo pipefail
             az group create \
-              --name "${{ steps.plan.outputs.resource-group }}" 
+              --name "${{ steps.plan.outputs.resource-group }}" \
+              --location "${{ steps.plan.outputs.location }}"
 
       - name: Deploy infrastructure (Bicep)
         id: deploy
@@ -114,7 +115,7 @@ jobs:
           scope: resourceGroup
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           resource-group-name: ${{ steps.plan.outputs.resource-group }}
-          location: ${{ steps.plan.outputs.location }}
+          # location: ${{ steps.plan.outputs.location }}
           name: github-runner-${{ steps.plan.outputs.environment }}
           template-file: project-github-runner/infra/main.bicep
           parameters-file: ${{ steps.plan.outputs.parameters-file }}
