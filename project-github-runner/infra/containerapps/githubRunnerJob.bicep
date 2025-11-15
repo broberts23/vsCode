@@ -133,14 +133,18 @@ var scaleRuleAuth = concat(baseScaleRuleAuth, additionalScaleRuleAuth)
 resource githubRunnerJob 'Microsoft.App/jobs@2025-01-01' = {
   name: name
   location: location
-  identity: {
-    type: identityType
-    userAssignedIdentities: empty(userAssignedIdentityId)
+  identity: union(
+    {
+      type: identityType
+    },
+    empty(userAssignedIdentityId)
       ? {}
       : {
-          '${userAssignedIdentityId}': {}
+          userAssignedIdentities: {
+            '${userAssignedIdentityId}': {}
+          }
         }
-  }
+  )
   properties: {
     environmentId: environmentId
     configuration: {
