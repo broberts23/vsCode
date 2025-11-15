@@ -106,8 +106,9 @@ jobs:
               --name "${{ steps.plan.outputs.resource-group }}" \
               --location "${{ steps.plan.outputs.location }}"
 
-      - name: Deploy infrastructure (Bicep)
-        id: deploy
+      - name: Deploy infrastructure (Bicep - prepare)
+        id: deploy_prepare
+        continue-on-error: true
         uses: azure/bicep-deploy@v2
         with:
           type: deployment
@@ -115,7 +116,6 @@ jobs:
           scope: resourceGroup
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           resource-group-name: ${{ steps.plan.outputs.resource-group }}
-          # location: ${{ steps.plan.outputs.location }}
           name: github-runner-${{ steps.plan.outputs.environment }}
           template-file: project-github-runner/infra/main.bicep
           parameters-file: ${{ steps.plan.outputs.parameters-file }}
@@ -144,6 +144,27 @@ jobs:
           file: project-github-runner/Dockerfile.github
           push: true
           tags: ${{ steps.plan.outputs.image-tag }}
+
+      - name: Finalize infrastructure (Bicep)
+        id: deploy
+        uses: azure/bicep-deploy@v2
+        with:
+          type: deployment
+          operation: create
+          scope: resourceGroup
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resource-group-name: ${{ steps.plan.outputs.resource-group }}
+          name: github-runner-${{ steps.plan.outputs.environment }}
+          template-file: project-github-runner/infra/main.bicep
+          parameters-file: ${{ steps.plan.outputs.parameters-file }}
+          parameters: |
+            {
+              "containerImage": "${{ steps.plan.outputs.image-tag }}",
+              "acrName": "${{ steps.plan.outputs.acr-name }}",
+              "githubAppApplicationId": "${{ vars.GH_APP_ID }}",
+              "githubAppInstallationId": "${{ vars.GH_APP_INSTALLATION_ID }}",
+              "githubAppPrivateKey": "${{ secrets.GH_APP_PRIVATE_KEY }}"
+            }
 
       - name: Publish bootstrap summary
         run: |
