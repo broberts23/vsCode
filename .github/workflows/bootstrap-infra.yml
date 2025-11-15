@@ -120,11 +120,11 @@ jobs:
           template-file: project-github-runner/infra/main.bicep
           parameters-file: ${{ steps.plan.outputs.parameters-file }}
           parameters: |
-            containerImage=${{ steps.plan.outputs.image-tag }}
-            acrName=${{ steps.plan.outputs.acr-name }}
-            githubAppApplicationId=${{ vars.GH_APP_ID }}
-            githubAppInstallationId=${{ vars.GH_APP_INSTALLATION_ID }}
-            githubAppPrivateKey=${{ secrets.GH_APP_PRIVATE_KEY }}
+            containerImage: "${{ steps.plan.outputs.image-tag }}"
+            acrName: "${{ steps.plan.outputs.acr-name }}"
+            githubAppApplicationId: "${{ vars.GH_APP_ID }}"
+            githubAppInstallationId: "${{ vars.GH_APP_INSTALLATION_ID }}"
+            githubAppPrivateKey: "${{ secrets.GH_APP_PRIVATE_KEY }}"
 
       - name: Sign in docker client to ACR
         run: |
