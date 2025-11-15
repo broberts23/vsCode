@@ -239,6 +239,9 @@ module githubAppKeySecret 'secrets/keyVaultSecret.bicep' = if (useGithubAppAuth)
     secretValue: githubAppPrivateKey
     tags: tags
   }
+  dependsOn: [
+    keyVault
+  ]
 }
 
 resource keyVaultResource 'Microsoft.KeyVault/vaults@2025-05-01' existing = if (useGithubAppAuth) {
