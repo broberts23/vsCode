@@ -32,6 +32,11 @@ resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
   properties: {
     adminUserEnabled: adminUserEnabled
     publicNetworkAccess: 'Enabled'
+    policies: {
+      azureADAuthenticationAsArmPolicy: {
+        status: 'Enabled'
+      }
+    }
   }
 }
 
