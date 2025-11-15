@@ -103,8 +103,7 @@ jobs:
           inlineScript: |
             set -euo pipefail
             az group create \
-              --name "${{ steps.plan.outputs.resource-group }}" \
-              --location "${{ steps.plan.outputs.location }}"
+              --name "${{ steps.plan.outputs.resource-group }}" 
 
       - name: Deploy infrastructure (Bicep)
         id: deploy
