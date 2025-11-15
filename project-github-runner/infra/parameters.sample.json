@@ -64,6 +64,9 @@
     "internalEnvironment": {
       "value": false
     },
+    "enableWorkloadProfiles": {
+      "value": true
+    },
     "workloadProfiles": {
       "value": [
         {

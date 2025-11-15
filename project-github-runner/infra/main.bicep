@@ -36,6 +36,9 @@ param dockerBridgeCidr string = '172.16.0.0/16'
 @description('Deploy the Container Apps environment as internal only when true (no public ingress).')
 param internalEnvironment bool = false
 
+@description('Enable workload-profile features for the Container Apps environment. When true, platform-reserved CIDR settings are ignored per ACA networking rules.')
+param enableWorkloadProfiles bool = true
+
 @description('Workload profile definitions for the Container Apps environment. Leave empty to default to the required Consumption profile when integrating with a delegated subnet.')
 param workloadProfiles array = []
 
@@ -194,6 +197,7 @@ module env 'containerapps/managedEnvironment.bicep' = {
     logAnalyticsCustomerId: works.outputs.customerId
     logAnalyticsSharedKey: logAnalyticsSharedKey
     tags: tags
+    enableWorkloadProfiles: enableWorkloadProfiles
     workloadProfiles: workloadProfiles
     infrastructureSubnetId: network.outputs.subnetId
     platformReservedCidr: platformReservedCidr
