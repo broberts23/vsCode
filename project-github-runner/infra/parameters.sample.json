@@ -64,6 +64,14 @@
     "internalEnvironment": {
       "value": false
     },
+    "workloadProfiles": {
+      "value": [
+        {
+          "name": "consumption",
+          "workloadProfileType": "Consumption"
+        }
+      ]
+    },
     "acrName": {
       "value": "ghrunneracr1234"
     },

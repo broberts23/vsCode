@@ -36,8 +36,8 @@ param dockerBridgeCidr string = '172.16.0.0/16'
 @description('Deploy the Container Apps environment as internal only when true (no public ingress).')
 param internalEnvironment bool = false
 
-@description('Optional workload profile type name (e.g., Consumption, D4). Leave empty to use default serverless profile.')
-param workloadProfileName string = ''
+@description('Workload profile definitions for the Container Apps environment. Leave empty to default to the required Consumption profile when integrating with a delegated subnet.')
+param workloadProfiles array = []
 
 @description('Fully qualified container image path (e.g., myacr.azurecr.io/github-actions-runner:1.0).')
 param containerImage string
@@ -194,7 +194,7 @@ module env 'containerapps/managedEnvironment.bicep' = {
     logAnalyticsCustomerId: works.outputs.customerId
     logAnalyticsSharedKey: logAnalyticsSharedKey
     tags: tags
-    workloadProfileName: workloadProfileName
+    workloadProfiles: workloadProfiles
     infrastructureSubnetId: network.outputs.subnetId
     platformReservedCidr: platformReservedCidr
     platformReservedDnsIp: platformReservedDnsIp
@@ -239,9 +239,6 @@ module githubAppKeySecret 'secrets/keyVaultSecret.bicep' = if (useGithubAppAuth)
     secretValue: githubAppPrivateKey
     tags: tags
   }
-  dependsOn: [
-    keyVault
-  ]
 }
 
 resource keyVaultResource 'Microsoft.KeyVault/vaults@2025-05-01' existing = if (useGithubAppAuth) {

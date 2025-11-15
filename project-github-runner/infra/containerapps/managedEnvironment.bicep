@@ -7,12 +7,21 @@ param logAnalyticsCustomerId string
 @secure()
 param logAnalyticsSharedKey string
 param tags object = {}
-param workloadProfileName string = ''
+param workloadProfiles array = []
 param infrastructureSubnetId string
 param platformReservedCidr string
 param platformReservedDnsIp string
 param dockerBridgeCidr string
 param internalEnvironment bool = false
+
+var defaultWorkloadProfiles = [
+  {
+    name: 'consumption'
+    workloadProfileType: 'Consumption'
+  }
+]
+
+var effectiveWorkloadProfiles = empty(workloadProfiles) ? defaultWorkloadProfiles : workloadProfiles
 
 resource managedEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
   name: name
@@ -33,14 +42,7 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2025-01-01' = {
       dockerBridgeCidr: dockerBridgeCidr
       internal: internalEnvironment
     }
-    workloadProfiles: empty(workloadProfileName)
-      ? []
-      : [
-          {
-            name: workloadProfileName
-            workloadProfileType: 'D4'
-          }
-        ]
+    workloadProfiles: effectiveWorkloadProfiles
   }
 }
 
