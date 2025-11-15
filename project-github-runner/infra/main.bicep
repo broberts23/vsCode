@@ -224,8 +224,6 @@ module acr 'containerapps/containerRegistry.bicep' = {
     location: location
     sku: acrSku
     tags: tags
-    principalId: userAssignedPrincipalId
-    principalType: 'ServicePrincipal'
   }
 }
 
@@ -388,6 +386,19 @@ var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
   '4633458b-17de-408a-b874-0445c86b69e6'
 )
+
+resource runnerIdentityAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(effectiveUserAssignedIdentityId)) {
+  name: guid(acrName, '${baseName}-runner-mi', 'acrPull')
+  scope: acrResource
+  dependsOn: [
+    acr
+  ]
+  properties: {
+    roleDefinitionId: acrPullRoleDefinitionId
+    principalId: userAssignedPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
 
 resource jobAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(acrName, '${baseName}-job', 'acrPull')

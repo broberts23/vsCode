@@ -12,16 +12,6 @@ param sku string = 'Basic'
 param adminUserEnabled bool = false
 param tags object = {}
 
-@description('Optional principal to grant AcrPull permissions to (e.g. user-assigned managed identity).')
-param principalId string = ''
-@allowed([
-  'ServicePrincipal'
-  'User'
-  'Group'
-  'ForeignGroup'
-])
-param principalType string = 'ServicePrincipal'
-
 resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
   name: name
   location: location
@@ -37,21 +27,6 @@ resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
         status: 'Enabled'
       }
     }
-  }
-}
-
-var acrPullRoleId = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions',
-  '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-)
-
-resource acrPullAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(principalId)) {
-  name: guid(registry.id, principalId, acrPullRoleId)
-  scope: registry
-  properties: {
-    roleDefinitionId: acrPullRoleId
-    principalId: principalId
-    principalType: principalType
   }
 }
 
