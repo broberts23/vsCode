@@ -157,9 +157,19 @@ var githubScaleRepositories = empty(githubRunnerRepositories)
   : githubRunnerRepositories
 var useGithubAppAuth = !empty(githubAppApplicationId) && !empty(githubAppInstallationId) && !empty(githubAppPrivateKey)
 var usePatAuth = !empty(githubPatSecretValue)
-var userAssignedPrincipalId = empty(userAssignedIdentityId)
-  ? ''
-  : reference(userAssignedIdentityId, '2018-11-30', 'Full').principalId
+var createRunnerIdentity = empty(userAssignedIdentityId)
+var runnerIdentityName = '${baseName}-job-mi'
+
+resource runnerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = if (createRunnerIdentity) {
+  name: runnerIdentityName
+  location: location
+  tags: tags
+}
+
+var effectiveUserAssignedIdentityId = createRunnerIdentity ? runnerIdentity.id : userAssignedIdentityId
+var userAssignedPrincipalId = createRunnerIdentity
+  ? reference(runnerIdentity.id, '2024-11-30', 'Full').principalId
+  : (empty(userAssignedIdentityId) ? '' : reference(userAssignedIdentityId, '2024-11-30', 'Full').principalId)
 var sanitizedBaseName = replace(toLower(baseName), '-', '')
 var keyVaultUniqueSuffix = substring(uniqueString(resourceGroup().id, baseName), 0, 13)
 var generatedKeyVaultName = take('kv${sanitizedBaseName}${keyVaultUniqueSuffix}', 24)
@@ -308,12 +318,14 @@ var runnerAuthEnv = useGithubAppAuth
 
 var runnerEnv = concat(baseRunnerEnv, runnerAuthEnv, additionalEnv)
 
+var jobSecretIdentity = empty(userAssignedIdentityId) ? 'system' : effectiveUserAssignedIdentityId
+
 var jobSecrets = useGithubAppAuth
   ? [
       {
         name: githubAppKeySecretName
         keyVaultUrl: githubAppKeySecretUri
-        identity: empty(userAssignedIdentityId) ? 'system' : userAssignedIdentityId
+        identity: jobSecretIdentity
       }
     ]
   : (usePatAuth
@@ -339,11 +351,11 @@ module job 'containerapps/githubRunnerJob.bicep' = {
     registries: [
       {
         server: registryLoginServer
-        identity: empty(userAssignedIdentityId) ? 'system' : userAssignedIdentityId
+        identity: empty(effectiveUserAssignedIdentityId) ? 'system' : effectiveUserAssignedIdentityId
       }
     ]
     systemAssigned: true
-    userAssignedIdentityId: userAssignedIdentityId
+    userAssignedIdentityId: effectiveUserAssignedIdentityId
     parallelism: 1
     replicaCompletionCount: 1
     replicaRetryLimit: 0
