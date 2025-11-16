@@ -52,7 +52,7 @@ jobs:
               RESOURCE_GROUP="rg-github-runner-dev"
               LOCATION="eastus"
               ACR_NAME="ghrunnerdevacr"
-              PARAMETERS_FILE="project-github-runner/infra/parameters.sample.json"
+              PARAMETERS_FILE="project-github-runner/infra/parameters.dev.json"
               ;;
             prod)
               RESOURCE_GROUP="rg-github-runner-prod"
