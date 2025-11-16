@@ -1,4 +1,4 @@
-name: Bootstrap Infrastructure
+name: Bootstrap Self-Hosted Runner Infra
 
 on:
   workflow_dispatch:

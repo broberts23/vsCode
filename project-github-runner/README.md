@@ -27,6 +27,8 @@ GitHub only issues runner registration tokens when the calling credential has th
 | `org`                                    | `POST /orgs/{org}/actions/runners/registration-token`               | **Organization** permissions → **Self-hosted runners: Read & write**                                       |
 | `ent`                                    | `POST /enterprises/{enterprise}/actions/runners/registration-token` | Enterprise administrators must grant the **Self-hosted runners** permission on the enterprise installation |
 
+Use `githubRunnerScope: "repo"` when `githubOwner` is a personal account such as `broberts23`, so the template targets the repository endpoints and the GitHub App only needs **Repository → Administration (Read & write)** plus access to that repo. Use `githubRunnerScope: "org"` only when `githubOwner` is a real GitHub Organization and the app is installed on that organization with **Organization → Self-hosted runners (Read & write)**.
+
 Be sure the installation is granted access to the exact repositories you list under `githubRunnerRepositories`. If the permission or repository access is missing, GitHub responds with `403 Resource not accessible by integration`; that message indicates the installation token lacks the scope documented above (see https://docs.github.com/en/rest/using-the-rest-api/troubleshooting#resource-not-accessible).
 
 ## 1. Clone and inspect

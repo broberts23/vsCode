@@ -2,10 +2,33 @@ FROM ghcr.io/actions/actions-runner:2.329.0
 
 USER root
 
-# install curl and jq
-RUN apt-get update && apt-get install -y curl jq && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Install prerequisites, PowerShell 7.4, Azure CLI, Bicep, Az and Microsoft.Graph modules
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    curl \
+    jq \
+    ca-certificates \
+    apt-transport-https \
+    gnupg \
+    software-properties-common \
+    && mkdir -p /etc/apt/keyrings \
+    # Install PowerShell 7.4
+    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/keyrings/microsoft.gpg > /dev/null \
+    && chmod go+r /etc/apt/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" > /etc/apt/sources.list.d/microsoft-prod.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends powershell=7.4.* \
+    # Install Azure CLI
+    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | tee /etc/apt/keyrings/microsoft-azurecli.gpg > /dev/null \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft-azurecli.gpg] https://packages.microsoft.com/repos/azure-cli/ jammy main" > /etc/apt/sources.list.d/azure-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends azure-cli \
+    # Install Bicep CLI via Azure CLI
+    && az bicep install \
+    # Install Az and Microsoft.Graph modules for all users
+    && pwsh -NoLogo -NoProfile -Command "Install-Module -Name Az -Repository PSGallery -Scope AllUsers -Force -AllowClobber; Install-Module -Name Microsoft.Graph -Repository PSGallery -Scope AllUsers -Force -AllowClobber" \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY github-actions-runner/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
