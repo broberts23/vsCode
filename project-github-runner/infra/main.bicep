@@ -167,9 +167,19 @@ resource runnerIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-1
 }
 
 var effectiveUserAssignedIdentityId = createRunnerIdentity ? runnerIdentity.id : userAssignedIdentityId
+var providedIdentitySegments = split(userAssignedIdentityId, '/')
+var providedIdentitySubscriptionId = length(providedIdentitySegments) >= 3 ? providedIdentitySegments[2] : ''
+var providedIdentityResourceGroup = length(providedIdentitySegments) >= 5 ? providedIdentitySegments[4] : ''
+var providedIdentityName = length(providedIdentitySegments) >= 9 ? providedIdentitySegments[8] : ''
+
+resource providedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' existing = if (!createRunnerIdentity && !empty(userAssignedIdentityId)) {
+  name: providedIdentityName
+  scope: resourceGroup(providedIdentitySubscriptionId, providedIdentityResourceGroup)
+}
+
 var userAssignedPrincipalId = createRunnerIdentity
-  ? reference(runnerIdentity.id, '2024-11-30', 'Full').principalId
-  : (empty(userAssignedIdentityId) ? '' : reference(userAssignedIdentityId, '2024-11-30', 'Full').principalId)
+  ? runnerIdentity!.properties.principalId
+  : (!empty(userAssignedIdentityId) ? providedIdentity!.properties.principalId : '')
 var sanitizedBaseName = replace(toLower(baseName), '-', '')
 var keyVaultUniqueSuffix = substring(uniqueString(resourceGroup().id, baseName), 0, 13)
 var generatedKeyVaultName = take('kv${sanitizedBaseName}${keyVaultUniqueSuffix}', 24)
