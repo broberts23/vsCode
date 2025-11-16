@@ -20,7 +20,7 @@
       "value": "1.0"
     },
     "containerMemory": {
-      "value": "4Gi"
+      "value": "2Gi"
     },
     "runnerLabels": {
       "value": "self-hosted,azure-container-apps"
