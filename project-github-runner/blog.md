@@ -228,7 +228,17 @@ Reference: https://keda.sh/docs/latest/scalers/github-runner/
 ## Security, identity, and secrets
 
 - Registry auth: Use managed identities to pull from ACR. Assign `AcrPull` to the job’s user‑assigned identity and configure the registry `identity` as either the UAMI resource ID or `system` for system‑assigned identity. Docs: https://learn.microsoft.com/azure/container-apps/containers?tabs=bicep#managed-identity-with-azure-container-registry
-- GitHub auth: Prefer GitHub App authentication. Store `GH_APP_ID`/`GH_APP_INSTALLATION_ID` as environment variables and the PEM private key in an environment secret per https://docs.github.com/actions/security-guides/using-secrets-in-github-actions. The bootstrap workflow passes these into the Bicep deployment, which persists the key in Azure Key Vault and grants the job identity `Key Vault Secrets User` so the runner and scaler can mint JWTs and installation tokens (see https://learn.microsoft.com/en-us/azure/container-apps/manage-secrets?tabs=arm-bicep and https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/about-authentication-with-a-github-app). Keep a minimal-scope PAT only as a fallback.
+- GitHub auth: Prefer GitHub App authentication. Store `GH_APP_ID`/`GH_APP_INSTALLATION_ID` as environment variables and the PEM private key in an environment secret per https://docs.github.com/actions/security-guides/using-secrets-in-github-actions. The bootstrap workflow passes these into the Bicep deployment, which persists the key in Azure Key Vault and grants the job identity `Key Vault Secrets User` so the runner and scaler can mint JWTs and installation tokens (see https://learn.microsoft.com/en-us/azure/container-apps/manage-secrets?tabs=arm-bicep and https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/about-authentication-with-a-github-app). Keep a minimal-scope PAT only as a fallback. When using a personal GitHub user (for example `broberts23`) as `githubOwner`, set `githubRunnerScope` to `repo` so the scaler and runner use `/repos/{owner}/{repo}` endpoints; only use `org` scope when `githubOwner` is a real GitHub Organization where `/orgs/{org}` and `/orgs/{org}/repos` resolve successfully.
+- GitHub App permission matrix:
+
+  | Runner scope | Registration endpoint                                               | Required permission                                   |
+  | ------------ | ------------------------------------------------------------------- | ----------------------------------------------------- |
+  | `repo`       | `POST /repos/{owner}/{repo}/actions/runners/registration-token`     | Repository → **Administration (Read & write)**        |
+  | `org`        | `POST /orgs/{org}/actions/runners/registration-token`               | Organization → **Self-hosted runners (Read & write)** |
+  | `ent`        | `POST /enterprises/{enterprise}/actions/runners/registration-token` | Enterprise-level **Self-hosted runners** permission   |
+
+  These requirements come directly from the GitHub REST reference (see https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-a-registration-token-for-a-repository and https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-a-registration-token-for-an-organization). If the installation token lacks the relevant permission or repository access, the API returns `403 Resource not accessible by integration` per https://docs.github.com/en/rest/using-the-rest-api/troubleshooting#resource-not-accessible. Update the GitHub App settings and re-authorize the installation whenever you change permissions or repository selections so GitHub issues tokens with the expanded scope.
+
 - No long‑lived runner nodes: Ephemeral job executions mitigate standing privilege and drift in base images. Version images and pin tags.
 - Secrets handling: Never embed raw secrets in parameter files or scripts. Retrieve values locally with SecretManagement or GitHub environments, rely on Key Vault references for runtime access, and avoid logging secret material.
 
@@ -238,6 +248,13 @@ Reference: https://keda.sh/docs/latest/scalers/github-runner/
 - Health: Use `az containerapp job execution list` (or portal) to inspect recent executions and statuses.
 - Cost: With event‑driven jobs, you pay only while containers run. Idle time is effectively zero when there’s no queued work.
 - Image hygiene: Keep runner images minimal and regularly updated. If builds require large toolchains, consider multiple label‑targeted images to limit bloat.
+
+## Troubleshooting GitHub App 403 responses
+
+- Watch runner logs: `github-actions-runner/entrypoint.sh` now logs the HTTP status code and response body whenever GitHub rejects a request, so you’ll see errors such as `GitHub API POST ...registration-token failed (403): {"message":"Resource not accessible by integration"...}` instead of a silent curl failure.
+- Check permissions: Use the table above to confirm the GitHub App’s Repository/Organization/Enterprise permissions align with the `githubRunnerScope`. The REST endpoint documentation lists the exact permission required for each scope (https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-a-registration-token-for-a-repository).
+- Inspect `X-Accepted-GitHub-Permissions`: GitHub includes this header in the response when a permission is missing. Capture the header via `curl -i` or the runner logs to see what permission GitHub expected (see https://docs.github.com/en/rest/using-the-rest-api/troubleshooting#resource-not-accessible).
+- Validate installation targeting: Open the GitHub App installation page and ensure every repository listed in `githubRunnerRepositories` is selected (or choose “All repositories”). After changing the selection, re-authorize the installation so tokens inherit the new repo list.
 
 ## Implementation details in this repo
 

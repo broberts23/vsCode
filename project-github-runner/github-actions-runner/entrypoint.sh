@@ -35,6 +35,47 @@ normalize_private_key() {
   printf '%s' "${APP_PRIVATE_KEY}" | sed 's/\\n/\n/g' | sed 's/\r$//'
 }
 
+github_api_request() {
+  local method=$1
+  local url=$2
+  local auth_header=$3
+  local data=${4:-}
+  local tmp status body
+
+  tmp=$(mktemp)
+  local curl_args=(-sS -o "${tmp}" -w '%{http_code}' -X "${method}" "${url}" \
+    -H 'Accept: application/vnd.github+json' \
+    -H 'User-Agent: azure-container-apps-runner' \
+    -H 'X-GitHub-Api-Version: 2022-11-28' \
+    -H "${auth_header}")
+
+  if [[ -n "${data}" ]]; then
+    curl_args+=(-d "${data}")
+  fi
+
+  if ! status=$(curl "${curl_args[@]}"); then
+    rm -f "${tmp}"
+    echo "Failed to reach GitHub API (${method} ${url})." >&2
+    return 1
+  fi
+
+  body=$(<"${tmp}")
+  rm -f "${tmp}"
+
+  status=$(printf '%s' "${status}" | tr -d '\r\n')
+  if [[ ! "${status}" =~ ^[0-9]+$ ]]; then
+    echo "GitHub API ${method} ${url} returned an invalid status: ${status}" >&2
+    return 1
+  fi
+
+  if (( status < 200 || status >= 300 )); then
+    echo "GitHub API ${method} ${url} failed (${status}): ${body}" >&2
+    return 1
+  fi
+
+  printf '%s' "${body}"
+}
+
 request_runner_token_with_github_app() {
   if [[ -z "${APP_ID:-}" || -z "${APP_INSTALLATION_ID:-}" ]]; then
     echo "APP_ID and APP_INSTALLATION_ID must be provided when APP_PRIVATE_KEY is set." >&2
@@ -55,10 +96,10 @@ request_runner_token_with_github_app() {
   rm -f "${key_file}"
 
   local installation_response
-  installation_response=$(curl -fsSL -X POST "${GITHUB_API_URL}/app/installations/${APP_INSTALLATION_ID}/access_tokens" \
-    -H "Authorization: Bearer ${jwt}" \
-    -H "Accept: application/vnd.github+json" \
-    -H "User-Agent: azure-container-apps-runner")
+  if ! installation_response=$(github_api_request POST "${GITHUB_API_URL}/app/installations/${APP_INSTALLATION_ID}/access_tokens" "Authorization: Bearer ${jwt}"); then
+    echo "Failed to exchange GitHub App JWT for an installation token." >&2
+    exit 1
+  fi
 
   local installation_token
   installation_token=$(printf '%s' "${installation_response}" | jq -r '.token')
@@ -69,10 +110,10 @@ request_runner_token_with_github_app() {
   fi
 
   local registration_response
-  registration_response=$(curl -fsSL -X POST "${REGISTRATION_TOKEN_API_URL}" \
-    -H "Authorization: Bearer ${installation_token}" \
-    -H "Accept: application/vnd.github+json" \
-    -H "User-Agent: azure-container-apps-runner")
+  if ! registration_response=$(github_api_request POST "${REGISTRATION_TOKEN_API_URL}" "Authorization: Bearer ${installation_token}"); then
+    echo "Failed to retrieve runner registration token using GitHub App authentication." >&2
+    exit 1
+  fi
 
   local token
   token=$(printf '%s' "${registration_response}" | jq -r '.token')
@@ -106,11 +147,12 @@ if [[ -z "${RUNNER_TOKEN:-}" ]]; then
     fi
 
     echo "Requesting registration token from GitHub using PAT..."
-    RUNNER_TOKEN=$(curl -fsSL -X POST "${REGISTRATION_TOKEN_API_URL}" \
-      -H "Authorization: token ${GITHUB_PAT}" \
-      -H "Accept: application/vnd.github+json" \
-      -H "User-Agent: azure-container-apps-runner" \
-      | jq -r '.token')
+    if ! registration_response=$(github_api_request POST "${REGISTRATION_TOKEN_API_URL}" "Authorization: token ${GITHUB_PAT}"); then
+      echo "Failed to retrieve runner registration token using PAT authentication." >&2
+      exit 1
+    fi
+
+    RUNNER_TOKEN=$(printf '%s' "${registration_response}" | jq -r '.token')
 
     if [[ -z "${RUNNER_TOKEN}" || "${RUNNER_TOKEN}" == "null" ]]; then
       echo "Failed to retrieve runner registration token using PAT authentication." >&2

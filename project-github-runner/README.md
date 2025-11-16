@@ -17,6 +17,18 @@ This repo deploys ephemeral GitHub Actions runners on Azure Container Apps jobs 
   - GitHub App (recommended) with App ID, installation ID, and PEM private key, or
   - Personal Access Token (PAT) with `repo`/`workflow` scopes (fallback).
 
+### GitHub App permissions you must grant
+
+GitHub only issues runner registration tokens when the calling credential has the correct fine-grained permission for the endpoint you target. Configure your GitHub App with the following access levels before installing it on your repo or organization (see the REST reference for the registration endpoints at https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-a-registration-token-for-a-repository and https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#create-a-registration-token-for-an-organization):
+
+| Runner scope (`githubRunnerScope`)       | Registration endpoint                                               | Required GitHub App permission                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `repo` (user-owned or single repository) | `POST /repos/{owner}/{repo}/actions/runners/registration-token`     | **Repository** permissions → **Administration: Read & write**                                              |
+| `org`                                    | `POST /orgs/{org}/actions/runners/registration-token`               | **Organization** permissions → **Self-hosted runners: Read & write**                                       |
+| `ent`                                    | `POST /enterprises/{enterprise}/actions/runners/registration-token` | Enterprise administrators must grant the **Self-hosted runners** permission on the enterprise installation |
+
+Be sure the installation is granted access to the exact repositories you list under `githubRunnerRepositories`. If the permission or repository access is missing, GitHub responds with `403 Resource not accessible by integration`; that message indicates the installation token lacks the scope documented above (see https://docs.github.com/en/rest/using-the-rest-api/troubleshooting#resource-not-accessible).
+
 ## 1. Clone and inspect
 
 ```bash
@@ -43,6 +55,7 @@ Edit `infra/parameters.dev.json` and set at minimum:
 - `containerImage` (for example `myacr.azurecr.io/github-actions-runner:2.329.0`)
 - `acrName`
 - `githubOwner` / `githubRepo`
+- `githubRunnerScope` (set to `repo` when `githubOwner` is a user account like `broberts23`; use `org` only when `githubOwner` is a real GitHub Organization)
 - GitHub auth: either `githubAppApplicationId`/`githubAppInstallationId`/`githubAppPrivateKey` or `githubPatSecretValue`.
 
 ## 3. Build and push the runner image
@@ -102,6 +115,13 @@ Remove-AzResourceGroup -Name $RESOURCE_GROUP -Force
 ```
 
 This removes all Azure resources created by the deployment. Remember to delete/rotate any GitHub PATs or GitHub App keys you created.
+
+## Troubleshooting GitHub App authentication
+
+- **403 `Resource not accessible by integration`**: This message means the GitHub App installation token does not have the permission documented for the registration endpoint you are calling. Revisit the table above to ensure Repository → Administration (read & write) or Organization → Self-hosted runners (read & write) is enabled, then re-authorize the installation so the updated permission applies (see https://docs.github.com/en/rest/using-the-rest-api/troubleshooting#resource-not-accessible).
+- **Wrong scope**: If `githubRunnerScope` is `org` but `githubOwner` is a personal account, GitHub will route you to `/orgs/{owner}` and return 404/403. Set the scope to `repo` for user-owned repositories so both the runner and scaler call `/repos/{owner}/{repo}`.
+- **Missing repository access**: Opening the GitHub App installation page shows the repositories granted to the installation. Ensure every repo monitored by `githubRunnerRepositories` is selected or switch the installation to "All repositories".
+- **Inspecting errors**: The runner container now logs the HTTP status code and body for every GitHub API call, so you can see the exact error payload from `POST .../registration-token`. The response also includes the `X-Accepted-GitHub-Permissions` header, which tells you what permission GitHub expected for that endpoint.
 
 ## More details
 
