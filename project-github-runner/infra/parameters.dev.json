@@ -1,0 +1,85 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+    "baseName": {
+      "value": "gh-runner"
+    },
+    "tags": {
+      "value": {
+        "project": "github-runner"
+      }
+    },
+    "containerImage": {
+      "value": "ghrunneracr1234.azurecr.io/github-actions-runner:2.329.0"
+    },
+    "containerCpu": {
+      "value": "1.0"
+    },
+    "containerMemory": {
+      "value": "4Gi"
+    },
+    "runnerLabels": {
+      "value": "self-hosted,azure-container-apps"
+    },
+    "githubRunnerScope": {
+      "value": "org"
+    },
+    "githubOwner": {
+      "value": "broberts23"
+    },
+    "githubRepo": {
+      "value": "vsCode"
+    },
+    "githubAppApplicationId": {
+      "value": "<replace-with-github-app-id>"
+    },
+    "githubAppInstallationId": {
+      "value": "<replace-with-installation-id>"
+    },
+    "githubAppPrivateKey": {
+      "value": "-----BEGIN PRIVATE KEY-----\n<replace-with-github-app-private-key>\n-----END PRIVATE KEY-----"
+    },
+    "githubPatSecretValue": {
+      "value": ""
+    },
+    "virtualNetworkAddressPrefix": {
+      "value": "10.10.0.0/16"
+    },
+    "containerAppsSubnetPrefix": {
+      "value": "10.10.0.0/23"
+    },
+    "platformReservedCidr": {
+      "value": "10.200.0.0/24"
+    },
+    "platformReservedDnsIp": {
+      "value": "10.200.0.10"
+    },
+    "dockerBridgeCidr": {
+      "value": "172.16.0.0/16"
+    },
+    "internalEnvironment": {
+      "value": false
+    },
+    "enableWorkloadProfiles": {
+      "value": true
+    },
+    "workloadProfiles": {
+      "value": [
+        {
+          "name": "consumption",
+          "workloadProfileType": "Consumption"
+        }
+      ]
+    },
+    "acrName": {
+      "value": "ghrunneracr1234"
+    },
+    "acrSku": {
+      "value": "Standard"
+    }
+  }
+}
