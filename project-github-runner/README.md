@@ -54,25 +54,17 @@ Edit `infra/parameters.dev.json` and set at minimum:
 
 - `location`
 - `baseName`
-- `containerImage` (for example `myacr.azurecr.io/github-actions-runner:2.329.0`)
+- `containerImage` (temporary placeholder, for example `example.azurecr.io/github-actions-runner:0.0.0`)
 - `acrName`
 - `githubOwner` / `githubRepo`
 - `githubRunnerScope` (set to `repo` when `githubOwner` is a user account like `broberts23`; use `org` only when `githubOwner` is a real GitHub Organization)
 - GitHub auth: either `githubAppApplicationId`/`githubAppInstallationId`/`githubAppPrivateKey` or `githubPatSecretValue`.
 
-## 3. Build and push the runner image
+At this point you have not created the ACR or image yet; the initial deployment will create the Azure resources and bootstrap the job with a placeholder image value.
 
-```powershell
-$ACR_NAME  = 'myacrname'
-$IMAGE_TAG = "$ACR_NAME.azurecr.io/github-actions-runner:2.329.0"
+## 3. Deploy Azure infra (first pass)
 
-az acr login --name $ACR_NAME
-./scripts/Build-GitHubRunnerImage.ps1 -ImageTag $IMAGE_TAG -Push
-```
-
-Update `containerImage` in your parameters file to match `$IMAGE_TAG`.
-
-## 4. Deploy infra with PowerShell
+Deploy the Bicep template once to create the resource group, Container Apps environment, Log Analytics workspace, and Azure Container Registry. The job will be deployed but will reference your temporary `containerImage` until you build and push the real one.
 
 ```powershell
 $RESOURCE_GROUP = 'rg-github-runner-dev'
@@ -87,9 +79,38 @@ $GITHUB_REPO    = 'your-org/your-repo'
   -TemplateParametersPath ./infra/parameters.dev.json
 ```
 
-The script will create the resource group (if needed), deploy `infra/main.bicep`, provision ACR, and wire the Container Apps job, identities, and Key Vault (for GitHub App private key).
+After this completes you will have an ACR named according to `acrName` in your parameters file.
 
-## 5. Point a workflow at the runners
+## 4. Build and push the runner image
+
+Now that ACR exists, build the runner image locally and push it to that registry.
+
+```powershell
+$ACR_NAME  = '<acr-name-from-parameters>'
+$IMAGE_TAG = "$ACR_NAME.azurecr.io/github-actions-runner:2.329.0"
+
+az acr login --name $ACR_NAME
+./scripts/Build-GitHubRunnerImage.ps1 -ImageTag $IMAGE_TAG -Push
+```
+
+Update `containerImage` in `infra/parameters.dev.json` to match `$IMAGE_TAG`.
+
+## 5. Redeploy infra to pick up the image
+
+Run the deployment script again so the Container Apps job points at the image you just pushed.
+
+```powershell
+./scripts/Deploy-GitHubRunner.ps1 `
+  -ResourceGroupName $RESOURCE_GROUP `
+  -Location $LOCATION `
+  -GitHubRepo $GITHUB_REPO `
+  -TemplatePath ./infra/main.bicep `
+  -TemplateParametersPath ./infra/parameters.dev.json
+```
+
+This second pass updates the job definition to use the correct `containerImage` while reusing the existing resource group, Container Apps environment, Log Analytics workspace, and ACR.
+
+## 6. Point a workflow at the runners
 
 In your GitHub repo, configure a workflow to target the labels in `runnerLabels` (default `self-hosted,azure-container-apps`):
 
@@ -110,7 +131,7 @@ az containerapp job execution list \
   --output table
 ```
 
-## 6. Clean up
+## 7. Clean up
 
 ```powershell
 Remove-AzResourceGroup -Name $RESOURCE_GROUP -Force
