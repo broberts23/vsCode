@@ -62,7 +62,7 @@ Components and responsibilities:
 - **Compute Boundary**: A Container Apps environment hosts the job. I treat this as the security and logging boundary for CI workloads—anything that can touch internal build systems or package feeds lives in this environment or its peered VNets.
 - **Network Access**: A dedicated virtual network and delegated subnet isolate the environment, while a network security group allows you to enforce egress controls or lock down ingress. This trades a bit of deployment complexity for the ability to keep runners off the public internet.
 - **Image Supply**: The runner image is pulled from ACR (or another registry). I default to managed identity authentication to ACR so there are no registry passwords or admin credentials in the deployment.
-- **Identity**: The job always gets a system-assigned identity. You can optionally attach a user‑assigned managed identity if you want a stable principal across redeployments or to share the identity with other workloads.
+- **Identity**: The Azure Container Apps job has the system-assigned identity enabled with ACR pull rights. By default the deployment also creates and attaches a user-assigned managed identity that you can reuse across redeployments or share with other workloads.
 - **Secrets**: GitHub App metadata (App ID, installation ID) is provided via GitHub environment variables and the private key arrives as an environment secret. The deployment copies the PEM into Azure Key Vault and references it from the Container Apps job so both the runner bootstrap and KEDA scaler can authenticate without hard-coding secrets in Bicep.
 - **Scaling**: A KEDA scaler queries GitHub for queued jobs using the PAT/App credentials. When the queue length exceeds your target, KEDA triggers ACA job executions. Each execution runs one ephemeral runner container that exits after the workflow completes.
 
@@ -90,6 +90,7 @@ When you trigger the workflow:
 2. The scaler detects the queue depth (`targetWorkflowQueueLength` defaults to `1`) and schedules up to nine executions within the Container Apps environment.
 3. Each execution registers as an ephemeral runner, processes its portion of the matrix, and exits.
 4. You can monitor progress with `az containerapp job execution list --name <jobName> --resource-group <rg>` and inspect job output through Log Analytics queries.
+5. You can monitor the progress of individual executions with `az containerapp job execution show --name <executionName> --job-name <jobName> --resource-group <rg>`.
 
 This pipeline provides a repeatable way to validate scale-out, confirm network access, and capture telemetry before onboarding production workloads.
 
@@ -227,9 +228,12 @@ Reference: https://keda.sh/docs/latest/scalers/github-runner/
 
 ## Security, identity, and secrets
 
+The design prioritizes least privilege and ephemeral credentials:
+
 - Registry auth: Use managed identities to pull from ACR. Assign `AcrPull` to the job’s user‑assigned identity and configure the registry `identity` as either the UAMI resource ID or `system` for system‑assigned identity. Docs: https://learn.microsoft.com/azure/container-apps/containers?tabs=bicep#managed-identity-with-azure-container-registry
 - GitHub auth: Prefer GitHub App authentication. Store `GH_APP_ID`/`GH_APP_INSTALLATION_ID` as environment variables and the PEM private key in an environment secret per https://docs.github.com/actions/security-guides/using-secrets-in-github-actions. The bootstrap workflow passes these into the Bicep deployment, which persists the key in Azure Key Vault and grants the job identity `Key Vault Secrets User` so the runner and scaler can mint JWTs and installation tokens (see https://learn.microsoft.com/en-us/azure/container-apps/manage-secrets?tabs=arm-bicep and https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/about-authentication-with-a-github-app). Keep a minimal-scope PAT only as a fallback.
 - Scope selection for user vs. org owners: When using a personal GitHub user (for example `broberts23`) as `githubOwner`, set `githubRunnerScope` to `repo` so the scaler and runner use `/repos/{owner}/{repo}` endpoints and the GitHub App only needs **Repository → Administration (Read & write)** on that repo. Use `githubRunnerScope: "org"` only when `githubOwner` is a real GitHub Organization where `/orgs/{org}` and `/orgs/{org}/repos` resolve successfully and the app is installed on that organization with **Organization → Self-hosted runners (Read & write)**.
+
 - GitHub App permission matrix:
 
   | Runner scope | Registration endpoint                                               | Required permission                                   |
@@ -270,24 +274,42 @@ The composed `infra/main.bicep` exposes these key parameters (non‑exhaustive):
 
 The `containerapps/githubRunnerJob.bicep` module renders the `rules: [ { type: 'github-runner', metadata, auth } ]` block and builds metadata/auth maps from your parameters, keeping the job specification clean and auditable.
 
-## GitHub Actions bootstrap workflow
+## GitHub Actions infrastructure bootstrap workflow
 
-The repository now includes `.github/workflows/bootstrap-infra.yml`, a GitHub Actions pipeline that automates the deployment sequence:
+The repository includes `.github/workflows/bootstrap-infra.yml`, a GitHub Actions pipeline that builds the runner image and deploys the Bicep template end to end.
 
-- Triggered by manual dispatch with environment-specific inputs.
-- Resolves the resource group, Azure region, Azure Container Registry, and parameters file, then authenticates with OpenID Connect using [`azure/login@v2`](https://github.com/Azure/login) configured per [Deploy Bicep with GitHub Actions](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-github-actions).
-- Ensures the target resource group exists via `az group create` (see [`az group create`](https://learn.microsoft.com/cli/azure/group?view=azure-cli-latest#az-group-create)) and deploys `infra/main.bicep` using [`azure/bicep-deploy@v2`](https://github.com/Azure/bicep-deploy).
-- Authenticates Docker to ACR (`az acr login`) and builds/pushes the runner image with [`docker/build-push-action@v6`](https://github.com/docker/build-push-action#usage), tagging images with a suffix such as `v${{ github.run_number }}`.
-- Appends a job summary containing the image URL plus the container app job/environment IDs output from the template.
+High-level behavior:
 
-Required GitHub environment configuration:
+- **Trigger and inputs**: The workflow runs on `workflow_dispatch` with inputs for `environment` (`dev` or `prod`), an optional `imageTagSuffix`, and an optional `parametersFile` override.
+- **Environment resolution**: The `Resolve deployment configuration` step maps the logical environment to concrete values:
+  - `dev` → `rg-github-runner-dev`, `eastus`, `ghrunnerdevacr`, parameters file `project-github-runner/infra/parameters.dev.json`.
+  - `prod` → `rg-github-runner-prod`, `eastus`, `ghrunnerprodacr`, parameters file `project-github-runner/infra/parameters.prod.json`.
+  - If `parametersFile` is provided, it overrides the default; the step fails fast if the file does not exist.
+- **Image tagging**: The same step computes a container image tag of the form `<acrName>.azurecr.io/github-actions-runner:<suffix>`, where `<suffix>` defaults to `v${{ github.run_number }}` unless overridden by `imageTagSuffix`.
 
-- `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (for OIDC auth).
-- Environment variables `GH_APP_ID` and `GH_APP_INSTALLATION_ID` to provide GitHub App metadata to the workflow. Copy the app ID from the GitHub App settings page (see [Navigating to your GitHub App settings](https://docs.github.com/en/apps/maintaining-github-apps/modifying-a-github-app-registration#navigating-to-your-github-app-settings)) and use webhook payloads or the REST endpoints listed in [Authenticating as a GitHub App installation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation#generating-an-installation-access-token) to locate the installation ID.
-- Environment secret `GH_APP_PRIVATE_KEY`, generated from the GitHub App settings per [Managing private keys for GitHub Apps](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps), which the deployment writes into Azure Key Vault for runtime access (see https://learn.microsoft.com/en-us/azure/container-apps/manage-secrets?tabs=arm-bicep).
-- Optional repository secret `GITHUB_PAT_RUNNER` remains supported for legacy PAT-based deployments.
+Deployment sequence in the job:
 
-When dispatching manually you can supply a custom parameters file—e.g., `infra/parameters.prod.json`—to align with environment-specific naming, or adjust the case statement in the workflow to map additional environments.
+1. **Checkout**: `actions/checkout@v4` pulls the repo so Docker and Bicep can see `project-github-runner`.
+2. **Azure login (OIDC)**: [`azure/login@v2`](https://github.com/Azure/login) authenticates to Azure using federated credentials, driven by `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID` in GitHub secrets. This follows the guidance in [Deploy Bicep with GitHub Actions](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-github-actions).
+3. **Resource group creation**: [`azure/cli@v2`](https://github.com/Azure/cli) runs `az group create` to ensure the target resource group exists (see [`az group create`](https://learn.microsoft.com/cli/azure/group?view=azure-cli-latest#az-group-create)).
+4. **Prepare infrastructure deployment**: An initial `azure/bicep-deploy@v2` step (`Deploy infrastructure (Bicep - prepare)`) runs against `infra/main.bicep` with the resolved parameters file and overrides for:
+   - `containerImage`: the computed ACR image tag.
+   - `acrName`: the resolved registry name.
+   - `githubAppApplicationId`, `githubAppInstallationId`, `githubAppPrivateKey`: sourced from environment variables `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, and secret `GH_APP_PRIVATE_KEY` respectively.
+     This step is `continue-on-error: true` so the image build can proceed even if the first deployment attempt fails (for example, on a cold start).
+5. **ACR login**: A plain `az acr login` signs the Docker client into the target ACR so the subsequent build can push the image.
+6. **Build and push image**: [`docker/setup-buildx-action@v3`](https://github.com/docker/setup-buildx-action) prepares Buildx, and [`docker/build-push-action@v6`](https://github.com/docker/build-push-action#usage) builds `project-github-runner/Dockerfile.github` with context `project-github-runner` and pushes it to the tag computed earlier.
+7. **Finalize infrastructure deployment**: A second `azure/bicep-deploy@v2` step reruns the deployment of `infra/main.bicep` with the same parameters file and overrides, guaranteeing that the Container Apps job uses the freshly pushed image tag.
+8. **Summary**: The final step appends a summary to the GitHub Actions job log containing the environment, resource group, image tag, and the Container Apps job and environment IDs returned by the Bicep deployment.
+
+Required GitHub configuration for the workflow:
+
+- **Azure OIDC**: Secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` for federated authentication.
+- **GitHub App metadata**: Environment variables `GH_APP_ID` and `GH_APP_INSTALLATION_ID` (environment-level `vars` in GitHub) supplying the GitHub App ID and installation ID; see [Authenticating as a GitHub App installation](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation#generating-an-installation-access-token) for ways to discover the installation ID.
+- **GitHub App private key**: Environment secret `GH_APP_PRIVATE_KEY`, generated from the GitHub App settings per [Managing private keys for GitHub Apps](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps). The Bicep deployment writes this value into Azure Key Vault so the job and KEDA scaler can authenticate without embedding secrets in templates.
+- **Optional PAT**: A repository secret such as `GITHUB_PAT_RUNNER` remains supported for PAT-based deployments when you do not want to (or cannot) use a GitHub App.
+
+When dispatching manually you can override the parameters file (for example `project-github-runner/infra/parameters.prod.json` for a production deployment) or supply a custom image tag suffix; the `Resolve deployment configuration` step ensures the final image tag and parameter file are consistent with the chosen environment.
 
 ## Example flow (putting it all together)
 
@@ -306,7 +328,15 @@ When dispatching manually you can supply a custom parameters file—e.g., `infra
 
 ## Conclusion
 
-Self‑hosted GitHub runners on Azure Container Apps combine ephemeral, serverless execution with the control and proximity you need for real‑world CI workloads. With KEDA’s github‑runner scaler, capacity adapts automatically to your GitHub queue, while ACA jobs keep the runtime surface small and manageable. This repository’s Bicep templates and wiring give you an auditable, parameterized foundation to deploy, tune, and operate your fleet of on‑demand runners.
+This project now represents a complete, opinionated pattern for running GitHub Actions workloads on Azure Container Apps jobs:
+
+- **Infrastructure as code**: A single composed Bicep template (`infra/main.bicep`) stands up the Container Apps environment, job, virtual network, Log Analytics, ACR, managed identities, and KEDA `github-runner` scaler with environment-specific parameter files.
+- **Hardened runner image**: `Dockerfile.github` builds on the official GitHub Actions runner image and layers in PowerShell 7.4, Azure CLI, Bicep, and Az/Microsoft.Graph modules so typical cloud build/test/deploy pipelines work out of the box.
+- **GitHub App–first authentication**: The default path uses a GitHub App with narrowly scoped permissions, Key Vault–backed private key storage, and a KEDA scaler that authenticates via the same app; PAT-based auth remains available as a fallback.
+- **Automated bootstrap workflow**: `.github/workflows/bootstrap-infra.yml` ties everything together—building and pushing the runner image, deploying the Bicep template with the correct tag and GitHub App metadata, and emitting IDs you can plug into downstream automation.
+- **Ephemeral, scalable execution**: Runners are created per job execution, register just long enough to process a workflow, and then exit. KEDA scales executions up and down based on queue depth so you only pay for active work while avoiding long-lived build agents.
+
+Taken together, the templates, scripts, and workflows in this repository give you a reusable starting point for production-ready self‑hosted runners: auditable, parameterized, and easy to adapt to additional environments, images, or GitHub organizations as your CI footprint grows.
 
 ## References
 
