@@ -216,7 +216,13 @@ Finally, verify that the `GH_APP_PRIVATE_KEY` secret contains the full PEM conte
 Another tip is to use Get-AzSecret to pull the secret locally and confirm it has the expected format:
 
 ```powershell
-Get-AzSecret -VaultName "<keyVaultName>" -Name "GHAppPrivateKey" | Select-Object -ExpandProperty SecretValueText | Out-File -FilePath "./github-app-private-key.pem" 
+az keyvault secret show \
+  --vault-name <kv-name> \
+  --name github-app-key \
+  --query value \
+  --output tsv > /tmp/app-key.txt
+
+cat /tmp/app-key.txt
 ```
 
 Then use openssl to validate the PEM:
