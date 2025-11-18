@@ -302,6 +302,7 @@ Taken together, the templates, scripts, and workflows in this repository give yo
 
 ## References
 
+- GitHub Actions self-hosted runners documentation: https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners
 - Jobs in Azure Container Apps: https://learn.microsoft.com/azure/container-apps/jobs?tabs=azure-cli
 - Containers in Azure Container Apps (registries, MI): https://learn.microsoft.com/azure/container-apps/containers?tabs=bicep
 - Azure Container Apps environments (logs): https://learn.microsoft.com/azure/container-apps/environment?tabs=bicep#logs

@@ -114,6 +114,16 @@ $triage = Get-WiRiskyServicePrincipalTriageReport
 $triage.Distribution.ByRiskLevel | Format-Table
 ```
 
+## Lab data seeding (optional)
+
+If your dev tenant does not yet have a rich set of workload identities, you can bootstrap a small, self-contained lab dataset for demonstrations:
+
+- Run `scripts/Bootstrap-WiLab.ps1 -TenantId '<tenant-guid>'` to create several `wi-lab-*` applications and service principals that cover long-lived secrets, near-expiry secrets, certificate credentials, federated-only identities, and a small number of high-privilege examples. The script is idempotent and will reuse existing lab objects with the same prefix.
+- Rerun `Scan-And-Report.ps1` to see how the lab objects appear in `credential-inventory.json`, `high-privilege-app-permissions.json`, and `privileged-roles.json`.
+- When you are finished, run `scripts/Cleanup-WiLab.ps1 -TenantId '<tenant-guid>'` (with `-WhatIf` first if you prefer) to remove the `wi-lab-*` identities from your dev tenant.
+
+These scripts are intended for **non-production** tenants only. They avoid manipulating Identity Protection risk state directly; in many dev tenants the risky workload identities reports will legitimately be empty, and that is an acceptable demonstration outcome.
+
 ## CI workflow example (scan + artifact)
 
 The GitHub Actions workflow (`workload-identity-scan.yml`) performs:
