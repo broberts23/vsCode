@@ -35,9 +35,9 @@ Function Connect-WiGraph {
             Throw "Required module '$Name' is not installed. Run scripts/Install-Dependencies.ps1 first."
         }
     }
-    Test-ModulePresent -Name 'Microsoft.Graph'
+    Test-ModulePresent -Name 'Microsoft.Graph.Authentication'
     try {
-        $connection = Connect-MgGraph -Scopes $Scopes -TenantId $TenantId
+        $connection = Connect-MgGraph -Scopes $Scopes -TenantId $TenantId -NoWelcome
     }
     catch {
         Throw "Failed to connect to Graph: $($_.Exception.Message)"

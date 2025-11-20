@@ -17,8 +17,17 @@ Function Get-WiTenantConsentSettings {
     [OutputType([psobject])]
     Param()
     try { $policy = Get-MgPolicyAuthorizationPolicy } catch { Throw "Failed to retrieve authorization policy: $($_.Exception.Message)" }
+
+    $policyProperties = $policy.PSObject.Properties
+    $permissionGrantPoliciesAssignedProp = $policyProperties | Where-Object { $_.Name -ieq 'permissionGrantPoliciesAssigned' } | Select-Object -First 1
+    $permissionGrantPoliciesAssignedToDefaultUserRoleProp = $policyProperties | Where-Object { $_.Name -ieq 'permissionGrantPolicyIdsAssignedToDefaultUserRole' -or $_.Name -ieq 'permissionGrantPoliciesAssignedToDefaultUserRole' } | Select-Object -First 1
+
+    $permissionGrantPoliciesAssigned = if ($permissionGrantPoliciesAssignedProp) { $permissionGrantPoliciesAssignedProp.Value } else { $null }
+    $permissionGrantPoliciesAssignedToDefaultUserRole = if ($permissionGrantPoliciesAssignedToDefaultUserRoleProp) { $permissionGrantPoliciesAssignedToDefaultUserRoleProp.Value } else { $null }
+
     return [PSCustomObject]@{
-        DefaultUserRolePermissionsAllowed = $policy.DefaultUserRolePermissions
-        PermissionGrantPoliciesAssigned   = $policy.PermissionGrantPolicyIdsAssignedToDefaultUserRole
+        DefaultUserRolePermissionsAllowed                 = $policy.DefaultUserRolePermissions
+        PermissionGrantPoliciesAssigned                   = $permissionGrantPoliciesAssigned
+        PermissionGrantPolicyIdsAssignedToDefaultUserRole = $permissionGrantPoliciesAssignedToDefaultUserRole
     }
 }

@@ -1,3 +1,4 @@
 .github/chatmodes/beastMode3.1.chatmode.md
 *.env
 *.sln
+**/project-workload-identity/scripts/out

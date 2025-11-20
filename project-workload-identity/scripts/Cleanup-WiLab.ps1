@@ -21,7 +21,7 @@
     ./Cleanup-WiLab.ps1 -TenantId '00000000-0000-0000-0000-000000000000'
 
 .EXAMPLE
-    ./Cleanup-WiLab.ps1 -TenantId $env:WI_LAB_TENANT_ID -Prefix 'wi-lab-demo' -WhatIf
+    ./Cleanup-WiLab.ps1 -TenantId $env:WI_LAB_TENANT_ID -Prefix 'wi-lab' -WhatIf
 
 #>
 
@@ -43,7 +43,7 @@ $ErrorActionPreference = 'Stop'
 
 Write-Verbose "Connecting to Microsoft Graph for tenant $TenantId"
 
-if (-not (Get-Module -Name Microsoft.Graph -ListAvailable)) {
+if (-not (Get-Module -Name Microsoft.Graph.Authentication -ListAvailable)) {
     throw 'Microsoft.Graph PowerShell SDK is required. Run Install-Dependencies.ps1 first.'
 }
 
@@ -53,12 +53,13 @@ if ($PSCmdlet.ShouldProcess("Tenant $TenantId", 'Connect-MgGraph')) {
 
 Write-Verbose "Locating lab applications with prefix '$Prefix'"
 
-$filter = "startsWith(displayName,'$Prefix-')"
-$apps = Get-MgApplication -Filter $filter -ConsistencyLevel eventual -CountVariable null -All -ErrorAction SilentlyContinue
+$filter = "startsWith(displayName,'$Prefix')"
+$apps = Get-MgApplication -Filter $filter -ConsistencyLevel eventual -All -ErrorAction SilentlyContinue
 
 foreach ($app in $apps) {
     if ($PSCmdlet.ShouldProcess("App $($app.DisplayName) ($($app.Id))", 'Remove-MgApplication')) {
         Remove-MgApplication -ApplicationId $app.Id
+        Write-Verbose "Removed application $($app.DisplayName) ($($app.Id))"
     }
 }
 

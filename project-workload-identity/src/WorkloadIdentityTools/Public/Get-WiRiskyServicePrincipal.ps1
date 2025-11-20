@@ -6,7 +6,7 @@ Set-StrictMode -Version Latest
 Retrieve risky service principals (preview Identity Protection workload identity risk).
 
 .DESCRIPTION
-Attempts to call preview/beta Graph cmdlet Get-MgIdentityProtectionRiskyServicePrincipal if available.
+Attempts to call preview/beta Graph cmdlet Get-MgBetaRiskyServicePrincipal if available.
 If not available, returns an empty set with a warning.
 Reference (Identity Protection risky workload identities – preview).
 
@@ -17,9 +17,9 @@ Function Get-WiRiskyServicePrincipal {
     [CmdletBinding()] 
     [OutputType([psobject])]
     Param()
-    if (Get-Command -Name Get-MgIdentityProtectionRiskyServicePrincipal -ErrorAction SilentlyContinue) {
+    if (Get-Command -Name Get-MgBetaRiskyServicePrincipal -ErrorAction SilentlyContinue) {
         try {
-            $sp = Get-MgIdentityProtectionRiskyServicePrincipal
+            $sp = Get-MgBetaRiskyServicePrincipal
             return $sp
         }
         catch {
@@ -28,7 +28,7 @@ Function Get-WiRiskyServicePrincipal {
         }
     }
     else {
-        Write-Warning 'Get-MgIdentityProtectionRiskyServicePrincipal not found. Ensure Microsoft.Graph.Identity.SignIns (beta) module installed.'
+        Write-Warning 'Get-MgBetaRiskyServicePrincipal not found. Ensure Microsoft.Graph.Beta.Identity.SignIns module installed.'
         return @()
     }
 }

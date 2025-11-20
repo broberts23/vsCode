@@ -49,12 +49,20 @@ $ErrorActionPreference = 'Stop'
 
 Write-Verbose "Connecting to Microsoft Graph for tenant $TenantId"
 
-if (-not (Get-Module -Name Microsoft.Graph -ListAvailable)) {
+if (-not (Get-Module -Name Microsoft.Graph.Authentication -ListAvailable)) {
     throw 'Microsoft.Graph PowerShell SDK is required. Run Install-Dependencies.ps1 first.'
 }
 
 if ($PSCmdlet.ShouldProcess("Tenant $TenantId", 'Connect-MgGraph')) {
-    Connect-MgGraph -TenantId $TenantId -Scopes @('Application.ReadWrite.All', 'Directory.ReadWrite.All', 'Directory.AccessAsUser.All') | Out-Null
+    $scopes = @(
+        'Application.ReadWrite.All',          # required for Add-MgApplicationKey / secrets & certs
+        'Directory.ReadWrite.All',            # required for app/SP creation
+        'Directory.AccessAsUser.All',         # required for certain write operations
+        'AppRoleAssignment.ReadWrite.All',    # required for Add-MgServicePrincipalAppRoleAssignment
+        'RoleManagement.ReadWrite.Directory'  # required for New-MgDirectoryRoleMemberByRef
+    )
+
+    Connect-MgGraph -TenantId $TenantId -Scopes $scopes | Out-Null
 }
 
 Write-Verbose "Seeding lab applications and service principals with prefix '$Prefix'"
@@ -106,36 +114,80 @@ function Add-WiLabPassword {
     return Add-MgApplicationPassword -ApplicationId $ApplicationId -PasswordCredential @{ displayName = $DisplayName; endDateTime = $EndDateTime }
 }
 
+function New-WiLabSelfSignedCertificate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Subject,
+        [Parameter(Mandatory)] [datetime] $NotAfter
+    )
+
+    $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+    try {
+        $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+            "CN=$Subject",
+            $rsa,
+            [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+            [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+        )
+
+        $notBefore = Get-Date
+        if ($NotAfter -le $notBefore) {
+            throw "Certificate NotAfter must be greater than now. Provided: $NotAfter"
+        }
+
+        return $request.CreateSelfSigned($notBefore, $NotAfter)
+    }
+    finally {
+        $rsa.Dispose()
+    }
+}
+
 function Add-WiLabCertificateKey {
-    [CmdletBinding(SupportsShouldProcess = $true)]
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string] $ApplicationId,
         [Parameter(Mandatory)] [datetime] $EndDateTime,
         [Parameter()] [string] $DisplayName = 'wi-lab-cert'
     )
 
-    # For simplicity we create a self-signed cert in-memory and upload the public key.
-    $cert = New-SelfSignedCertificate -DnsName "${ApplicationId}.wi-lab" -CertStoreLocation Cert:\CurrentUser\My -NotAfter $EndDateTime
+    # Generate a self-signed certificate and export the public key to /tmp for manual upload.
+    $subject = "${ApplicationId}.wi-lab"
+    $cert = New-WiLabSelfSignedCertificate -Subject $subject -NotAfter $EndDateTime
 
     try {
-        $keyValue = [System.Convert]::ToBase64String($cert.GetRawCertData())
-
-        if (-not $PSCmdlet.ShouldProcess("App $ApplicationId", "Add-MgApplicationKey ($DisplayName, $EndDateTime)")) {
-            return $null
+        $safeDisplayName = ($DisplayName -replace '[^a-zA-Z0-9-]', '-')
+        $safeAppId = ($ApplicationId -replace '[^a-zA-Z0-9-]', '-')
+        $timestamp = Get-Date -Format 'yyyyMMddHHmmss'
+        $tempRoot = '/tmp'
+        if (-not (Test-Path -Path $tempRoot)) {
+            New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
         }
 
-        return Add-MgApplicationKey -ApplicationId $ApplicationId -KeyCredential @{
-            displayName = $DisplayName
-            type        = 'AsymmetricX509Cert'
-            usage       = 'Verify'
-            key         = $keyValue
-            endDateTime = $EndDateTime
+        $basePath = Join-Path -Path $tempRoot -ChildPath "${safeAppId}_${safeDisplayName}_${timestamp}"
+        $cerPath = "$basePath.cer"
+        $pemPath = "$basePath.pem"
+
+        $certBytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+        [System.IO.File]::WriteAllBytes($cerPath, $certBytes)
+
+        $builder = New-Object System.Text.StringBuilder
+        $builder.AppendLine('-----BEGIN CERTIFICATE-----') | Out-Null
+        $builder.AppendLine([System.Convert]::ToBase64String($certBytes, [System.Base64FormattingOptions]::InsertLineBreaks)) | Out-Null
+        $builder.AppendLine('-----END CERTIFICATE-----') | Out-Null
+        [System.IO.File]::WriteAllText($pemPath, $builder.ToString())
+
+        Write-Information "Exported certificate for $DisplayName to $cerPath (upload via portal) and $pemPath" -InformationAction Continue
+
+        return [pscustomobject]@{
+            PublicCertificatePath = $cerPath
+            PemCertificatePath    = $pemPath
+            Thumbprint            = $cert.Thumbprint
+            NotAfter              = $cert.NotAfter
         }
     }
     finally {
-        # Best-effort: remove the local cert so the private key is not left behind.
         if ($cert) {
-            Remove-Item -Path "Cert:\CurrentUser\My\$($cert.Thumbprint)" -ErrorAction SilentlyContinue
+            $cert.Dispose()
         }
     }
 }
@@ -166,8 +218,14 @@ function Add-WiLabDirectoryRoleAssignment {
 
     $role = Get-MgDirectoryRole -Filter "roleTemplateId eq '$RoleTemplateId'" -ErrorAction SilentlyContinue
     if (-not $role) {
-        Write-Warning "Directory role with templateId $RoleTemplateId is not available in this tenant. Skipping role assignment."
-        return $null
+        try {
+            $role = Enable-MgDirectoryRole -DirectoryRoleTemplateId $RoleTemplateId -ErrorAction Stop
+            Write-Verbose "Activated directory role template $RoleTemplateId"
+        }
+        catch {
+            Write-Warning "Directory role with templateId $RoleTemplateId is not available and activation failed: $($_.Exception.Message). Skipping role assignment."
+            return $null
+        }
     }
 
     if (-not $PSCmdlet.ShouldProcess("SP $ServicePrincipalId", "New-MgDirectoryRoleMemberByRef ($($role.DisplayName))")) {
@@ -212,13 +270,15 @@ $longCertAppName = "$Prefix-long-lived-cert"
 $longCertApp = New-WiLabApplication -DisplayName $longCertAppName -Description 'Lab app with long-lived certificate credential.'
 if ($longCertApp) {
     $certEnd = (Get-Date).AddYears(2)
-    Add-WiLabCertificateKey -ApplicationId $longCertApp.Id -EndDateTime $certEnd -DisplayName 'wi-lab-long-cert' | Out-Null
+    $certificateInfo = Add-WiLabCertificateKey -ApplicationId $longCertApp.Id -EndDateTime $certEnd -DisplayName 'wi-lab-long-cert'
 
     $labSummary.Add([pscustomobject]@{
-            Type        = 'Application'
-            Scenario    = 'LongLivedCert'
-            DisplayName = $longCertApp.DisplayName
-            Id          = $longCertApp.Id
+            Type           = 'Application'
+            Scenario       = 'LongLivedCert'
+            DisplayName    = $longCertApp.DisplayName
+            Id             = $longCertApp.Id
+            CertPath       = if ($certificateInfo) { $certificateInfo.PublicCertificatePath } else { $null }
+            CertThumbprint = if ($certificateInfo) { $certificateInfo.Thumbprint } else { $null }
         })
 }
 
@@ -227,13 +287,15 @@ $shortCertAppName = "$Prefix-short-lived-cert"
 $shortCertApp = New-WiLabApplication -DisplayName $shortCertAppName -Description 'Lab app with short-lived certificate credential.'
 if ($shortCertApp) {
     $certEnd = (Get-Date).AddDays(30)
-    Add-WiLabCertificateKey -ApplicationId $shortCertApp.Id -EndDateTime $certEnd -DisplayName 'wi-lab-short-cert' | Out-Null
+    $certificateInfo = Add-WiLabCertificateKey -ApplicationId $shortCertApp.Id -EndDateTime $certEnd -DisplayName 'wi-lab-short-cert'
 
     $labSummary.Add([pscustomobject]@{
-            Type        = 'Application'
-            Scenario    = 'ShortLivedCert'
-            DisplayName = $shortCertApp.DisplayName
-            Id          = $shortCertApp.Id
+            Type           = 'Application'
+            Scenario       = 'ShortLivedCert'
+            DisplayName    = $shortCertApp.DisplayName
+            Id             = $shortCertApp.Id
+            CertPath       = if ($certificateInfo) { $certificateInfo.PublicCertificatePath } else { $null }
+            CertThumbprint = if ($certificateInfo) { $certificateInfo.Thumbprint } else { $null }
         })
 }
 
@@ -256,42 +318,73 @@ if ($federatedApp) {
         })
 }
 
-# 6) High-privilege permission app
+# 6) High-privilege permission app (only Graph app permissions; no directory role)
 $privPermAppName = "$Prefix-high-priv-perms"
 $privPermApp = New-WiLabApplication -DisplayName $privPermAppName -Description 'Lab app with elevated Graph app roles for permission surface demos.'
 if ($privPermApp) {
-    # Assign a couple of higher-privilege app roles such as Directory.Read.All and Application.ReadWrite.All
-    $sp = Get-MgServicePrincipal -Filter "appId eq '$($privPermApp.AppId)'" -ConsistencyLevel eventual -CountVariable null -ErrorAction SilentlyContinue
-    if (-not $sp) {
-        $sp = New-MgServicePrincipal -AppId $privPermApp.AppId
-    }
+    # Ensure the application has high-privilege Graph roles in RequiredResourceAccess
+    $graphResourceAppId = '00000003-0000-0000-c000-000000000000'
+    $desiredGraphRoleValues = @('Directory.Read.All', 'Application.ReadWrite.All')
 
-    $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'" -ConsistencyLevel eventual -CountVariable null -ErrorAction SilentlyContinue
+    $graphSp = Get-MgServicePrincipal -Filter "appId eq '$graphResourceAppId'" -ConsistencyLevel eventual -ErrorAction SilentlyContinue
     if ($graphSp) {
-        $desiredRoles = @('Directory.Read.All', 'Application.ReadWrite.All')
-        foreach ($roleValue in $desiredRoles) {
-            $appRole = $graphSp.AppRoles | Where-Object { $_.Value -eq $roleValue -and $_.AllowedMemberTypes -contains 'Application' }
-            if ($appRole) {
-                if ($PSCmdlet.ShouldProcess("SP $($sp.Id)", "Add-MgServicePrincipalAppRoleAssignment ($roleValue)")) {
-                    Add-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $sp.Id -PrincipalId $sp.Id -ResourceId $graphSp.Id -AppRoleId $appRole.Id | Out-Null
+        $graphAppRoles = $graphSp.AppRoles | Where-Object { $_.AllowedMemberTypes -contains 'Application' -and $desiredGraphRoleValues -contains $_.Value }
+
+        if ($graphAppRoles) {
+            $required = @()
+            if ($privPermApp.RequiredResourceAccess) {
+                $required = @($privPermApp.RequiredResourceAccess)
+            }
+
+            $graphRequired = $required | Where-Object { $_.ResourceAppId -eq $graphResourceAppId }
+            if (-not $graphRequired) {
+                $graphRequired = [Microsoft.Graph.PowerShell.Models.MicrosoftGraphRequiredResourceAccess]::new()
+                $graphRequired.ResourceAppId = $graphResourceAppId
+                $graphRequired.ResourceAccess = @()
+                $required += $graphRequired
+            }
+
+            $existingIds = @()
+            if ($graphRequired.ResourceAccess) {
+                $existingIds = @($graphRequired.ResourceAccess | ForEach-Object { [string]$_.Id })
+            }
+
+            $updatedResourceAccess = @($graphRequired.ResourceAccess)
+            foreach ($role in $graphAppRoles) {
+                if ($existingIds -notcontains ([string]$role.Id)) {
+                    $accessEntry = [Microsoft.Graph.PowerShell.Models.MicrosoftGraphResourceAccess]::new()
+                    $accessEntry.Id = $role.Id
+                    $accessEntry.Type = 'Role'
+                    $updatedResourceAccess += $accessEntry
                 }
+            }
+            $graphRequired.ResourceAccess = $updatedResourceAccess
+
+            if ($PSCmdlet.ShouldProcess($privPermApp.DisplayName, 'Update-MgApplication RequiredResourceAccess')) {
+                Update-MgApplication -ApplicationId $privPermApp.Id -RequiredResourceAccess $required | Out-Null
+                $privPermApp = Get-MgApplication -ApplicationId $privPermApp.Id -Property 'Id,AppId,DisplayName,RequiredResourceAccess'
             }
         }
     }
 
+    $sp = Get-MgServicePrincipal -Filter "appId eq '$($privPermApp.AppId)'" -ConsistencyLevel eventual -ErrorAction SilentlyContinue
+    if (-not $sp) {
+        $sp = New-MgServicePrincipal -AppId $privPermApp.AppId
+    }
+
     $labSummary.Add([pscustomobject]@{
             Type        = 'ServicePrincipal'
-            Scenario    = 'HighPrivilegePermissions'
+            Scenario    = 'HighPrivilegePermissions-AppPermissionsOnly'
             DisplayName = $privPermApp.DisplayName
             Id          = $sp.Id
         })
 }
 
-# 7) Privileged-role service principal
+# 7) Privileged-role service principal (only directory role; no explicit Graph app permissions seeded here)
 $privRoleAppName = "$Prefix-priv-role-sp"
 $privRoleApp = New-WiLabApplication -DisplayName $privRoleAppName -Description 'Lab service principal in a privileged directory role.'
 if ($privRoleApp) {
-    $sp = Get-MgServicePrincipal -Filter "appId eq '$($privRoleApp.AppId)'" -ConsistencyLevel eventual -CountVariable null -ErrorAction SilentlyContinue
+    $sp = Get-MgServicePrincipal -Filter "appId eq '$($privRoleApp.AppId)'" -ConsistencyLevel eventual -ErrorAction SilentlyContinue
     if (-not $sp) {
         $sp = New-MgServicePrincipal -AppId $privRoleApp.AppId
     }

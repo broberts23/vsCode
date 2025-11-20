@@ -1,7 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+ 
 <#
 .SYNOPSIS
 Run a full workload identity scan and generate JSON/CSV outputs.
@@ -12,17 +11,21 @@ Run a full workload identity scan and generate JSON/CSV outputs.
     [Parameter()][string[]]$Scopes = @('Application.Read.All', 'Directory.Read.All'),
     [Parameter()][string]$OutputPath = './out'
 )
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
 Import-Module (Join-Path $PSScriptRoot '../src/WorkloadIdentityTools/WorkloadIdentityTools.psd1')
 Connect-WiGraph -Scopes $Scopes -TenantId $TenantId -NoWelcome
 
 if (-not (Test-Path $OutputPath)) { New-Item -ItemType Directory -Path $OutputPath | Out-Null }
 
 Write-Information 'Collecting credential inventory...' -InformationAction Continue
-$inventory = Get-WiApplicationCredentialInventory -All
+$inventory = @(Get-WiApplicationCredentialInventory -All)
 Write-Information 'Collecting privileged role assignments...' -InformationAction Continue
-$privRoles = Get-WiServicePrincipalPrivilegedAssignments
+$privRoles = @(Get-WiServicePrincipalPrivilegedAssignments)
 Write-Information 'Collecting high privilege app permissions...' -InformationAction Continue
-$hiPerms = Get-WiHighPrivilegeAppPermissions
+$hiPerms = @(Get-WiHighPrivilegeAppPermissions)
 Write-Information 'Collecting consent settings...' -InformationAction Continue
 $consent = Get-WiTenantConsentSettings
 Write-Information 'Collecting risky service principals (if available)...' -InformationAction Continue

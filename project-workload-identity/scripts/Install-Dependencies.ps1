@@ -1,12 +1,15 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
-Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop'
+
 <#
 .SYNOPSIS
 Install required PowerShell modules for the toolkit.
 #>
 [CmdletBinding()] Param()
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
 
 Function Install-IfMissing {
     Param([string]$Name, [string]$Version)
@@ -21,16 +24,16 @@ Function Install-IfMissing {
 
 # Install only the minimal Microsoft Graph submodules required by the toolkit
 # - Authentication: Connect-MgGraph / Invoke-MgGraphRequest
-Install-IfMissing -Name Microsoft.Graph.Authentication -Version '2.25.0'
+Install-IfMissing -Name Microsoft.Graph.Authentication -Version '2.32.0'
 
 # - Applications: Get-MgApplication, New-MgApplicationFederatedIdentityCredential, Add-MgApplicationKey
-Install-IfMissing -Name Microsoft.Graph.Applications -Version '2.25.0'
+Install-IfMissing -Name Microsoft.Graph.Applications -Version '2.32.0'
 
 # - Authorization policy (consent posture): Get-MgPolicyAuthorizationPolicy
-Install-IfMissing -Name Microsoft.Graph.Identity.SignIns -Version '2.25.0'
+Install-IfMissing -Name Microsoft.Graph.Identity.SignIns -Version '2.32.0'
 
 # - Directory roles and members: Get-MgDirectoryRole, Get-MgDirectoryRoleMember
-Install-IfMissing -Name Microsoft.Graph.Identity.DirectoryManagement -Version '2.25.0'
+Install-IfMissing -Name Microsoft.Graph.Identity.DirectoryManagement -Version '2.32.0'
 
 # Note: Risky workload identity cmdlets use Invoke-MgGraphRequest against REST beta endpoints; no beta module is required.
 Write-Information 'Module installation complete.' -InformationAction Continue
