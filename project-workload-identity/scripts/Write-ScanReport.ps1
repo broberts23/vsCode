@@ -118,7 +118,8 @@ else {
 
 $credentialRows = if ($credentialInventory) {
     ($credentialInventory | Sort-Object -Property RiskLevel, DaysUntilExpiry | ForEach-Object {
-        $reasons = ( if ($_.RiskReasons) { ($_.RiskReasons -join ', ') } else { '—' } )
+        if ($_.RiskReasons) { $reasons = ($_.RiskReasons -join ', ') } else { $reasons = '—' }
+        $days = if ($_.DaysUntilExpiry) { [math]::Round($_.DaysUntilExpiry, 0) } else { '—' }
         '<tr>' +
         '<td>' + (ConvertTo-HtmlEncode $_.DisplayName) + '</td>' +
         '<td>' + (ConvertTo-HtmlEncode $_.ApplicationId) + '</td>' +
@@ -126,7 +127,7 @@ $credentialRows = if ($credentialInventory) {
         '<td>' + (ConvertTo-HtmlEncode $_.CredentialId) + '</td>' +
         '<td>' + (ConvertTo-HtmlEncode $_.RiskLevel) + '</td>' +
         '<td>' + (ConvertTo-HtmlEncode $reasons) + '</td>' +
-        '<td>' + (if ($_.DaysUntilExpiry) { [math]::Round($_.DaysUntilExpiry, 0) } else { '—' }) + '</td>' +
+        '<td>' + $days + '</td>' +
         '</tr>'
     }) -join "`n"
 }
