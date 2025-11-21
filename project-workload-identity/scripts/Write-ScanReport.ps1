@@ -58,6 +58,40 @@ function ConvertTo-HtmlEncode {
     return [System.Net.WebUtility]::HtmlEncode([string]$Value)
 }
 
+function ConvertTo-DistributionString {
+    Param([AllowNull()][object]$Distribution)
+    if ($null -eq $Distribution) { return '—' }
+
+    if ($Distribution -is [System.Collections.IDictionary]) {
+        $parts = foreach ($k in $Distribution.Keys) { "$k ($($Distribution[$k]))" }
+        return ($parts -join ', ')
+    }
+
+    if ($Distribution -is [System.Collections.IEnumerable] -and -not ($Distribution -is [string])) {
+        $parts = @()
+        foreach ($item in $Distribution) {
+            if ($null -eq $item) { continue }
+            if ($item -is [System.Collections.DictionaryEntry]) {
+                $parts += "$($item.Key) ($($item.Value))"
+                continue
+            }
+            if ($item -is [string]) { $parts += $item; continue }
+            $nameProp = @('Name', 'RiskLevel', 'State', 'Key', 'Label') | Where-Object { $item.PSObject.Properties[$_] } | Select-Object -First 1
+            $countProp = @('Count', 'Value', 'Total') | Where-Object { $item.PSObject.Properties[$_] } | Select-Object -First 1
+            if ($nameProp) {
+                $n = $item.$nameProp
+                if ($countProp) { $parts += "$n ($($item.$countProp))" } else { $parts += "$n" }
+            }
+            else {
+                $parts += [string]$item
+            }
+        }
+        return ($parts -join ', ')
+    }
+
+    return [string]$Distribution
+}
+
 $null = New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
 $reportPath = Join-Path -Path $OutputFolder -ChildPath $ReportName
 
@@ -163,8 +197,8 @@ else {
 $riskySummary = if ($riskyTriage -and $riskyTriage.Summary) {
     "<ul>
         <li><strong>Total risky identities:</strong> $(ConvertTo-HtmlEncode $riskyTriage.Summary.Total)</li>
-        <li><strong>Distribution by level:</strong> $(ConvertTo-HtmlEncode (($riskyTriage.Distribution.ByRiskLevel | ForEach-Object { "$_ ($($_.Count))" }) -join ', '))</li>
-        <li><strong>Distribution by state:</strong> $(ConvertTo-HtmlEncode (($riskyTriage.Distribution.ByRiskState | ForEach-Object { "$_ ($($_.Count))" }) -join ', '))</li>
+        <li><strong>Distribution by level:</strong> $(ConvertTo-HtmlEncode (ConvertTo-DistributionString $riskyTriage.Distribution.ByRiskLevel))</li>
+        <li><strong>Distribution by state:</strong> $(ConvertTo-HtmlEncode (ConvertTo-DistributionString $riskyTriage.Distribution.ByRiskState))</li>
     </ul>"
 }
 else {
@@ -172,11 +206,11 @@ else {
 }
 
 $cardMarkup = ($cards | ForEach-Object {
-    "<article class='card'>
+        "<article class='card'>
         <p class='label'>$(ConvertTo-HtmlEncode $_.Label)</p>
         <p class='value'>$(ConvertTo-HtmlEncode $_.Value)</p>
     </article>"
-}) -join [Environment]::NewLine
+    }) -join [Environment]::NewLine
 
 $tenantId = if ($scanSummary) { ConvertTo-HtmlEncode $scanSummary.TenantId } else { 'N/A' }
 $timestamp = if ($scanSummary) { ConvertTo-HtmlEncode $scanSummary.Timestamp } else { ConvertTo-HtmlEncode $now.ToString('u') }
