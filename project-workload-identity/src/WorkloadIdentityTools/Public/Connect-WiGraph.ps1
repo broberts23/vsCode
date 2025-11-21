@@ -35,15 +35,56 @@ Function Connect-WiGraph {
             Throw "Required module '$Name' is not installed. Run scripts/Install-Dependencies.ps1 first."
         }
     }
+    Function Get-WiEnvironmentCredentialContext {
+        $clientId = $env:AZURE_CLIENT_ID
+        $tenantId = $env:AZURE_TENANT_ID
+        $hasSecret = -not [string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_SECRET)
+        $hasCertPath = -not [string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_CERTIFICATE_PATH)
+        $federatedTokenPath = $env:AZURE_FEDERATED_TOKEN_FILE
+        $hasFederatedToken = -not [string]::IsNullOrWhiteSpace($federatedTokenPath) -and (Test-Path -Path $federatedTokenPath -PathType Leaf)
+        $mode = if ($hasFederatedToken) {
+            'WorkloadIdentity'
+        }
+        elseif ($hasCertPath) {
+            'ClientCertificate'
+        }
+        elseif ($hasSecret) {
+            'ClientSecret'
+        }
+        else {
+            $null
+        }
+        return [PSCustomObject]@{
+            Ready  = ($clientId -and $tenantId -and $mode)
+            Mode   = $mode
+            Tenant = $tenantId
+        }
+    }
     Test-ModulePresent -Name 'Microsoft.Graph.Authentication'
+    $envContext = Get-WiEnvironmentCredentialContext
+    $useEnvironmentAuth = $envContext.Ready
+    if ($useEnvironmentAuth -and $TenantId -and $envContext.Tenant -and ($TenantId -ne $envContext.Tenant)) {
+        Write-Warning "TenantId parameter ($TenantId) does not match AZURE_TENANT_ID ($($envContext.Tenant)). The environment variable value will be used for CI authentication."
+    }
     try {
-        $connection = Connect-MgGraph -Scopes $Scopes -TenantId $TenantId -NoWelcome
+        if ($useEnvironmentAuth) {
+            $connection = Connect-MgGraph -EnvironmentVariable -NoWelcome
+        }
+        else {
+            $connection = Connect-MgGraph -Scopes $Scopes -TenantId $TenantId -NoWelcome
+        }
     }
     catch {
         Throw "Failed to connect to Graph: $($_.Exception.Message)"
     }
     if (-not $NoWelcome) {
-        Write-Information "Connected to Graph. Scopes: $($Scopes -join ', ') Tenant: $TenantId" -InformationAction Continue
+        if ($useEnvironmentAuth) {
+            $tenantLabel = if ($envContext.Tenant) { $envContext.Tenant } else { 'environment default' }
+            Write-Information "Connected to Graph using EnvironmentCredential mode '$($envContext.Mode)' for tenant $tenantLabel." -InformationAction Continue
+        }
+        else {
+            Write-Information "Connected to Graph. Scopes: $($Scopes -join ', ') Tenant: $TenantId" -InformationAction Continue
+        }
     }
     return $connection
 }

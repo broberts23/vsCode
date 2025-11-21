@@ -91,6 +91,8 @@ $triage = Get-WiRiskyServicePrincipalTriageReport
 $triage.Distribution.ByRiskLevel | Format-Table
 ```
 
+> Automation note: When `Connect-WiGraph` detects Azure workload identity environment variables (for example `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and either `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_SECRET`, or `AZURE_CLIENT_CERTIFICATE_PATH`) it automatically switches to `Connect-MgGraph -EnvironmentVariable`. This enables GitHub Actions runs that use `azure/login` with an OIDC federated credential to reuse the pipeline’s service principal without prompting for interactive scopes, per the Microsoft Graph PowerShell guidance for the EnvironmentVariable parameter set (https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0) and the Azure Identity environment variable contract (https://learn.microsoft.com/dotnet/api/overview/azure/identity-readme?view=azure-dotnet#environment-variables). Local runs continue to request the delegated scopes you pass to `Connect-WiGraph`.
+
 ## Report Outputs
 `Get-WiApplicationCredentialInventory` returns objects with fields:
 - ApplicationId, DisplayName
