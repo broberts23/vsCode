@@ -136,11 +136,15 @@ Function Connect-WiGraph {
                     # CI without environment credential: try Azure CLI access token
                     $token = Get-WiGraphAccessTokenFromAz -TenantId ($TenantId ? $TenantId : $env:AZURE_TENANT_ID)
                     if ($token) {
-                        $connection = Connect-MgGraph -AccessToken $token -NoWelcome
+                        $secureToken = try { ConvertTo-SecureString $token -AsPlainText -Force } catch { $null }
+                        if (-not $secureToken) { Throw "Failed to convert Azure CLI access token to SecureString." }
+                        Write-Verbose "Azure CLI Graph access token acquired (length=$($token.Length)). Attempting Connect-MgGraph -AccessToken." -Verbose
+                        $connection = Connect-MgGraph -AccessToken $secureToken -NoWelcome
                         Write-Verbose "Connected using Azure CLI acquired Graph access token." -Verbose
                     }
                     else {
                         # As last resort attempt scopes (may fail)
+                        Write-Verbose "Azure CLI token acquisition returned null; attempting delegated Connect-MgGraph in headless CI (likely to fail)." -Verbose
                         $connection = Connect-MgGraph @connectParams
                     }
                 }

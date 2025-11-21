@@ -74,10 +74,11 @@ If the error persists:
 If environment variable credential detection fails (no `AZURE_FEDERATED_TOKEN_FILE` present) but the workflow is running in GitHub Actions (`GITHUB_ACTIONS=true`), `Connect-WiGraph` attempts a fallback:
 
 1. Calls: `az account get-access-token --resource https://graph.microsoft.com/ --tenant <tenant>`
-2. Passes the resulting access token to `Connect-MgGraph -AccessToken`
-3. If that fails, it finally attempts delegated scopes (expected to fail headless) and surfaces the original authentication error.
+2. Converts the returned token string to a SecureString (required by `Connect-MgGraph -AccessToken`)
+3. Passes it to `Connect-MgGraph -AccessToken <SecureString>`
+4. If token acquisition returns null, it finally attempts delegated scopes (expected to fail headless) and surfaces the original authentication error.
 
-Ensure the Azure CLI is installed (it is after `azure/login`) and the service principal has the required Graph application permissions. The Azure CLI token respects those permissions.
+Ensure the Azure CLI is installed (it is after `azure/login`) and the service principal has the required Graph application permissions. The Azure CLI token respects those permissions. A failure stating it cannot bind `AccessToken` usually indicates a missing SecureString conversion (now handled) or an empty token.
 
 ## Setup Federated Credential (First-Time Setup)
 
