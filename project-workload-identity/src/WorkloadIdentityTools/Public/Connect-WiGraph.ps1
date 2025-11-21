@@ -6,27 +6,56 @@ Set-StrictMode -Version Latest
 Connect to Microsoft Graph with explicit scopes.
 
 .DESCRIPTION
-Wrapper around Connect-MgGraph enforcing explicit scopes, tenant, and recommended best practices.
+Wrapper around Connect-MgGraph with support for both delegated (interactive) and application (CI/CD) authentication.
+
+Local/Interactive Mode:
+- Requires -Scopes parameter with delegated permissions
+- Uses Connect-MgGraph with interactive consent flow
+- Optionally specify -TenantId to target specific tenant
+
+CI/CD Mode (auto-detected):
+- Detects Azure workload identity environment variables (AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE/SECRET/CERT)
+- Uses Connect-MgGraph -EnvironmentVariable for service principal authentication
+- Scopes parameter is ignored; service principal must have Graph application permissions pre-consented in Entra ID
+- Typically set by 'azure/login@v1' action in GitHub Actions workflows
+
 Docs: https://learn.microsoft.com/powershell/microsoftgraph/authentication/connect-mggraph?view=graph-powershell-1.0
 
 .PARAMETER Scopes
-Array of Microsoft Graph permission scopes to request.
+Array of Microsoft Graph permission scopes to request (required for local/interactive mode).
+Ignored in CI/CD mode when environment variables are present.
 
 .PARAMETER TenantId
-Target tenant ID (GUID) for connection.
+Target tenant ID (GUID) for connection. Optional for local mode if you have default tenant.
+Compared against AZURE_TENANT_ID in CI/CD mode for validation.
+
+.PARAMETER NoWelcome
+Suppress the connection success message.
 
 .OUTPUTS
 Microsoft.Graph.PowerShell.Models.IIdentityAccessToken
 
 .NOTES
-Ensures no implicit scope usage. Consider using certificate-based auth for automation.
+CI/CD Prerequisites:
+- Service principal must have Graph API application permissions (not delegated) granted and admin-consented
+- Required permissions: Application.Read.All, Directory.Read.All, Policy.Read.All, IdentityRiskyServicePrincipal.Read.All
+- Grant permissions in Entra ID portal under "API permissions" for the app registration
+- Ensure permissions are of type "Application" not "Delegated"
+
+.EXAMPLE
+# Local interactive authentication
+Connect-WiGraph -Scopes @('Application.Read.All','Directory.Read.All') -TenantId 'tenant-guid'
+
+.EXAMPLE
+# CI/CD authentication (auto-detected from environment variables set by azure/login)
+Connect-WiGraph -TenantId 'tenant-guid'
 #>
 Function Connect-WiGraph {
     [CmdletBinding()] 
     [OutputType('Microsoft.Graph.PowerShell.Models.IIdentityAccessToken')]
     Param(
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string[]]$Scopes,
-        [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F-]{36}$')][string]$TenantId,
+        [Parameter()][ValidateNotNullOrEmpty()][string[]]$Scopes,
+        [Parameter()][ValidatePattern('^[0-9a-fA-F-]{36}$')][string]$TenantId,
         [Parameter()][switch]$NoWelcome
     )
     Function Test-ModulePresent {
@@ -63,15 +92,29 @@ Function Connect-WiGraph {
     Test-ModulePresent -Name 'Microsoft.Graph.Authentication'
     $envContext = Get-WiEnvironmentCredentialContext
     $useEnvironmentAuth = $envContext.Ready
+    
+    # Validate parameters based on auth mode
+    if (-not $useEnvironmentAuth -and -not $Scopes) {
+        Throw "Scopes parameter is required when not using environment variable authentication (CI mode). Provide -Scopes for delegated authentication."
+    }
+    
     if ($useEnvironmentAuth -and $TenantId -and $envContext.Tenant -and ($TenantId -ne $envContext.Tenant)) {
         Write-Warning "TenantId parameter ($TenantId) does not match AZURE_TENANT_ID ($($envContext.Tenant)). The environment variable value will be used for CI authentication."
     }
+    
     try {
         if ($useEnvironmentAuth) {
             $connection = Connect-MgGraph -EnvironmentVariable -NoWelcome
         }
         else {
-            $connection = Connect-MgGraph -Scopes $Scopes -TenantId $TenantId -NoWelcome
+            $connectParams = @{
+                Scopes    = $Scopes
+                NoWelcome = $true
+            }
+            if ($TenantId) {
+                $connectParams['TenantId'] = $TenantId
+            }
+            $connection = Connect-MgGraph @connectParams
         }
     }
     catch {
@@ -81,6 +124,7 @@ Function Connect-WiGraph {
         if ($useEnvironmentAuth) {
             $tenantLabel = if ($envContext.Tenant) { $envContext.Tenant } else { 'environment default' }
             Write-Information "Connected to Graph using EnvironmentCredential mode '$($envContext.Mode)' for tenant $tenantLabel." -InformationAction Continue
+            Write-Information "Note: Service principal must have Graph application permissions pre-consented. If subsequent cmdlets fail with 'Authentication needed', verify the service principal has Application.Read.All, Directory.Read.All, Policy.Read.All, IdentityRiskyServicePrincipal.Read.All granted in Entra ID." -InformationAction Continue
         }
         else {
             Write-Information "Connected to Graph. Scopes: $($Scopes -join ', ') Tenant: $TenantId" -InformationAction Continue
