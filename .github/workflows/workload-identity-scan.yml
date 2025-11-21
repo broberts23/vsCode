@@ -36,6 +36,18 @@ jobs:
         run: |
           ./project-workload-identity/scripts/Scan-And-Report.ps1 -TenantId $env:SCAN_TENANT_ID -Scopes @('Application.Read.All','Directory.Read.All','IdentityRiskyServicePrincipal.Read.All') -OutputPath './out'
 
+      - name: Render HTML Report
+        shell: pwsh
+        run: |
+          ./project-workload-identity/scripts/Write-ScanReport.ps1 -OutputFolder ./out
+
+      - name: Publish Report Summary
+        shell: pwsh
+        env:
+          REPORT_PATH: ./out/workload-identity-report.html
+        run: |
+          ./project-workload-identity/scripts/Publish-ScanReportSummary.ps1 -ReportPath $env:REPORT_PATH
+
       - name: Upload Full Scan Artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -6,9 +6,13 @@ Set-StrictMode -Version Latest
 Retrieve risky service principals (preview Identity Protection workload identity risk).
 
 .DESCRIPTION
-Attempts to call preview/beta Graph cmdlet Get-MgBetaRiskyServicePrincipal if available.
-If not available, returns an empty set with a warning.
-Reference (Identity Protection risky workload identities – preview).
+Convenience wrapper around Get-WiBetaRiskyServicePrincipal to keep backward compatibility with existing scripts while standardizing on Microsoft.Graph.Beta.Identity.SignIns cmdlets.
+
+.PARAMETER RiskLevel
+Optional filter by riskLevel: low|medium|high|hidden|none.
+
+.PARAMETER RiskState
+Optional filter by riskState: none|confirmedSafe|remediated|dismissed|atRisk|confirmedCompromised.
 
 .OUTPUTS
 PSCustomObject representing risky service principals or empty result.
@@ -16,19 +20,12 @@ PSCustomObject representing risky service principals or empty result.
 Function Get-WiRiskyServicePrincipal {
     [CmdletBinding()] 
     [OutputType([psobject])]
-    Param()
-    if (Get-Command -Name Get-MgBetaRiskyServicePrincipal -ErrorAction SilentlyContinue) {
-        try {
-            $sp = Get-MgBetaRiskyServicePrincipal
-            return $sp
-        }
-        catch {
-            Write-Warning "Failed to retrieve risky service principals: $($_.Exception.Message)"
-            return @()
-        }
+    Param(
+        [Parameter()][ValidateSet('low', 'medium', 'high', 'hidden', 'none')][string]$RiskLevel,
+        [Parameter()][ValidateSet('none', 'confirmedSafe', 'remediated', 'dismissed', 'atRisk', 'confirmedCompromised')][string]$RiskState
+    )
+    if ($PSBoundParameters.Count -gt 0) {
+        return Get-WiBetaRiskyServicePrincipal @PSBoundParameters
     }
-    else {
-        Write-Warning 'Get-MgBetaRiskyServicePrincipal not found. Ensure Microsoft.Graph.Beta.Identity.SignIns module installed.'
-        return @()
-    }
+    return Get-WiBetaRiskyServicePrincipal
 }

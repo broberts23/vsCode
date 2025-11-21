@@ -6,8 +6,11 @@ Set-StrictMode -Version Latest
 Get risk history for a risky service principal (beta).
 
 .DESCRIPTION
-Calls /beta/identityProtection/riskyServicePrincipals/{id}/history to return risk history items.
+Uses Get-MgBetaRiskyServicePrincipalHistory from Microsoft.Graph.Beta.Identity.SignIns to return risk history items.
 Requires IdentityRiskyServicePrincipal.Read.All and Workload ID Premium license.
+
+.NOTES
+Cmdlet reference: https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.beta.identity.signins/get-mgbetariskyserviceprincipalhistory?view=graph-powershell-beta
 
 .PARAMETER RiskyServicePrincipalId
 The id of the risky service principal object.
@@ -24,22 +27,16 @@ Function Get-WiBetaRiskyServicePrincipalHistory {
     Param(
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$RiskyServicePrincipalId
     )
-    $base = "https://graph.microsoft.com/beta/identityProtection/riskyServicePrincipals/$RiskyServicePrincipalId/history?`$top=999"
-    $items = New-Object System.Collections.Generic.List[object]
-    $uri = $base
-    do {
-        $resp = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
-        foreach ($v in $resp.value) {
-            $items.Add([PSCustomObject]@{
-                    RiskLevel               = $v.riskLevel
-                    RiskState               = $v.riskState
-                    RiskDetail              = $v.riskDetail
-                    RiskLastUpdatedDateTime = $v.riskLastUpdatedDateTime
-                    Activity                = $v.activity
-                    InitiatedBy             = $v.initiatedBy
-                })
+    $results = Get-MgBetaRiskyServicePrincipalHistory -RiskyServicePrincipalId $RiskyServicePrincipalId -All -ErrorAction Stop
+    $objects = foreach ($item in $results) {
+        [PSCustomObject]@{
+            RiskLevel               = $item.RiskLevel
+            RiskState               = $item.RiskState
+            RiskDetail              = $item.RiskDetail
+            RiskLastUpdatedDateTime = $item.RiskLastUpdatedDateTime
+            Activity                = $item.Activity
+            InitiatedBy             = $item.InitiatedBy
         }
-        $uri = $resp.'@odata.nextLink'
-    } while ($uri)
-    return $items
+    }
+    return $objects
 }
