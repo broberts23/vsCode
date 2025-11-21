@@ -35,5 +35,11 @@ Install-IfMissing -Name Microsoft.Graph.Identity.SignIns -Version '2.32.0'
 # - Directory roles and members: Get-MgDirectoryRole, Get-MgDirectoryRoleMember
 Install-IfMissing -Name Microsoft.Graph.Identity.DirectoryManagement -Version '2.32.0'
 
+# - Identity governance (risky service principal reporting): Get-MgBetaRoleManagementDirectoryRoleAssignment
+Install-IfMissing -Name Microsoft.Graph.Beta.Identity.Governance -Version '2.32.0'
+
+# - Identity sign-ins (risky service principal history): Get-MgBetaRiskyServicePrincipalHistory
+Install-IfMissing -Name Microsoft.Graph.Beta.Identity.SignIns -Version '2.32.0'
+
 # Note: Risky workload identity cmdlets use Invoke-MgGraphRequest against REST beta endpoints; no beta module is required.
 Write-Information 'Module installation complete.' -InformationAction Continue
