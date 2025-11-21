@@ -64,6 +64,20 @@ Function Connect-WiGraph {
             Throw "Required module '$Name' is not installed. Run scripts/Install-Dependencies.ps1 first."
         }
     }
+    Function Get-WiGraphAccessTokenFromAz {
+        Param([string]$TenantId)
+        if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+            Write-Verbose "Azure CLI not found; cannot perform fallback token acquisition."; return $null
+        }
+        try {
+            $accessToken = az account get-access-token --resource https://graph.microsoft.com/ --tenant $TenantId --query accessToken -o tsv 2>$null
+            if (-not $accessToken) { return $null }
+            return $accessToken
+        }
+        catch {
+            Write-Verbose "Azure CLI token acquisition failed: $($_.Exception.Message)"; return $null
+        }
+    }
     Function Get-WiEnvironmentCredentialContext {
         $clientId = $env:AZURE_CLIENT_ID
         $tenantId = $env:AZURE_TENANT_ID
@@ -107,14 +121,33 @@ Function Connect-WiGraph {
             $connection = Connect-MgGraph -EnvironmentVariable -NoWelcome
         }
         else {
+            # Attempt delegated interactive first (local dev), fallback to Azure CLI token if CI detected
+            $ciMode = $env:GITHUB_ACTIONS -eq 'true'
             $connectParams = @{
-                Scopes    = $Scopes
                 NoWelcome = $true
             }
-            if ($TenantId) {
-                $connectParams['TenantId'] = $TenantId
+            if ($Scopes) { $connectParams['Scopes'] = $Scopes }
+            if ($TenantId) { $connectParams['TenantId'] = $TenantId }
+            try {
+                if (-not $ciMode) {
+                    $connection = Connect-MgGraph @connectParams
+                }
+                else {
+                    # CI without environment credential: try Azure CLI access token
+                    $token = Get-WiGraphAccessTokenFromAz -TenantId ($TenantId ? $TenantId : $env:AZURE_TENANT_ID)
+                    if ($token) {
+                        $connection = Connect-MgGraph -AccessToken $token -NoWelcome
+                        Write-Verbose "Connected using Azure CLI acquired Graph access token." -Verbose
+                    }
+                    else {
+                        # As last resort attempt scopes (may fail)
+                        $connection = Connect-MgGraph @connectParams
+                    }
+                }
             }
-            $connection = Connect-MgGraph @connectParams
+            catch {
+                throw
+            }
         }
     }
     catch {

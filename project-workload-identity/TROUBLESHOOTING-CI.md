@@ -67,6 +67,17 @@ If the error persists:
 2. Check that you clicked "Grant admin consent" not just "Add permission"
 3. Verify the service principal isn't disabled in Entra ID
 4. Confirm the federated credential subject claim matches your GitHub repo (see [Setup Federated Credential](#setup-federated-credential) below)
+5. Run the workflow with `ACTIONS_STEP_DEBUG: true` to surface verbose messages (set in repo settings or add an `env:` block). You should see either `Connected to Graph using EnvironmentCredential mode` or `Connected using Azure CLI acquired Graph access token.`
+
+### Fallback Path (Azure CLI Token)
+
+If environment variable credential detection fails (no `AZURE_FEDERATED_TOKEN_FILE` present) but the workflow is running in GitHub Actions (`GITHUB_ACTIONS=true`), `Connect-WiGraph` attempts a fallback:
+
+1. Calls: `az account get-access-token --resource https://graph.microsoft.com/ --tenant <tenant>`
+2. Passes the resulting access token to `Connect-MgGraph -AccessToken`
+3. If that fails, it finally attempts delegated scopes (expected to fail headless) and surfaces the original authentication error.
+
+Ensure the Azure CLI is installed (it is after `azure/login`) and the service principal has the required Graph application permissions. The Azure CLI token respects those permissions.
 
 ## Setup Federated Credential (First-Time Setup)
 
