@@ -117,62 +117,62 @@ else {
 }
 
 $credentialRows = if ($credentialInventory) {
-    $credentialInventory | Sort-Object -Property RiskLevel, DaysUntilExpiry | ForEach-Object {
+    ($credentialInventory | Sort-Object -Property RiskLevel, DaysUntilExpiry | ForEach-Object {
         $reasons = if ($_.RiskReasons) { ($_.RiskReasons -join ', ') } else { '—' }
-        "<tr>
-            <td>$(ConvertTo-HtmlEncode $_.DisplayName)</td>
-            <td>$(ConvertTo-HtmlEncode $_.ApplicationId)</td>
-            <td>$(ConvertTo-HtmlEncode $_.CredentialType)</td>
-            <td>$(ConvertTo-HtmlEncode $_.CredentialId)</td>
-            <td>$(ConvertTo-HtmlEncode $_.RiskLevel)</td>
-            <td>$(ConvertTo-HtmlEncode $reasons)</td>
-            <td>$(if ($_.DaysUntilExpiry) { [math]::Round($_.DaysUntilExpiry, 0) } else { '—' })</td>
-        </tr>"
-    } | Out-String
+        '<tr>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.DisplayName) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.ApplicationId) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.CredentialType) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.CredentialId) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.RiskLevel) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $reasons) + '</td>' +
+        '<td>' + (if ($_.DaysUntilExpiry) { [math]::Round($_.DaysUntilExpiry, 0) } else { '—' }) + '</td>' +
+        '</tr>'
+    }) -join "`n"
 }
 else {
     '<tr><td colspan="7">No workload identity credentials required attention in this scan.</td></tr>'
 }
 
 $privilegedRoleRows = if ($privilegedRoles) {
-    $privilegedRoles | ForEach-Object {
-        "<tr>
-            <td>$(ConvertTo-HtmlEncode $_.RoleDisplayName)</td>
-            <td>$(ConvertTo-HtmlEncode $_.DisplayName)</td>
-            <td>$(ConvertTo-HtmlEncode $_.AppId)</td>
-            <td>$(ConvertTo-HtmlEncode $_.ServicePrincipalId)</td>
-        </tr>"
-    } | Out-String
+    ($privilegedRoles | ForEach-Object {
+        '<tr>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.RoleDisplayName) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.DisplayName) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.AppId) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.ServicePrincipalId) + '</td>' +
+        '</tr>'
+    }) -join "`n"
 }
 else {
     '<tr><td colspan="4">No privileged directory roles were assigned to application identities.</td></tr>'
 }
 
 $highPrivilegeRows = if ($highPrivilegePermissions) {
-    $highPrivilegePermissions | ForEach-Object {
+    ($highPrivilegePermissions | ForEach-Object {
         $perms = if ($_.HighPrivilegePermissions) { ($_.HighPrivilegePermissions -join ', ') } else { '—' }
-        "<tr>
-            <td>$(ConvertTo-HtmlEncode $_.DisplayName)</td>
-            <td>$(ConvertTo-HtmlEncode $_.ApplicationId)</td>
-            <td>$(ConvertTo-HtmlEncode $perms)</td>
-        </tr>"
-    } | Out-String
+        '<tr>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.DisplayName) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.ApplicationId) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $perms) + '</td>' +
+        '</tr>'
+    }) -join "`n"
 }
 else {
     '<tr><td colspan="3">No high-privilege delegated or application permissions were detected.</td></tr>'
 }
 
 $riskyRows = if ($riskyServicePrincipals) {
-    $riskyServicePrincipals | ForEach-Object {
-        "<tr>
-            <td>$(ConvertTo-HtmlEncode $_.displayName)</td>
-            <td>$(ConvertTo-HtmlEncode $_.appId)</td>
-            <td>$(ConvertTo-HtmlEncode $_.riskLevel)</td>
-            <td>$(ConvertTo-HtmlEncode $_.riskState)</td>
-            <td>$(ConvertTo-HtmlEncode $_.riskDetail)</td>
-            <td>$(ConvertTo-HtmlEncode $_.riskLastUpdatedDateTime)</td>
-        </tr>"
-    } | Out-String
+    ($riskyServicePrincipals | ForEach-Object {
+        '<tr>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.displayName) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.appId) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.riskLevel) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.riskState) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.riskDetail) + '</td>' +
+        '<td>' + (ConvertTo-HtmlEncode $_.riskLastUpdatedDateTime) + '</td>' +
+        '</tr>'
+    }) -join "`n"
 }
 else {
     '<tr><td colspan="6">Microsoft Entra ID Protection did not flag any risky service principals during this scan.</td></tr>'
