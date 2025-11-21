@@ -118,7 +118,7 @@ else {
 
 $credentialRows = if ($credentialInventory) {
     ($credentialInventory | Sort-Object -Property RiskLevel, DaysUntilExpiry | ForEach-Object {
-        $reasons = ConvertTo-CommaDelimitedOrDefault $_.RiskReasons
+        $reasons = ( if ($_.RiskReasons) { ($_.RiskReasons -join ', ') } else { '—' } )
         '<tr>' +
         '<td>' + (ConvertTo-HtmlEncode $_.DisplayName) + '</td>' +
         '<td>' + (ConvertTo-HtmlEncode $_.ApplicationId) + '</td>' +
