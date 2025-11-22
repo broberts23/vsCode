@@ -1,4 +1,4 @@
-# Workload Identity Risk and Remediation with Microsoft Graph + PowerShell 7.4
+# Workload Identity Risk and Remediation with Microsoft Graph & PowerShell
 
 ## Introduction
 
@@ -11,6 +11,24 @@ The wake-up call for most organizations comes from one of three places: an Entra
 This article walks through a practical solution I built to get ahead of that problem: a PowerShell 7.4 toolkit that discovers, triages, and remediates workload identity risk using Microsoft Graph. The philosophy is simple—stop rotating secrets and start eliminating them. Use federated credentials (OIDC workload identity) wherever possible, short-lived certificates where federation isn't an option, and actually monitor what your workload identities are doing.
 
 If you're following Microsoft's guidance on [protecting identities and secrets](https://learn.microsoft.com/entra/fundamentals/configure-security#protect-identities-and-secrets), this toolkit gives you the automation to make it real.
+
+## Prerequisites
+
+**Licensing requirements:** The toolkit's discovery features work with any Entra ID tenant and require no additional licenses—the read-only scan operations use standard Microsoft Graph permissions available to all organizations. However, several of the scenarios and enforcement capabilities discussed in this article require premium licensing:
+
+- **Microsoft Entra ID P2 or Microsoft Entra ID Governance** — Required to access Identity Protection risk detections for workload identities (the `risky-service-principals.json` and `risky-service-principal-triage.json` artifacts). Basic risk visibility (limited reporting details) is available without premium licenses, but full risk details and risk-based actions require a premium subscription.
+
+- **Microsoft Entra Workload Identities Premium** — Required to create or modify Conditional Access policies scoped to service principals, to use risk-based Conditional Access conditions for workload identities, and to conduct access reviews of service principals in Privileged Identity Management. You can view, start a trial, and acquire licenses at https://portal.azure.com/#view/Microsoft_Azure_ManagedServiceIdentity/WorkloadIdentitiesBlade.
+
+- **Access Reviews for service principals** — Requires both Workload Identities Premium and an ID Governance or ID P2 license.
+
+The core scanning and reporting functionality—credential inventory, privileged role enumeration, high-privilege app permissions, and consent settings—operates without premium licenses. You can run the full scan, generate all artifacts, and build remediation plans using the free tier. Premium licensing becomes necessary when you move from visibility to enforcement (Conditional Access) or governance automation (PIM access reviews, advanced Identity Protection actions).
+
+For more information, see:
+
+- Microsoft Entra Workload ID licensing: https://www.microsoft.com/security/business/identity-access/microsoft-entra-workload-identities
+- Microsoft Entra ID Governance licensing: https://learn.microsoft.com/en-us/entra/id-governance/licensing-fundamentals
+- Conditional Access for workload identities: https://learn.microsoft.com/en-us/entra/identity/conditional-access/workload-identity
 
 ## What This Toolkit Does
 
@@ -55,6 +73,7 @@ Because rotation is a band-aid. It assumes the secret is the inevitable part of 
 **Federated credentials** (OIDC workload identity) and **managed identities** eliminate static secrets completely. Instead of storing a password-equivalent that could leak, you configure trust relationships. GitHub Actions proves it's running in your repository by presenting a signed OIDC token; Entra ID validates the token and issues a short-lived access token. No secret ever hits your CI/CD environment.
 
 The advantages are huge:
+
 - **No exfiltration risk.** There's nothing static to steal. An attacker would have to compromise the OIDC issuer itself (GitHub, Azure, AWS) which is significantly harder than grabbing a secret from a Key Vault or environment variable.
 - **No rotation schedules.** Tokens are issued on-demand and expire in minutes or hours. You never have to coordinate "rotate this secret across 12 environments by Friday."
 - **Faster incident response.** If a workload identity is compromised, you revoke the trust relationship in Entra ID. You don't have to hunt down every place a secret was copied.
@@ -64,6 +83,8 @@ The advantages are huge:
 Where federation isn't an option—legacy systems, third-party integrations that don't support OIDC—short-lived certificates are the next best thing. A cert with a 30-day lifetime that auto-rotates is orders of magnitude safer than a 2-year client secret that someone pasted into Slack.
 
 This toolkit exists to accelerate that transition: discover where secrets still exist, generate migration recommendations, and provide helpers to create federated credentials or rotate to short-lived certs. The goal isn't "rotate faster"; it's "remove the secret."
+
+**Layer adaptive controls:** Once high-risk apps are identified, enforce Conditional Access for workload identities (requires Workload Identities Premium licensing) to block risky service principals based on location or risk signals. Pair this with Continuous Access Evaluation (CAE) so revocations—service principal disable, deletion, or risk escalation—take effect immediately without waiting for token expiry. Validate outcomes via the Service Principal sign-in logs to confirm that enforcement is working as expected. The toolkit's `risky-service-principals.json` and `privileged-roles.json` artifacts provide the candidate list for scoping these policies.
 
 ## How It Works Under the Hood
 
@@ -79,6 +100,8 @@ The module is built on PowerShell 7.4 with strict mode, `[CmdletBinding()]` attr
 
 **Everything outputs structured data.** The scan script writes JSON and CSV files to `./out/`. Each artifact is timestamped and includes metadata like the tenant ID and when the scan ran. You can parse these with `ConvertFrom-Json`, load them into pandas, or push them to Azure Monitor Logs. There's no proprietary format—just standards.
 
+**Future enhancement:** Optional CAE token capability detection and recommendation flags (proposed column `SupportsCae` in the credential inventory) would enable prioritization of workloads for real-time enforcement. Applications that send the `xms_cc=cp1` claim in their token requests receive CAE-enabled long-lived tokens (24 hours) subject to instant revocation events—a powerful upgrade over traditional 1-hour token lifetimes.
+
 ## The Discovery Side
 
 The heavy lifting happens in a handful of cmdlets that map directly to Microsoft Graph queries:
@@ -90,6 +113,8 @@ The heavy lifting happens in a handful of cmdlets that map directly to Microsoft
 **`Get-WiHighPrivilegeAppPermissions`** looks for applications holding dangerous Graph permissions—things like `Directory.ReadWrite.All`, `Application.ReadWrite.All`, `RoleManagement.ReadWrite.Directory`. These are the permissions that let an app modify users, create new apps, or assign roles. You'd be surprised how many apps have these permissions "just in case."
 
 **`Get-WiTenantConsentSettings`** fetches the authorization policy (`Get-MgPolicyAuthorizationPolicy`) and extracts the consent knobs: whether users can consent to apps, whether admin consent workflows are enabled, who can create apps, and whether email verification is required. This is the posture that controls how workload identities proliferate in your tenant.
+
+**Classification & Attributes:** Beyond discovery, you can map discovered apps to custom security attributes (e.g., `RiskTier`, `RemediationPhase`, `DataSensitivity`) using Microsoft Graph PowerShell. Custom security attributes in Entra ID enable filtered views and targeted policy scope—for example, applying stricter Conditional Access policies to apps tagged with `DataSensitivity=High` or tracking migration progress with `RemediationPhase=InProgress`. While the toolkit doesn't automatically assign these attributes, the credential inventory and high-privilege permissions data provide the inputs for classification decisions. See https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/custom-security-attributes-apps for implementation guidance.
 
 **`Get-WiBetaRiskyServicePrincipal`** and **`Get-WiBetaRiskyServicePrincipalHistory`** hit the Identity Protection beta endpoints to pull risky workload identities. These are service principals that Microsoft's risk detection systems have flagged—maybe they authenticated from an anonymous IP, or their credentials showed up in a breach, or there was anomalous sign-in behavior. The triage report (`Get-WiRiskyServicePrincipalTriageReport`) aggregates the distribution by risk level and risk state so you can see at a glance how many are at risk vs. confirmed compromised vs. dismissed.
 
@@ -104,6 +129,8 @@ Once you've identified problems, the toolkit provides helpers to fix them:
 **`Set-WiRiskyServicePrincipalCompromised`** and **`Clear-WiRiskyServicePrincipalRisk`** are the approved-verb wrappers around the Identity Protection risk action APIs. If a service principal is flagged and you've confirmed it's compromised (maybe you found the secret in a public repo), you mark it as compromised so Microsoft's signals improve. If it's a false positive, you dismiss the risk. Both cmdlets support `-WhatIf` so you can preview the action before committing.
 
 All of these require elevated permissions: `Application.ReadWrite.All` for credential changes, `IdentityRiskyServicePrincipal.ReadWrite.All` plus the Security Administrator role for risk actions. The module won't prompt you for consent on the fly—you need to authenticate with those scopes upfront.
+
+**Post-remediation governance:** After addressing immediate risks, seed Privileged Identity Management (PIM) recurring access reviews from the `privileged-roles.json` and `high-privilege-app-permissions.json` artifacts. Access reviews for service principals require Workload Identities Premium plus ID Governance licensing. Generate a CSV of candidate service principals with their role assignments, last sign-in dates, and permission counts, then import that scope into PIM to establish quarterly or semi-annual entitlement hygiene reviews. This closes the loop from discovery → remediation → ongoing governance. See https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-create-roles-and-resource-roles-review for setup guidance.
 
 ## Running It Yourself
 
@@ -190,6 +217,7 @@ The real power comes from running this continuously. You want to catch new high-
 Here's how you set that up in GitHub Actions. First, create a service principal in Entra ID and configure a federated credential for your GitHub repo (see `New-WiFederatedCredential` or do it in the portal). Grant it the Graph application permissions it needs: `Application.Read.All`, `Directory.Read.All`, `Policy.Read.All`, `IdentityRiskyServicePrincipal.Read.All`. Make sure those permissions are admin-consented.
 
 Add the service principal's client ID and your tenant ID as GitHub repository secrets:
+
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID` (required by `azure/login`)
@@ -201,7 +229,7 @@ Now create a workflow file (`.github/workflows/workload-identity-scan.yml`) that
 name: Workload Identity Scan
 on:
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+    - cron: "0 2 * * *" # Daily at 2 AM UTC
   workflow_dispatch:
 
 jobs:
@@ -212,34 +240,34 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v3
-      
+
       - name: Azure Login (OIDC)
         uses: azure/login@v1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      
+
       - name: Install Dependencies
         shell: pwsh
         run: ./project-workload-identity/scripts/Install-Dependencies.ps1
-      
+
       - name: Run Scan
         shell: pwsh
         env:
           WI_SCAN_TENANT_ID: ${{ secrets.WI_SCAN_TENANT_ID }}
         run: ./project-workload-identity/scripts/Scan-And-Report.ps1
-      
+
       - name: Render HTML Report
         shell: pwsh
         run: ./project-workload-identity/scripts/Write-ScanReport.ps1 -OutputFolder ./out
-      
+
       - name: Publish Report Summary
         shell: pwsh
         env:
           REPORT_PATH: ./out/workload-identity-report.html
         run: ./project-workload-identity/scripts/Publish-ScanReportSummary.ps1
-      
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3
         with:
@@ -252,6 +280,8 @@ The `azure/login` step sets the `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, and `AZURE
 The workflow runs nightly, scans the tenant, generates an HTML report, publishes a summary to the GitHub Actions job summary (so you can see highlights without downloading artifacts), and uploads the full JSON/CSV artifacts for later analysis.
 
 If a new high-risk app appears, you'll see it in the next morning's workflow run. If someone creates a service principal with Global Administrator, it shows up in `privileged-roles.json`. If Identity Protection flags a risky workload identity, it's in the triage report. All without manual intervention.
+
+**Optionally generate `conditional-access-candidates.json`:** Extend the scan to produce a list of service principal object IDs exceeding defined risk thresholds (e.g., high-risk credentials + privileged roles, or confirmed risky status from Identity Protection). This artifact can drive out-of-band policy provisioning—import the object IDs into a Conditional Access policy scoped to block access from untrusted locations or at elevated risk levels. The candidates file becomes a living policy scope that updates nightly as new high-risk apps are discovered.
 
 ## What You Get Out
 
@@ -303,12 +333,16 @@ A few things to keep in mind as you use this toolkit:
 
 **Integrate with access reviews.** If you're using Entra ID Governance access reviews for service principals, you can use the privileged role and high-privilege permission data from this toolkit to seed the review scope. Export the JSON, identify the high-risk apps, and kick off targeted reviews for those identities.
 
+**Enable CAE for eligible workload identities.** Applications accessing Microsoft Graph can opt into Continuous Access Evaluation by requesting tokens with the `xms_cc=cp1` claim. This enables 24-hour long-lived tokens subject to instant revocation on disable, delete, or risk state changes. Monitor revocations in the Service Principal sign-in logs—look for the "Continuous access evaluation" field and verify that blocked sessions show appropriate failure reasons. Track an adoption metric (percentage of high-privilege principals covered by Conditional Access policies) to measure your enforcement posture over time. Note: Conditional Access for workload identities requires Workload Identities Premium licensing and applies only to single-tenant service principals (managed identities and multi-tenant apps are excluded).
+
 ## References
 
 PowerShell / Testing:
+
 - Pester overview: https://learn.microsoft.com/powershell/scripting/testing/overview?view=powershell-7.4
 
 Graph SDK (v1.0):
+
 - Connect-MgGraph: https://learn.microsoft.com/powershell/microsoftgraph/authentication/connect-mggraph?view=graph-powershell-1.0
 - Get-MgApplication: https://learn.microsoft.com/powershell/module/microsoft.graph.applications/get-mgapplication?view=graph-powershell-1.0
 - New-MgApplicationFederatedIdentityCredential: https://learn.microsoft.com/powershell/module/microsoft.graph.applications/new-mgapplicationfederatedidentitycredential?view=graph-powershell-1.0
@@ -316,6 +350,7 @@ Graph SDK (v1.0):
 - Get-MgPolicyAuthorizationPolicy: https://learn.microsoft.com/powershell/module/microsoft.graph.identity.signins/get-mgpolicyauthorizationpolicy?view=graph-powershell-1.0
 
 Graph Beta (Risky Workload Identities):
+
 - List risky SPs: https://learn.microsoft.com/en-us/graph/api/identityprotectionroot-list-riskyserviceprincipals?view=graph-rest-beta
 - Risk history: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-list-history?view=graph-rest-beta
 - Confirm compromised: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-confirmcompromised?view=graph-rest-beta
@@ -335,6 +370,6 @@ The end goal is a tenant where standing secrets don't exist, privileged assignme
 
 Start with a scan. See what you're dealing with. Build a plan. Automate the remediation. Repeat.
 
-The blueprint is here. The rest is execution.
+The blueprint is here. The rest is execution. 🚀
 
 License: MIT
