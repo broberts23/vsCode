@@ -370,6 +370,8 @@ The end goal is a tenant where standing secrets don't exist, privileged assignme
 
 Start with a scan. See what you're dealing with. Build a plan. Automate the remediation. Repeat.
 
+For all the files and code snippets mentioned, check out the [GitHub repository](https://github.com/broberts23/vsCode/tree/main/project-workload-identity).
+
 The blueprint is here. The rest is execution. 🚀
 
 License: MIT
