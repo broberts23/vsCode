@@ -344,3 +344,12 @@ Reference: [Bicep Best Practices](https://learn.microsoft.com/azure/azure-resour
 Azure Storage Lifecycle Management Policies are the right tool when retention is time-based and you value operational simplicity over granular control. Deploy them with Bicep, test with realistic data, and let the service handle the rest. Your infrastructure stays declarative, your storage costs stay predictable, and you avoid the operational overhead of maintaining yet another background job.
 
 For scenarios demanding filename parsing, per-run reporting, or conditional logic, custom code remains the escape hatch—but for most cleanup workloads, the built-in lifecycle engine is enough.
+
+## References
+
+- [My GitHub Repo](https://github.com/broberts23/vsCode/tree/main/project-blob-cleanup)
+- [Azure Blob Storage Lifecycle Management](https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-overview)
+- [Bicep Best Practices](https://learn.microsoft.com/azure/azure-resource-manager/bicep/best-practices)
+- [Monitor Azure Blob Storage](https://learn.microsoft.com/azure/storage/blobs/monitor-blob-storage)
+- [Enable access time tracking](https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-policy-configure#enable-access-time-tracking)
+- [Lifecycle management policy monitoring](https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-policy-monitor)
