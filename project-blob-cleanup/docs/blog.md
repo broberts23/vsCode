@@ -152,9 +152,10 @@ Azure Storage can optionally track when each blob was last read (requires enabli
 ```json
 "actions": {
   "baseBlob": {
-    "enableAutoTierToHotFromCool": {
+    "tierToCool": {
       "daysAfterLastAccessTimeGreaterThan": 30
     },
+    "enableAutoTierToHotFromCool": true,
     "delete": {
       "daysAfterLastAccessTimeGreaterThan": 90
     }
@@ -176,11 +177,11 @@ param storageAccountName string
 param containerPrefixes array
 param retentionDays int = 7
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' existing = {
+resource storageAccount 'Microsoft.Storage/storageAccounts@2025-06-01' existing = {
   name: storageAccountName
 }
 
-resource managementPolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01' = {
+resource managementPolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2025-06-01' = {
   name: 'default'
   parent: storageAccount
   properties: {
@@ -288,7 +289,22 @@ Before enabling a policy in production, seed test data with the provided `Seed-S
 
 This creates blobs with filenames encoding timestamps (e.g., `signin/entra/20251113000000.json`). Deploy your policy with a short retention window (`retentionDays: 2`) and check after the next daily evaluation cycle (typically within 24 hours) whether old blobs were deleted.
 
-**Important caveat**: Lifecycle policies evaluate `LastModified` or creation time, not filename content. The seeding script sets blob metadata timestamps to match filename patterns for accurate testing.
+**Important caveat**: Lifecycle policies evaluate `LastModified` or creation time, not filename content. The seeding script creates blobs with timestamps in their filenames, but all blobs will have `LastModified` set to the upload time. To test retention policies effectively, you need to wait for blobs to age naturally—there is no supported way to backdate blob timestamps. For rapid testing, use very short retention periods (1-2 days) and verify policy execution after 24-48 hours.
+
+## Validating the Policy in the Azure Portal
+
+After deployment (Bicep or ARM), you can confirm the lifecycle policy configuration and observe its effects directly in the Azure Portal.
+
+### Verify Rule Definition
+
+1. Navigate to the Storage Account.
+2. In the left menu, under **Data management**, select **Lifecycle management**.
+3. Use the **List view** tab to confirm your rule appears (e.g., `DeleteOldBlobs`) and its status is **Enabled**.
+4. Switch to **Code view** to inspect the JSON that the portal stored. It should reflect the Bicep deployment (prefixes, `daysAfterModificationGreaterThan`, snapshot settings).
+
+If the rule was just deployed or modified, allow up to 24 hours for the first evaluation cycle (per Microsoft guidance). The presence of the rule in the portal does not mean deletions have already occurred.
+
+Reference: [Configure a lifecycle management policy (Azure Portal)](https://learn.microsoft.com/azure/storage/blobs/lifecycle-management-policy-configure#create-or-manage-a-policy)
 
 ## Monitoring and Observability
 

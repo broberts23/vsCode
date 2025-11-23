@@ -6,7 +6,7 @@
       "value": "stprodblobcleanup001"
     },
     "containerPrefixes": {
-      "value": ["signin", "passwordexpiry", "audit", "logs"]
+      "value": ["audit", "samples"]
     },
     "retentionDays": {
       "value": 7

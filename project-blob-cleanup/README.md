@@ -39,12 +39,12 @@ project-blob-cleanup/
 
 Each environment parameter file (`parameters.{env}.json`) specifies:
 
-| Parameter            | Description                                   | Example                       |
-| -------------------- | --------------------------------------------- | ----------------------------- |
-| `storageAccountName` | Name of the existing Storage Account          | `stprodblobcleanup001`        |
-| `containerPrefixes`  | Array of container name prefixes to target    | `["signin", "audit", "logs"]` |
-| `retentionDays`      | Days after modification before deleting blobs | `7`                           |
-| `enabled`            | Enable or disable the lifecycle rule          | `true`                        |
+| Parameter            | Description                                   | Example                |
+| -------------------- | --------------------------------------------- | ---------------------- |
+| `storageAccountName` | Name of the existing Storage Account          | `stprodblobcleanup001` |
+| `containerPrefixes`  | Array of container name prefixes to target    | `["audit", "samples"]` |
+| `retentionDays`      | Days after modification before deleting blobs | `7`                    |
+| `enabled`            | Enable or disable the lifecycle rule          | `true`                 |
 
 The `containerPrefixes` array is consolidated into a single lifecycle rule's `prefixMatch` filter, keeping the policy lean and under Azure's rule count limits.
 
@@ -94,7 +94,7 @@ ENVIRONMENT="prod"
 az deployment group create \
   --resource-group $RESOURCE_GROUP \
   --template-file ./infra/main.bicep \
-  --parameters @./infra/parameters.$ENVIRONMENT.json
+  --parameters ./infra/parameters.$ENVIRONMENT.json
 ```
 
 Reference: [az deployment group create](https://learn.microsoft.com/cli/azure/deployment/group#az-deployment-group-create)
@@ -116,13 +116,13 @@ Use the PowerShell seeding script to populate containers with timestamped blobs 
 
 The script creates virtual directory structures like:
 
-- `signin/entra/20251110000000.json`
-- `passwordexpiry/activedirectory/20251115120000.json`
-- `audit/logs/20251123180000.json`
+- `imports/signin/entra/20251110000000-1.json`
+- `exports/signin/activedirectory/20251115120000-2.json`
+- `audit/logs/system/20251123180000-1.json`
 
 ## How Lifecycle Policies Work
 
-Azure Storage evaluates lifecycle rules once per day (timing is service-managed). Blobs matching the filter criteria (`blobTypes`, `prefixMatch`) have their `LastModified` timestamp compared against the `daysAfterModificationGreaterThan` threshold. Snapshots use their creation time with `daysAfterCreationGreaterThan`.
+Azure Storage evaluates lifecycle rules periodically (timing is service-managed). Blobs matching the filter criteria (`blobTypes`, `prefixMatch`) have their `LastModified` timestamp compared against the `daysAfterModificationGreaterThan` threshold. Snapshots use their creation time with `daysAfterCreationGreaterThan`.
 
 **Important**: Unlike custom code approaches, lifecycle policies:
 

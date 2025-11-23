@@ -2,19 +2,19 @@ param(
   [Parameter(Mandatory)][string]$StorageAccountName,
   [Parameter(Mandatory)][string]$ResourceGroup,
   [int]$PastDays = 10,
-  [int]$FutureDays = 3,
+  [int]$FutureDays = 10,
   [int]$PerDayPerPath = 2
 )
 
 Write-Host "Seeding storage account '$StorageAccountName' in resource group '$ResourceGroup'"
 
-try { Connect-AzAccount -Identity -ErrorAction Stop | Out-Null } catch { Write-Warning "Identity auth failed; ensure you are logged in." }
+try { Connect-AzAccount } catch { Write-Warning "Identity auth failed; ensure you are logged in." }
 
 $sa = Get-AzStorageAccount -Name $StorageAccountName -ResourceGroupName $ResourceGroup -ErrorAction Stop
 $ctx = $sa.Context
 
-$containers = @("signin", "passwordexpiry", "audit", "telemetry", "samples")
-$paths = @("signin/entra", "signin/activedirectory", "passwordexpiry/entra")
+$containers = @("imports", "exports", "audit", "telemetry", "samples")
+$paths = @("signin/entra", "signin/activedirectory", "logs/system", "logs/application")
 
 foreach ($c in $containers) {
   try { New-AzStorageContainer -Name $c -Context $ctx -Permission Off -ErrorAction SilentlyContinue | Out-Null } catch {}
