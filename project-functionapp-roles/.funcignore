@@ -1,0 +1,24 @@
+# Exclude test files from deployment
+tests/
+*.Tests.ps1
+
+# Exclude infrastructure code
+infra/
+
+# Exclude documentation
+docs/
+*.md
+
+# Exclude scripts
+scripts/
+
+# Exclude development files
+.git/
+.gitignore
+.vscode/
+local.settings.json
+.env
+
+# Exclude test output
+TestResults/
+coverage.xml
