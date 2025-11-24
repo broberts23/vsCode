@@ -11,8 +11,22 @@
 #>
 
 BeforeAll {
+    # Determine project root from test file location
+    # When running via Pester configuration, use PWD (project root)
+    # When running directly, use calculated path from script location
+    if ($PSScriptRoot -and (Test-Path $PSScriptRoot)) {
+        $script:TestProjectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    }
+    else {
+        # Fallback to PWD when PSScriptRoot is not available (Pester config execution)
+        $script:TestProjectRoot = Get-Location | Select-Object -ExpandProperty Path
+    }
+    
+    Write-Host "ProjectRoot set to: $script:TestProjectRoot" -ForegroundColor Cyan
+    
     # Import required modules
-    $modulePath = Join-Path $PSScriptRoot '../../Modules/PasswordResetHelpers/PasswordResetHelpers.psm1'
+    $modulePath = Join-Path $script:TestProjectRoot 'Modules/PasswordResetHelpers/PasswordResetHelpers.psm1'
+    Write-Host "Loading module from: $modulePath" -ForegroundColor Cyan
     Import-Module $modulePath -Force
     
     # Mock environment variables
@@ -26,11 +40,14 @@ Describe 'ResetUserPassword Function' {
     
     Context 'Request Validation' {
         BeforeEach {
+            # Set project root for path resolution in tests
+            $script:TestProjectRoot = Get-Location | Select-Object -ExpandProperty Path
+            
             # Mock the helper functions
             Mock Test-JwtToken { } -ModuleName PasswordResetHelpers
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
-            Mock Set-UserPassword { $true } -ModuleName PasswordResetHelpers
+            Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             
             # Simulate function execution
             $script:response = $null
@@ -48,7 +65,7 @@ Describe 'ResetUserPassword Function' {
             }
             
             # Execute function script
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 401
@@ -61,7 +78,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 401
@@ -80,7 +97,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{} | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 400
@@ -90,9 +107,12 @@ Describe 'ResetUserPassword Function' {
     
     Context 'JWT Token Validation' {
         BeforeEach {
+            # Set project root for path resolution in tests
+            $script:TestProjectRoot = Get-Location | Select-Object -ExpandProperty Path
+            
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
-            Mock Set-UserPassword { $true } -ModuleName PasswordResetHelpers
+            Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             
             $script:response = $null
             
@@ -110,7 +130,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 401
@@ -124,7 +144,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 401
@@ -133,13 +153,16 @@ Describe 'ResetUserPassword Function' {
     
     Context 'Role Authorization' {
         BeforeEach {
+            # Set project root for path resolution in tests
+            $script:TestProjectRoot = Get-Location | Select-Object -ExpandProperty Path
+            
             Mock Test-JwtToken {
                 $claims = [System.Collections.Generic.List[System.Security.Claims.Claim]]::new()
                 $identity = [System.Security.Claims.ClaimsIdentity]::new($claims, 'Bearer')
                 [System.Security.Claims.ClaimsPrincipal]::new($identity)
             } -ModuleName PasswordResetHelpers
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
-            Mock Set-UserPassword { $true } -ModuleName PasswordResetHelpers
+            Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             
             $script:response = $null
             
@@ -157,7 +180,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 403
@@ -172,7 +195,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 200
@@ -181,6 +204,9 @@ Describe 'ResetUserPassword Function' {
     
     Context 'Password Reset Operations' {
         BeforeEach {
+            # Set project root for path resolution in tests
+            $script:TestProjectRoot = Get-Location | Select-Object -ExpandProperty Path
+            
             Mock Test-JwtToken {
                 $claims = [System.Collections.Generic.List[System.Security.Claims.Claim]]::new()
                 $identity = [System.Security.Claims.ClaimsIdentity]::new($claims, 'Bearer')
@@ -198,14 +224,14 @@ Describe 'ResetUserPassword Function' {
         
         It 'Should return generated password on successful reset' {
             Mock New-SecurePassword { 'GeneratedPassword123!' } -ModuleName PasswordResetHelpers
-            Mock Set-UserPassword { $true } -ModuleName PasswordResetHelpers
+            Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             
             $Request = @{
                 Headers = @{ Authorization = 'Bearer valid-token' }
                 Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 200
@@ -216,14 +242,14 @@ Describe 'ResetUserPassword Function' {
         
         It 'Should handle user not found error' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
-            Mock Set-UserPassword { throw 'Resource not found' } -ModuleName PasswordResetHelpers
+            Mock Set-ADUserPassword { throw 'Resource not found' } -ModuleName PasswordResetHelpers
             
             $Request = @{
                 Headers = @{ Authorization = 'Bearer valid-token' }
                 Body    = @{ userId = 'nonexistent@contoso.com' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 500
@@ -232,14 +258,14 @@ Describe 'ResetUserPassword Function' {
         
         It 'Should include security headers in response' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
-            Mock Set-UserPassword { $true } -ModuleName PasswordResetHelpers
+            Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             
             $Request = @{
                 Headers = @{ Authorization = 'Bearer valid-token' }
                 Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $PSScriptRoot '../../ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.Headers.'Cache-Control' | Should -Match 'no-store'

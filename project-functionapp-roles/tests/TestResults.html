@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Results - Password Reset Function App</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 { font-size: 2rem; margin-bottom: 10px; }
+        .header p { opacity: 0.9; font-size: 0.95rem; }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-card .label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .passed { color: #28a745; }
+        .failed { color: #dc3545; }
+        .total { color: #007bff; }
+        .rate { color: #17a2b8; }
+        .status-banner {
+            background: #28a745;
+            color: white;
+            padding: 15px 30px;
+            text-align: center;
+            font-size: 1.2rem;
+            font-weight: 500;
+        }
+        .tests {
+            padding: 30px;
+        }
+        .test-suite {
+            margin-bottom: 30px;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .suite-header {
+            background: #e9ecef;
+            padding: 15px 20px;
+            font-weight: 600;
+            color: #495057;
+            cursor: pointer;
+            user-select: none;
+        }
+        .suite-header:hover { background: #dee2e6; }
+        .test-cases {
+            padding: 15px;
+        }
+        .test-case {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #f1f3f5;
+        }
+        .test-case:last-child { border-bottom: none; }
+        .test-case .icon {
+            font-size: 1.2rem;
+            margin-right: 12px;
+        }
+        .test-case .name {
+            flex: 1;
+            font-size: 0.95rem;
+        }
+        .test-case .time {
+            color: #6c757d;
+            font-size: 0.85rem;
+            margin-left: 12px;
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 0.85rem;
+            border-top: 1px solid #dee2e6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 Password Reset Function App</h1>
+            <p>Test Results Report - Generated 2025-11-24 20:45:53</p>
+        </div>
+        
+        <div class="status-banner">
+            ✅ All Tests Passing
+        </div>
+        
+        <div class="summary">
+            <div class="stat-card">
+                <div class="value passed">39</div>
+                <div class="label">Passed</div>
+            </div>
+            <div class="stat-card">
+                <div class="value failed">0</div>
+                <div class="label">Failed</div>
+            </div>
+            <div class="stat-card">
+                <div class="value total">39</div>
+                <div class="label">Total</div>
+            </div>
+            <div class="stat-card">
+                <div class="value rate">100%</div>
+                <div class="label">Pass Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" style="color: #6f42c1;">94.2%</div>
+                <div class="label">Coverage</div>
+            </div>
+        </div>
+        
+        <div class="tests">
+            <h2 style="margin-bottom: 20px; color: #343a40;">Test Suites</h2>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should load the module successfully</div>
+                        <div class="time">0.05s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Test-JwtToken function</div>
+                        <div class="time">0.01s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Test-RoleClaim function</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export New-SecurePassword function</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Set-ADUserPassword function</div>
+                        <div class="time">0.009s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null token</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty token</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid token format</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should validate a properly formatted JWT token</div>
+                        <div class="time">0.036s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on expired token</div>
+                        <div class="time">0.007s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid issuer</div>
+                        <div class="time">0.013s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid audience</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null principal</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return true when required role exists</div>
+                        <div class="time">0.012s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return false when required role does not exist</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return false when no roles exist</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should be case-sensitive for role matching</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate a password of default length</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate a password of specified length</div>
+                        <div class="time">0.025s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate password with minimum length</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw for length below minimum</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw for length above maximum</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one lowercase character</div>
+                        <div class="time">0.005s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one uppercase character</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one number</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one special character</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate unique passwords</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate passwords consistently meeting complexity requirements</div>
+                        <div class="time">0.04s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null SamAccountName</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty SamAccountName</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null Password</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty Password</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should call Set-ADAccountPassword with correct parameters</div>
+                        <div class="time">0.079s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should call Set-ADUser for password change requirement</div>
+                        <div class="time">0.014s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should support ChangePasswordAtLogon parameter</div>
+                        <div class="time">0.02s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw when Set-ADAccountPassword fails</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should accept pipeline input for SamAccountName</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should support -WhatIf</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate password that meets all requirements</div>
+                        <div class="time">0.007s</div>
+                    </div>                </div>
+            </div>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers Module</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should load the module successfully</div>
+                        <div class="time">0.05s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Test-JwtToken function</div>
+                        <div class="time">0.01s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Test-RoleClaim function</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export New-SecurePassword function</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Set-ADUserPassword function</div>
+                        <div class="time">0.009s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null token</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty token</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid token format</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should validate a properly formatted JWT token</div>
+                        <div class="time">0.036s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on expired token</div>
+                        <div class="time">0.007s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid issuer</div>
+                        <div class="time">0.013s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid audience</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null principal</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return true when required role exists</div>
+                        <div class="time">0.012s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return false when required role does not exist</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return false when no roles exist</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should be case-sensitive for role matching</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate a password of default length</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate a password of specified length</div>
+                        <div class="time">0.025s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate password with minimum length</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw for length below minimum</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw for length above maximum</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one lowercase character</div>
+                        <div class="time">0.005s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one uppercase character</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one number</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one special character</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate unique passwords</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate passwords consistently meeting complexity requirements</div>
+                        <div class="time">0.04s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null SamAccountName</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty SamAccountName</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null Password</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty Password</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should call Set-ADAccountPassword with correct parameters</div>
+                        <div class="time">0.079s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should call Set-ADUser for password change requirement</div>
+                        <div class="time">0.014s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should support ChangePasswordAtLogon parameter</div>
+                        <div class="time">0.02s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw when Set-ADAccountPassword fails</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should accept pipeline input for SamAccountName</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should support -WhatIf</div>
+                        <div class="time">0.004s</div>
+                    </div>                </div>
+            </div>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers Module.Module Load</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should load the module successfully</div>
+                        <div class="time">0.05s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Test-JwtToken function</div>
+                        <div class="time">0.01s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Test-RoleClaim function</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export New-SecurePassword function</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should export Set-ADUserPassword function</div>
+                        <div class="time">0.009s</div>
+                    </div>                </div>
+            </div>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers Module.Test-JwtToken</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null token</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty token</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid token format</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should validate a properly formatted JWT token</div>
+                        <div class="time">0.036s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on expired token</div>
+                        <div class="time">0.007s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid issuer</div>
+                        <div class="time">0.013s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on invalid audience</div>
+                        <div class="time">0.004s</div>
+                    </div>                </div>
+            </div>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers Module.Test-RoleClaim</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null principal</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return true when required role exists</div>
+                        <div class="time">0.012s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return false when required role does not exist</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should return false when no roles exist</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should be case-sensitive for role matching</div>
+                        <div class="time">0.003s</div>
+                    </div>                </div>
+            </div>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers Module.New-SecurePassword</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate a password of default length</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate a password of specified length</div>
+                        <div class="time">0.025s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate password with minimum length</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw for length below minimum</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw for length above maximum</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one lowercase character</div>
+                        <div class="time">0.005s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one uppercase character</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one number</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should contain at least one special character</div>
+                        <div class="time">0.004s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate unique passwords</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate passwords consistently meeting complexity requirements</div>
+                        <div class="time">0.04s</div>
+                    </div>                </div>
+            </div>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers Module.Set-ADUserPassword</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null SamAccountName</div>
+                        <div class="time">0.018s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty SamAccountName</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on null Password</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw on empty Password</div>
+                        <div class="time">0.003s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should call Set-ADAccountPassword with correct parameters</div>
+                        <div class="time">0.079s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should call Set-ADUser for password change requirement</div>
+                        <div class="time">0.014s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should support ChangePasswordAtLogon parameter</div>
+                        <div class="time">0.02s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should throw when Set-ADAccountPassword fails</div>
+                        <div class="time">0.008s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should accept pipeline input for SamAccountName</div>
+                        <div class="time">0.006s</div>
+                    </div>                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should support -WhatIf</div>
+                        <div class="time">0.004s</div>
+                    </div>                </div>
+            </div>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers Module Integration Tests</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate password that meets all requirements</div>
+                        <div class="time">0.007s</div>
+                    </div>                </div>
+            </div>            <div class="test-suite">
+                <div class="suite-header">📦 PasswordResetHelpers Module Integration Tests.End-to-End Password Generation and Validation</div>
+                <div class="test-cases">                    <div class="test-case">
+                        <div class="icon">✅</div>
+                        <div class="name">Should generate password that meets all requirements</div>
+                        <div class="time">0.007s</div>
+                    </div>                </div>
+            </div>        </div>
+        
+        <div class="footer">
+            <p>PowerShell 7.4 • Pester 5.7.1 • Azure Functions v4</p>
+            <p style="margin-top: 8px;">Generated by Generate-HtmlReport.ps1</p>
+        </div>
+    </div>
+</body>
+</html>
