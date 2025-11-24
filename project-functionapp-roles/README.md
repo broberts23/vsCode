@@ -145,7 +145,32 @@ Connect-MgGraph -Scopes 'Application.ReadWrite.All'
 
 ### Step 5: Configure Network Connectivity
 
-**Option 1: VNet Integration (Recommended for Production)**
+**Option 1: Deploy Self-Contained Domain Controller (Recommended for Demos)**
+
+The solution includes optional domain controller resources for creating a complete demo environment. See [Domain Controller Setup Guide](docs/DOMAIN-CONTROLLER-SETUP.md) for detailed instructions.
+
+To deploy with a domain controller, set `deployDomainController: true` in your parameters file:
+
+```json
+{
+  "deployDomainController": {
+    "value": true
+  },
+  "vmAdminUsername": {
+    "value": "azureadmin"
+  },
+  "vmAdminPassword": {
+    "value": "SECURE_PASSWORD"
+  },
+  "domainName": {
+    "value": "contoso.local"
+  }
+}
+```
+
+This creates a Windows Server 2022 VM with AD DS, service account, and test users automatically.
+
+**Option 2: VNet Integration (Recommended for Production)**
 
 1. Create or identify a VNet with connectivity to your Domain Controllers
 2. Enable VNet Integration on the Function App:
@@ -157,7 +182,7 @@ Connect-MgGraph -Scopes 'Application.ReadWrite.All'
        --subnet <SUBNET_NAME>
    ```
 
-**Option 2: Hybrid Connection or ExpressRoute**
+**Option 3: Hybrid Connection or ExpressRoute**
 
 Configure according to your organization's network architecture.
 

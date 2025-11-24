@@ -33,6 +33,21 @@
     },
     "domainController": {
       "value": "dc01.contoso.local"
+    },
+    "deployDomainController": {
+      "value": true
+    },
+    "vmAdminUsername": {
+      "value": "azureadmin"
+    },
+    "vmAdminPassword": {
+      "value": "REPLACE_WITH_SECURE_PASSWORD"
+    },
+    "domainName": {
+      "value": "contoso.local"
+    },
+    "domainNetBiosName": {
+      "value": "CONTOSO"
     }
   }
 }

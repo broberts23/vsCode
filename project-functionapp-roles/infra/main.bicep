@@ -41,6 +41,22 @@ param adServiceAccountPassword string
 @description('Domain controller FQDN (optional)')
 param domainController string = ''
 
+@description('VM admin username for domain controller')
+param vmAdminUsername string = 'azureadmin'
+
+@description('VM admin password for domain controller')
+@secure()
+param vmAdminPassword string
+
+@description('Active Directory domain name')
+param domainName string = 'contoso.local'
+
+@description('Active Directory NetBIOS name')
+param domainNetBiosName string = 'CONTOSO'
+
+@description('Deploy domain controller VM')
+param deployDomainController bool = true
+
 // ====================================
 // Variables
 // ====================================
@@ -52,6 +68,11 @@ var storageAccountName = '${baseName}st${environment}${take(uniqueSuffix, 8)}'
 var keyVaultName = '${baseName}-kv-${environment}-${take(uniqueSuffix, 8)}'
 var logAnalyticsName = '${baseName}-log-${environment}-${uniqueSuffix}'
 var appInsightsName = '${baseName}-ai-${environment}-${uniqueSuffix}'
+var vnetName = '${baseName}-vnet-${environment}-${uniqueSuffix}'
+var dcVmName = '${baseName}-dc-${environment}'
+var dcNicName = '${dcVmName}-nic'
+var dcPublicIpName = '${dcVmName}-pip'
+var nsgName = '${baseName}-nsg-${environment}-${uniqueSuffix}'
 
 // ====================================
 // Resources
@@ -155,6 +176,223 @@ resource adServiceAccountSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' =
     contentType: 'application/json'
     attributes: {
       enabled: true
+    }
+  }
+}
+
+// Network Security Group
+// https://learn.microsoft.com/azure/virtual-network/network-security-groups-overview
+resource nsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = if (deployDomainController) {
+  name: nsgName
+  location: location
+  tags: tags
+  properties: {
+    securityRules: [
+      {
+        name: 'AllowRDP'
+        properties: {
+          priority: 1000
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '3389'
+        }
+      }
+      {
+        name: 'AllowADDS'
+        properties: {
+          priority: 1010
+          protocol: '*'
+          access: 'Allow'
+          direction: 'Inbound'
+          sourceAddressPrefix: 'VirtualNetwork'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRanges: [
+            '389' // LDAP
+            '636' // LDAPS
+            '3268' // Global Catalog
+            '3269' // Global Catalog SSL
+            '88' // Kerberos
+            '53' // DNS
+            '445' // SMB
+          ]
+        }
+      }
+    ]
+  }
+}
+
+// Virtual Network
+// https://learn.microsoft.com/azure/virtual-network/virtual-networks-overview
+resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = if (deployDomainController) {
+  name: vnetName
+  location: location
+  tags: tags
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        '10.0.0.0/16'
+      ]
+    }
+    subnets: [
+      {
+        name: 'DomainControllerSubnet'
+        properties: {
+          addressPrefix: '10.0.1.0/24'
+          networkSecurityGroup: {
+            id: nsg.id
+          }
+        }
+      }
+      {
+        name: 'FunctionAppSubnet'
+        properties: {
+          addressPrefix: '10.0.2.0/24'
+          delegations: [
+            {
+              name: 'delegation'
+              properties: {
+                serviceName: 'Microsoft.Web/serverFarms'
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+
+// Public IP for Domain Controller
+// https://learn.microsoft.com/azure/virtual-network/ip-services/public-ip-addresses
+resource dcPublicIp 'Microsoft.Network/publicIPAddresses@2023-11-01' = if (deployDomainController) {
+  name: dcPublicIpName
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    dnsSettings: {
+      domainNameLabel: toLower(dcVmName)
+    }
+  }
+}
+
+// Network Interface for Domain Controller
+// https://learn.microsoft.com/azure/virtual-network/virtual-network-network-interface
+resource dcNic 'Microsoft.Network/networkInterfaces@2023-11-01' = if (deployDomainController) {
+  name: dcNicName
+  location: location
+  tags: tags
+  properties: {
+    ipConfigurations: [
+      {
+        name: 'ipconfig1'
+        properties: {
+          privateIPAllocationMethod: 'Static'
+          privateIPAddress: '10.0.1.4'
+          subnet: {
+            id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'DomainControllerSubnet')
+          }
+          publicIPAddress: {
+            id: dcPublicIp.id
+          }
+        }
+      }
+    ]
+  }
+  dependsOn: [
+    vnet
+  ]
+}
+
+// Domain Controller Virtual Machine
+// https://learn.microsoft.com/azure/virtual-machines/windows/overview
+resource dcVm 'Microsoft.Compute/virtualMachines@2024-03-01' = if (deployDomainController) {
+  name: dcVmName
+  location: location
+  tags: tags
+  properties: {
+    hardwareProfile: {
+      vmSize: 'Standard_D2s_v3'
+    }
+    osProfile: {
+      computerName: take(dcVmName, 15)
+      adminUsername: vmAdminUsername
+      adminPassword: vmAdminPassword
+      windowsConfiguration: {
+        enableAutomaticUpdates: true
+        provisionVMAgent: true
+        timeZone: 'UTC'
+      }
+    }
+    storageProfile: {
+      imageReference: {
+        publisher: 'MicrosoftWindowsServer'
+        offer: 'WindowsServer'
+        sku: '2022-datacenter'
+        version: 'latest'
+      }
+      osDisk: {
+        name: '${dcVmName}-osdisk'
+        caching: 'ReadWrite'
+        createOption: 'FromImage'
+        managedDisk: {
+          storageAccountType: 'Premium_LRS'
+        }
+      }
+      dataDisks: [
+        {
+          name: '${dcVmName}-datadisk'
+          diskSizeGB: 32
+          lun: 0
+          createOption: 'Empty'
+          managedDisk: {
+            storageAccountType: 'Premium_LRS'
+          }
+        }
+      ]
+    }
+    networkProfile: {
+      networkInterfaces: [
+        {
+          id: dcNic.id
+          properties: {
+            primary: true
+          }
+        }
+      ]
+    }
+    diagnosticsProfile: {
+      bootDiagnostics: {
+        enabled: true
+        storageUri: storageAccount.properties.primaryEndpoints.blob
+      }
+    }
+  }
+}
+
+// Custom Script Extension to bootstrap AD DS
+// https://learn.microsoft.com/azure/virtual-machines/extensions/custom-script-windows
+resource dcBootstrap 'Microsoft.Compute/virtualMachines/extensions@2024-03-01' = if (deployDomainController) {
+  parent: dcVm
+  name: 'BootstrapADDS'
+  location: location
+  properties: {
+    publisher: 'Microsoft.Compute'
+    type: 'CustomScriptExtension'
+    typeHandlerVersion: '1.10'
+    autoUpgradeMinorVersion: true
+    protectedSettings: {
+      fileUris: [
+        'https://raw.githubusercontent.com/.../Bootstrap-ADDSDomain.ps1' // or from storage
+      ]
+      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Bootstrap-ADDSDomain.ps1 -DomainName "${domainName}" -DomainNetBiosName "${domainNetBiosName}" -SafeModeAdminPassword (ConvertTo-SecureString "${vmAdminPassword}" -AsPlainText -Force)'
     }
   }
 }
