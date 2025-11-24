@@ -14,8 +14,8 @@
     "tenantId": {
       "value": "YOUR_TENANT_ID_HERE"
     },
-    "expectedAudience": {
-      "value": "api://YOUR_APP_ID_HERE"
+    "clientId": {
+      "value": "YOUR_APP_ID_HERE"
     },
     "requiredRole": {
       "value": "Role.PasswordReset"

@@ -30,10 +30,28 @@ BeforeAll {
     Import-Module $modulePath -Force
     
     # Mock environment variables
-    $env:TENANT_ID = 'test-tenant-id'
-    $env:EXPECTED_AUDIENCE = 'api://test-app-id'
-    $env:EXPECTED_ISSUER = 'https://sts.windows.net/test-tenant-id/'
     $env:REQUIRED_ROLE = 'Role.PasswordReset'
+    
+    # Helper to create client principal header
+    function New-ClientPrincipalHeader {
+        param(
+            [string[]]$Roles = @()
+        )
+        
+        $claims = @()
+        foreach ($role in $Roles) {
+            $claims += @{ typ = 'roles'; val = $role }
+        }
+        
+        $principal = @{
+            auth_typ = 'aad'
+            claims   = $claims
+        }
+        
+        $json = $principal | ConvertTo-Json -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+        return [System.Convert]::ToBase64String($bytes)
+    }
 }
 
 Describe 'ResetUserPassword Function' {
@@ -58,10 +76,10 @@ Describe 'ResetUserPassword Function' {
             }
         }
         
-        It 'Should reject request without Authorization header' {
+        It 'Should reject request without X-MS-CLIENT-PRINCIPAL header' {
             $Request = @{
                 Headers = @{}
-                Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
+                Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
             # Execute function script
@@ -72,28 +90,23 @@ Describe 'ResetUserPassword Function' {
             ($script:response.Body | ConvertFrom-Json).error | Should -Be 'Unauthorized'
         }
         
-        It 'Should reject request with invalid Authorization header format' {
+        It 'Should reject request with invalid X-MS-CLIENT-PRINCIPAL header' {
             $Request = @{
-                Headers = @{ Authorization = 'Invalid token-format' }
-                Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
+                Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = 'not-valid-base64!!!' }
+                Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
             $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 401
-            ($script:response.Body | ConvertFrom-Json).message | Should -Match 'Bearer'
         }
         
-        It 'Should reject request without userId in body' {
-            Mock Test-JwtToken {
-                $claims = [System.Collections.Generic.List[System.Security.Claims.Claim]]::new()
-                $identity = [System.Security.Claims.ClaimsIdentity]::new($claims, 'Bearer')
-                [System.Security.Claims.ClaimsPrincipal]::new($identity)
-            } -ModuleName PasswordResetHelpers
+        It 'Should reject request without samAccountName in body' {
+            $clientPrincipalHeader = New-ClientPrincipalHeader -Roles @('Role.PasswordReset')
             
             $Request = @{
-                Headers = @{ Authorization = 'Bearer valid-token' }
+                Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = $clientPrincipalHeader }
                 Body    = @{} | ConvertTo-Json
             }
             
@@ -101,11 +114,11 @@ Describe 'ResetUserPassword Function' {
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 400
-            ($script:response.Body | ConvertFrom-Json).message | Should -Match 'userId'
+            ($script:response.Body | ConvertFrom-Json).message | Should -Match 'samAccountName'
         }
     }
     
-    Context 'JWT Token Validation' {
+    Context 'Client Principal Validation' {
         BeforeEach {
             # Set project root for path resolution in tests
             $script:TestProjectRoot = Get-Location | Select-Object -ExpandProperty Path
@@ -122,26 +135,12 @@ Describe 'ResetUserPassword Function' {
             }
         }
         
-        It 'Should reject expired tokens' {
-            Mock Test-JwtToken { throw 'Token has expired' } -ModuleName PasswordResetHelpers
+        It 'Should reject invalid client principal' {
+            Mock Get-ClientPrincipal { throw 'Failed to decode client principal' } -ModuleName PasswordResetHelpers
             
             $Request = @{
-                Headers = @{ Authorization = 'Bearer expired-token' }
-                Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
-            }
-            
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
-            Invoke-Expression $functionScript
-            
-            $script:response.StatusCode | Should -Be 401
-        }
-        
-        It 'Should reject tokens with invalid issuer' {
-            Mock Test-JwtToken { throw 'Invalid token issuer' } -ModuleName PasswordResetHelpers
-            
-            $Request = @{
-                Headers = @{ Authorization = 'Bearer invalid-issuer-token' }
-                Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
+                Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = 'invalid-header' }
+                Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
             $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
@@ -156,10 +155,11 @@ Describe 'ResetUserPassword Function' {
             # Set project root for path resolution in tests
             $script:TestProjectRoot = Get-Location | Select-Object -ExpandProperty Path
             
-            Mock Test-JwtToken {
-                $claims = [System.Collections.Generic.List[System.Security.Claims.Claim]]::new()
-                $identity = [System.Security.Claims.ClaimsIdentity]::new($claims, 'Bearer')
-                [System.Security.Claims.ClaimsPrincipal]::new($identity)
+            Mock Get-ClientPrincipal {
+                [PSCustomObject]@{
+                    auth_typ = 'aad'
+                    claims   = @()
+                }
             } -ModuleName PasswordResetHelpers
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
@@ -175,9 +175,10 @@ Describe 'ResetUserPassword Function' {
         It 'Should reject requests without required role' {
             Mock Test-RoleClaim { $false } -ModuleName PasswordResetHelpers
             
+            $clientPrincipalHeader = New-ClientPrincipalHeader -Roles @()
             $Request = @{
-                Headers = @{ Authorization = 'Bearer valid-token-no-role' }
-                Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
+                Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = $clientPrincipalHeader }
+                Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
             $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
@@ -190,9 +191,11 @@ Describe 'ResetUserPassword Function' {
         It 'Should accept requests with required role' {
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
             
+            $global:ADServiceCredential = [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
+            $clientPrincipalHeader = New-ClientPrincipalHeader -Roles @('Role.PasswordReset')
             $Request = @{
-                Headers = @{ Authorization = 'Bearer valid-token-with-role' }
-                Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
+                Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = $clientPrincipalHeader }
+                Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
             $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
@@ -207,12 +210,17 @@ Describe 'ResetUserPassword Function' {
             # Set project root for path resolution in tests
             $script:TestProjectRoot = Get-Location | Select-Object -ExpandProperty Path
             
-            Mock Test-JwtToken {
-                $claims = [System.Collections.Generic.List[System.Security.Claims.Claim]]::new()
-                $identity = [System.Security.Claims.ClaimsIdentity]::new($claims, 'Bearer')
-                [System.Security.Claims.ClaimsPrincipal]::new($identity)
+            Mock Get-ClientPrincipal {
+                [PSCustomObject]@{
+                    auth_typ = 'aad'
+                    claims   = @(
+                        @{ typ = 'roles'; val = 'Role.PasswordReset' }
+                    )
+                }
             } -ModuleName PasswordResetHelpers
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
+            
+            $global:ADServiceCredential = [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
             
             $script:response = $null
             
@@ -226,9 +234,10 @@ Describe 'ResetUserPassword Function' {
             Mock New-SecurePassword { 'GeneratedPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             
+            $clientPrincipalHeader = New-ClientPrincipalHeader -Roles @('Role.PasswordReset')
             $Request = @{
-                Headers = @{ Authorization = 'Bearer valid-token' }
-                Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
+                Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = $clientPrincipalHeader }
+                Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
             $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
@@ -237,32 +246,33 @@ Describe 'ResetUserPassword Function' {
             $script:response.StatusCode | Should -Be 200
             $responseBody = $script:response.Body | ConvertFrom-Json
             $responseBody.password | Should -Be 'GeneratedPassword123!'
-            $responseBody.userId | Should -Be 'user@contoso.com'
+            $responseBody.samAccountName | Should -Be 'jdoe'
         }
         
         It 'Should handle user not found error' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
-            Mock Set-ADUserPassword { throw 'Resource not found' } -ModuleName PasswordResetHelpers
+            Mock Set-ADUserPassword { throw 'Cannot find an object' } -ModuleName PasswordResetHelpers
             
+            $clientPrincipalHeader = New-ClientPrincipalHeader -Roles @('Role.PasswordReset')
             $Request = @{
-                Headers = @{ Authorization = 'Bearer valid-token' }
-                Body    = @{ userId = 'nonexistent@contoso.com' } | ConvertTo-Json
+                Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = $clientPrincipalHeader }
+                Body    = @{ samAccountName = 'nonexistent' } | ConvertTo-Json
             }
             
             $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 500
-            ($script:response.Body | ConvertFrom-Json).message | Should -Match 'not found'
         }
         
         It 'Should include security headers in response' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             
+            $clientPrincipalHeader = New-ClientPrincipalHeader -Roles @('Role.PasswordReset')
             $Request = @{
-                Headers = @{ Authorization = 'Bearer valid-token' }
-                Body    = @{ userId = 'user@contoso.com' } | ConvertTo-Json
+                Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = $clientPrincipalHeader }
+                Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
             $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw

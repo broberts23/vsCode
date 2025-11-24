@@ -41,45 +41,26 @@ try {
     
     #region Validate Request
     
-    # Extract Authorization header
-    $authHeader = $Request.Headers['Authorization']
-    if (-not $authHeader) {
-        Write-Warning "Missing Authorization header"
+    # Extract X-MS-CLIENT-PRINCIPAL header (injected by App Service Authentication)
+    $clientPrincipalHeader = $Request.Headers['X-MS-CLIENT-PRINCIPAL']
+    if (-not $clientPrincipalHeader) {
+        Write-Warning "Missing X-MS-CLIENT-PRINCIPAL header - authentication not configured or request not authenticated"
         Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::Unauthorized
                 Headers    = @{ 'Content-Type' = 'application/json' }
                 Body       = @{
                     error   = 'Unauthorized'
-                    message = 'Authorization header is required'
+                    message = 'Authentication required. Ensure App Service Authentication is enabled.'
                 } | ConvertTo-Json
             })
         return
     }
-    
-    # Extract Bearer token
-    if ($authHeader -notmatch '^Bearer\s+(.+)$') {
-        Write-Warning "Invalid Authorization header format"
-        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
-                StatusCode = [HttpStatusCode]::Unauthorized
-                Headers    = @{ 'Content-Type' = 'application/json' }
-                Body       = @{
-                    error   = 'Unauthorized'
-                    message = 'Authorization header must use Bearer scheme'
-                } | ConvertTo-Json
-            })
-        return
-    }
-    
-    $token = $Matches[1]
     
     # Get configuration from environment variables
-    $tenantId = $env:TENANT_ID
-    $expectedAudience = $env:EXPECTED_AUDIENCE
-    $expectedIssuer = $env:EXPECTED_ISSUER -replace '\{TENANT_ID\}', $tenantId
     $requiredRole = $env:REQUIRED_ROLE
     
-    if (-not $tenantId -or -not $expectedAudience -or -not $requiredRole) {
-        Write-Error "Missing required environment variables"
+    if (-not $requiredRole) {
+        Write-Error "Missing required environment variable: REQUIRED_ROLE"
         Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::InternalServerError
                 Headers    = @{ 'Content-Type' = 'application/json' }
@@ -93,21 +74,22 @@ try {
     
     #endregion
     
-    #region Validate JWT Token
+    #region Decode Client Principal
     
-    Write-Information "Validating JWT token"
+    Write-Information "Decoding client principal from App Service Authentication"
     
     try {
-        $principal = Test-JwtToken -Token $token -ExpectedIssuer $expectedIssuer -ExpectedAudience $expectedAudience -ErrorAction Stop
+        $principal = Get-ClientPrincipal -HeaderValue $clientPrincipalHeader -ErrorAction Stop
+        Write-Information "Principal decoded: $($principal.name_typ) - Auth type: $($principal.auth_typ)"
     }
     catch {
-        Write-Warning "JWT token validation failed: $_"
+        Write-Warning "Failed to decode client principal: $_"
         Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::Unauthorized
                 Headers    = @{ 'Content-Type' = 'application/json' }
                 Body       = @{
                     error   = 'Unauthorized'
-                    message = 'Invalid or expired token'
+                    message = 'Invalid authentication principal'
                 } | ConvertTo-Json
             })
         return

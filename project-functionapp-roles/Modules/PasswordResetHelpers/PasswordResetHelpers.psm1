@@ -14,85 +14,50 @@ $ErrorActionPreference = 'Stop'
 
 #region Public Functions
 
-function Test-JwtToken {
+function Get-ClientPrincipal {
     <#
     .SYNOPSIS
-        Validates a JWT token
+        Decodes the X-MS-CLIENT-PRINCIPAL header from Azure Functions authentication middleware
     .DESCRIPTION
-        Validates JWT token signature, expiration, issuer, and audience claims
-    .PARAMETER Token
-        The JWT token string to validate
-    .PARAMETER ExpectedIssuer
-        Expected token issuer
-    .PARAMETER ExpectedAudience
-        Expected token audience
+        Parses and decodes the base64-encoded client principal header injected by
+        App Service / Functions built-in authentication (Easy Auth)
+    .PARAMETER HeaderValue
+        The base64-encoded X-MS-CLIENT-PRINCIPAL header value
     .OUTPUTS
-        System.Security.Claims.ClaimsPrincipal
+        System.Management.Automation.PSCustomObject
     .EXAMPLE
-        $principal = Test-JwtToken -Token $bearerToken -ExpectedIssuer $issuer -ExpectedAudience $audience
+        $principal = Get-ClientPrincipal -HeaderValue $Request.Headers['X-MS-CLIENT-PRINCIPAL']
     .LINK
-        https://learn.microsoft.com/azure/active-directory/develop/access-tokens
+        https://learn.microsoft.com/azure/app-service/configure-authentication-user-identities
     #>
     [CmdletBinding()]
-    [OutputType([System.Security.Claims.ClaimsPrincipal])]
+    [OutputType([PSCustomObject])]
     param(
         [Parameter(Mandatory, ValueFromPipeline)]
         [ValidateNotNullOrEmpty()]
-        [string]$Token,
-        
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]$ExpectedIssuer,
-        
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]$ExpectedAudience
+        [string]$HeaderValue
     )
-    
-    Begin {
-        Write-Verbose "Initializing JWT token validation"
-    }
     
     Process {
         try {
-            # Parse JWT token
-            $handler = [System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler]::new()
+            Write-Verbose "Decoding X-MS-CLIENT-PRINCIPAL header"
             
-            if (-not $handler.CanReadToken($Token)) {
-                throw "Invalid JWT token format"
+            # Decode base64 header
+            $bytes = [System.Convert]::FromBase64String($HeaderValue)
+            $json = [System.Text.Encoding]::UTF8.GetString($bytes)
+            
+            # Parse JSON
+            $principal = $json | ConvertFrom-Json
+            
+            if (-not $principal) {
+                throw "Failed to parse client principal JSON"
             }
             
-            $jwtToken = $handler.ReadJwtToken($Token)
-            
-            # Validate expiration
-            $now = [DateTime]::UtcNow
-            if ($jwtToken.ValidTo -lt $now) {
-                throw "Token has expired"
-            }
-            
-            if ($jwtToken.ValidFrom -gt $now) {
-                throw "Token not yet valid"
-            }
-            
-            # Validate issuer
-            if ($jwtToken.Issuer -ne $ExpectedIssuer) {
-                throw "Invalid token issuer. Expected: $ExpectedIssuer, Got: $($jwtToken.Issuer)"
-            }
-            
-            # Validate audience
-            $audiences = $jwtToken.Audiences
-            if ($audiences -notcontains $ExpectedAudience) {
-                throw "Invalid token audience. Expected: $ExpectedAudience"
-            }
-            
-            Write-Verbose "JWT token validation successful"
-            
-            # Return claims principal
-            $identity = [System.Security.Claims.ClaimsIdentity]::new($jwtToken.Claims, 'Bearer')
-            return [System.Security.Claims.ClaimsPrincipal]::new($identity)
+            Write-Verbose "Client principal decoded successfully. Auth type: $($principal.auth_typ)"
+            return $principal
         }
         catch {
-            Write-Error "JWT token validation failed: $_"
+            Write-Error "Failed to decode client principal: $_"
             throw
         }
     }
@@ -101,16 +66,17 @@ function Test-JwtToken {
 function Test-RoleClaim {
     <#
     .SYNOPSIS
-        Tests if a claims principal has a specific role
+        Tests if a client principal has a specific role
     .DESCRIPTION
-        Checks if the provided claims principal contains the required role claim
+        Checks if the provided client principal (decoded from X-MS-CLIENT-PRINCIPAL) contains the required role claim
     .PARAMETER Principal
-        The ClaimsPrincipal to check
+        The client principal object (decoded from X-MS-CLIENT-PRINCIPAL header)
     .PARAMETER RequiredRole
         The required role claim value
     .OUTPUTS
         System.Boolean
     .EXAMPLE
+        $principal = Get-ClientPrincipal -HeaderValue $Request.Headers['X-MS-CLIENT-PRINCIPAL']
         $hasRole = Test-RoleClaim -Principal $principal -RequiredRole 'Role.PasswordReset'
     .LINK
         https://learn.microsoft.com/azure/active-directory/develop/howto-add-app-roles-in-azure-ad-apps
@@ -120,7 +86,7 @@ function Test-RoleClaim {
     param(
         [Parameter(Mandatory, ValueFromPipeline)]
         [ValidateNotNull()]
-        [System.Security.Claims.ClaimsPrincipal]$Principal,
+        [PSCustomObject]$Principal,
         
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -131,20 +97,29 @@ function Test-RoleClaim {
         try {
             Write-Verbose "Checking for role claim: $RequiredRole"
             
-            # Get all role claims
-            # Roles can be in 'roles' claim (app roles) or 'role' claim
-            $roleClaims = @($Principal.FindAll('roles'))
-            if ($roleClaims.Count -eq 0) {
-                $roleClaims = @($Principal.FindAll('role'))
+            # Check if principal has claims property
+            if (-not $Principal.PSObject.Properties['claims']) {
+                Write-Verbose "No claims property found in principal"
+                return $false
             }
             
+            # Check if claims array exists and is not empty
+            if (-not $Principal.claims) {
+                Write-Verbose "No claims found in principal"
+                return $false
+            }
+            
+            # Get all role claims
+            # Roles can be in 'roles' or 'role' claim type
+            $roleClaims = @($Principal.claims | Where-Object { $_.typ -eq 'roles' -or $_.typ -eq 'role' })
+            
             if ($roleClaims.Count -eq 0) {
-                Write-Verbose "No role claims found in token"
+                Write-Verbose "No role claims found in principal"
                 return $false
             }
             
             # Check if required role exists (case-sensitive)
-            $roleValues = @($roleClaims | ForEach-Object { $_.Value })
+            $roleValues = @($roleClaims | ForEach-Object { $_.val })
             $hasRole = $roleValues -ccontains $RequiredRole
             
             Write-Verbose "Role claim check result: $hasRole"
@@ -330,7 +305,7 @@ function Set-ADUserPassword {
 
 # Export module members
 Export-ModuleMember -Function @(
-    'Test-JwtToken'
+    'Get-ClientPrincipal'
     'Test-RoleClaim'
     'New-SecurePassword'
     'Set-ADUserPassword'

@@ -24,8 +24,8 @@ param tags object = {
 @description('Entra ID Tenant ID')
 param tenantId string
 
-@description('Expected JWT audience (Application ID)')
-param expectedAudience string
+@description('App Registration Client ID (Application ID) for authentication')
+param clientId string
 
 @description('Required role claim for password reset')
 param requiredRole string = 'Role.PasswordReset'
@@ -242,18 +242,6 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: appInsights.properties.ConnectionString
         }
         {
-          name: 'TENANT_ID'
-          value: tenantId
-        }
-        {
-          name: 'EXPECTED_AUDIENCE'
-          value: expectedAudience
-        }
-        {
-          name: 'EXPECTED_ISSUER'
-          value: 'https://sts.windows.net/${tenantId}/'
-        }
-        {
           name: 'REQUIRED_ROLE'
           value: requiredRole
         }
@@ -271,6 +259,41 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
   dependsOn: [
     adServiceAccountSecret
   ]
+}
+
+// App Service Authentication / Authorization (Easy Auth)
+// https://learn.microsoft.com/azure/app-service/configure-authentication-provider-aad
+resource functionAppAuth 'Microsoft.Web/sites/config@2023-12-01' = {
+  parent: functionApp
+  name: 'authsettingsV2'
+  properties: {
+    globalValidation: {
+      requireAuthentication: true
+      unauthenticatedClientAction: 'Return401'
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          openIdIssuer: 'https://sts.windows.net/${tenantId}/v2.0'
+          clientId: clientId
+        }
+        validation: {
+          allowedAudiences: [
+            'api://${clientId}'
+          ]
+        }
+      }
+    }
+    login: {
+      tokenStore: {
+        enabled: true
+      }
+    }
+    platform: {
+      enabled: true
+    }
+  }
 }
 
 // Key Vault Secrets Officer role assignment for Function App

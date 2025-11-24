@@ -15,14 +15,6 @@ using namespace System.Collections.Generic
 #>
 
 BeforeAll {
-    # Load JWT dependencies
-    $binPath = Join-Path $PSScriptRoot '../../bin'
-    Add-Type -Path "$binPath/Microsoft.IdentityModel.Abstractions.dll"
-    Add-Type -Path "$binPath/Microsoft.IdentityModel.Logging.dll"
-    Add-Type -Path "$binPath/Microsoft.IdentityModel.Tokens.dll"
-    Add-Type -Path "$binPath/Microsoft.IdentityModel.JsonWebTokens.dll"
-    Add-Type -Path "$binPath/System.IdentityModel.Tokens.Jwt.dll"
-    
     # Import module
     $modulePath = Join-Path $PSScriptRoot '../../Modules/PasswordResetHelpers/PasswordResetHelpers.psm1'
     Import-Module $modulePath -Force
@@ -45,8 +37,8 @@ Describe 'PasswordResetHelpers Module' {
             Get-Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
         }
         
-        It 'Should export Test-JwtToken function' {
-            Get-Command Test-JwtToken -Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
+        It 'Should export Get-ClientPrincipal function' {
+            Get-Command Get-ClientPrincipal -Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
         }
         
         It 'Should export Test-RoleClaim function' {
@@ -62,93 +54,92 @@ Describe 'PasswordResetHelpers Module' {
         }
     }
     
-    Context 'Test-JwtToken' {
+    Context 'Get-ClientPrincipal' {
         BeforeAll {
-            $validIssuer = 'https://sts.windows.net/tenant-id/'
-            $validAudience = 'api://app-id'
+            # Create valid client principal JSON (as returned by App Service Auth)
+            $validPrincipal = @{
+                auth_typ = 'aad'
+                name_typ = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
+                role_typ = 'http://schemas.microsoft.com/ws/2008/06/identity/claims/role'
+                claims   = @(
+                    @{ typ = 'roles'; val = 'Role.PasswordReset' }
+                    @{ typ = 'name'; val = 'user@contoso.com' }
+                )
+            }
             
-            # Create a valid JWT token for testing
-            $claims = [System.Collections.Generic.List[System.Security.Claims.Claim]]::new()
-            $claims.Add([System.Security.Claims.Claim]::new('roles', 'Role.PasswordReset'))
-            $claims.Add([System.Security.Claims.Claim]::new('aud', $validAudience))
-            
-            $notBefore = [DateTime]::UtcNow.AddMinutes(-5)
-            $expires = [DateTime]::UtcNow.AddHours(1)
-            
-            $jwtToken = [System.IdentityModel.Tokens.Jwt.JwtSecurityToken]::new(
-                $validIssuer,
-                $validAudience,
-                $claims,
-                $notBefore,
-                $expires
-            )
-            
-            $handler = [System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler]::new()
-            $validToken = $handler.WriteToken($jwtToken)
+            $json = $validPrincipal | ConvertTo-Json -Compress
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+            $validHeader = [System.Convert]::ToBase64String($bytes)
         }
         
-        It 'Should throw on null token' {
-            { Test-JwtToken -Token $null -ExpectedIssuer $validIssuer -ExpectedAudience $validAudience } | Should -Throw
+        It 'Should throw on null header' {
+            { Get-ClientPrincipal -HeaderValue $null } | Should -Throw
         }
         
-        It 'Should throw on empty token' {
-            { Test-JwtToken -Token '' -ExpectedIssuer $validIssuer -ExpectedAudience $validAudience } | Should -Throw
+        It 'Should throw on empty header' {
+            { Get-ClientPrincipal -HeaderValue '' } | Should -Throw
         }
         
-        It 'Should throw on invalid token format' {
-            { Test-JwtToken -Token 'not-a-jwt-token' -ExpectedIssuer $validIssuer -ExpectedAudience $validAudience } | Should -Throw
+        It 'Should throw on invalid base64' {
+            { Get-ClientPrincipal -HeaderValue 'not-valid-base64!!!' } | Should -Throw
         }
         
-        It 'Should validate a properly formatted JWT token' {
-            $result = Test-JwtToken -Token $validToken -ExpectedIssuer $validIssuer -ExpectedAudience $validAudience
+        It 'Should decode valid client principal header' {
+            $result = Get-ClientPrincipal -HeaderValue $validHeader
             $result | Should -Not -BeNullOrEmpty
-            $result | Should -BeOfType [System.Security.Claims.ClaimsPrincipal]
+            $result.auth_typ | Should -Be 'aad'
+            $result.claims | Should -Not -BeNullOrEmpty
         }
         
-        It 'Should throw on expired token' {
-            # Create expired token
-            $claims = [System.Collections.Generic.List[System.Security.Claims.Claim]]::new()
-            $claims.Add([System.Security.Claims.Claim]::new('aud', $validAudience))
-            
-            $notBefore = [DateTime]::UtcNow.AddHours(-2)
-            $expires = [DateTime]::UtcNow.AddHours(-1)
-            
-            $expiredToken = [System.IdentityModel.Tokens.Jwt.JwtSecurityToken]::new(
-                $validIssuer,
-                $validAudience,
-                $claims,
-                $notBefore,
-                $expires
-            )
-            
-            $handler = [System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler]::new()
-            $tokenString = $handler.WriteToken($expiredToken)
-            
-            { Test-JwtToken -Token $tokenString -ExpectedIssuer $validIssuer -ExpectedAudience $validAudience } | Should -Throw '*expired*'
+        It 'Should return principal with claims array' {
+            $result = Get-ClientPrincipal -HeaderValue $validHeader
+            $result.claims | Should -HaveCount 2
+            $result.claims[0].typ | Should -Be 'roles'
+            $result.claims[0].val | Should -Be 'Role.PasswordReset'
         }
         
-        It 'Should throw on invalid issuer' {
-            { Test-JwtToken -Token $validToken -ExpectedIssuer 'https://wrong-issuer/' -ExpectedAudience $validAudience } | Should -Throw '*issuer*'
-        }
-        
-        It 'Should throw on invalid audience' {
-            { Test-JwtToken -Token $validToken -ExpectedIssuer $validIssuer -ExpectedAudience 'api://wrong-audience' } | Should -Throw '*audience*'
+        It 'Should handle principal with multiple claims' {
+            $principal = @{
+                auth_typ = 'aad'
+                claims   = @(
+                    @{ typ = 'roles'; val = 'Role.PasswordReset' }
+                    @{ typ = 'roles'; val = 'Role.Other' }
+                    @{ typ = 'name'; val = 'user@contoso.com' }
+                )
+            }
+            
+            $json = $principal | ConvertTo-Json -Compress
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+            $header = [System.Convert]::ToBase64String($bytes)
+            
+            $result = Get-ClientPrincipal -HeaderValue $header
+            $result.claims | Should -HaveCount 3
         }
     }
     
     Context 'Test-RoleClaim' {
         BeforeAll {
-            # Create test claims principal
-            $claims = [System.Collections.Generic.List[System.Security.Claims.Claim]]::new()
-            $claims.Add([System.Security.Claims.Claim]::new('roles', 'Role.PasswordReset'))
-            $claims.Add([System.Security.Claims.Claim]::new('roles', 'Role.Other'))
-            
-            $identity = [System.Security.Claims.ClaimsIdentity]::new($claims)
-            $principalWithRoles = [System.Security.Claims.ClaimsPrincipal]::new($identity)
+            # Create test client principal with roles
+            $principalWithRoles = [PSCustomObject]@{
+                auth_typ = 'aad'
+                claims   = @(
+                    @{ typ = 'roles'; val = 'Role.PasswordReset' }
+                    @{ typ = 'roles'; val = 'Role.Other' }
+                )
+            }
             
             # Principal without role claims
-            $emptyIdentity = [System.Security.Claims.ClaimsIdentity]::new()
-            $principalWithoutRoles = [System.Security.Claims.ClaimsPrincipal]::new($emptyIdentity)
+            $principalWithoutRoles = [PSCustomObject]@{
+                auth_typ = 'aad'
+                claims   = @(
+                    @{ typ = 'name'; val = 'user@contoso.com' }
+                )
+            }
+            
+            # Principal with no claims
+            $principalNoClaims = [PSCustomObject]@{
+                auth_typ = 'aad'
+            }
         }
         
         It 'Should throw on null principal' {
@@ -170,9 +161,26 @@ Describe 'PasswordResetHelpers Module' {
             $result | Should -Be $false
         }
         
+        It 'Should return false when no claims exist' {
+            $result = Test-RoleClaim -Principal $principalNoClaims -RequiredRole 'Role.PasswordReset'
+            $result | Should -Be $false
+        }
+        
         It 'Should be case-sensitive for role matching' {
             $result = Test-RoleClaim -Principal $principalWithRoles -RequiredRole 'role.passwordreset'
             $result | Should -Be $false
+        }
+        
+        It 'Should handle role claim type' {
+            $principalWithRole = [PSCustomObject]@{
+                auth_typ = 'aad'
+                claims   = @(
+                    @{ typ = 'role'; val = 'Role.PasswordReset' }
+                )
+            }
+            
+            $result = Test-RoleClaim -Principal $principalWithRole -RequiredRole 'Role.PasswordReset'
+            $result | Should -Be $true
         }
     }
     

@@ -1,37 +1,40 @@
 # Password Reset Function App
 
-A secure, high-performance Azure Function App that enables password resets for on-premises Active Directory Domain Services (ADDS) users. The function validates JWT tokens with role-based access control and can handle tens of requests per second.
+A secure, high-performance Azure Function App that enables password resets for on-premises Active Directory Domain Services (ADDS) users. The function uses Azure Functions built-in authentication (Easy Auth) with role-based access control and can handle tens of requests per second.
 
 ## 🏗️ Architecture
 
 ```mermaid
 flowchart LR
-    A["Client App<br>with JWT"] -- HTTPS<br>JWT Bearer Token --> B["Function App<br>PowerShell 7.4<br>VNet Integrated"]
-    B -- "1.Validate JWT" --> C["Entra ID"]
-    B -- "2.Retrieve AD Credentials" --> D["Key Vault<br>AD Service Account"]
-    B -- "3.LDAP<br>Password Reset" --> E["Active Directory<br>On-Premises<br>Domain Services"]
+    A["Client App<br>with JWT"] -- HTTPS<br>JWT Bearer Token --> B["App Service Auth<br>Middleware"]
+    B -- "1.Validate JWT<br>(Platform)" --> C["Entra ID"]
+    B -- "2.Inject Principal" --> D["Function App<br>PowerShell 7.4<br>VNet Integrated"]
+    D -- "3.Retrieve AD Credentials" --> E["Key Vault<br>AD Service Account"]
+    D -- "4.LDAP<br>Password Reset" --> F["Active Directory<br>On-Premises<br>Domain Services"]
 
     style A fill:#e1f5ff
     style B fill:#fff4e1
     style C fill:#BBDEFB
-    style D fill:#f3e5f5
-    style E fill:#C8E6C9
+    style D fill:#fff4e1
+    style E fill:#f3e5f5
+    style F fill:#C8E6C9
 ```
 
 ### Components
 
+- **App Service Authentication**: Built-in middleware validates JWT tokens (signature, expiration, issuer, audience)
 - **Azure Function App**: PowerShell 7.4 HTTP trigger on Linux Consumption plan with VNet Integration
 - **Active Directory**: On-premises ADDS for user password resets
 - **AD Service Account**: Domain account with delegated password reset permissions, credentials stored in Key Vault
 - **Managed Identity**: Reads AD service account credentials from Key Vault
 - **Key Vault**: Secure storage for AD service account credentials (secret: ENTRA-PWDRESET-RW)
 - **Application Insights**: Monitoring, logging, and telemetry
-- **Entra ID App Registration**: JWT token issuer with `Role.PasswordReset` app role
+- **Entra ID App Registration**: Token issuer with `Role.PasswordReset` app role
 
 ## 🚀 Features
 
-- ✅ **JWT Bearer Token Authentication**: Validates tokens with signature, expiration, issuer, and audience checks
-- ✅ **Role-Based Access Control**: Requires `Role.PasswordReset` claim in JWT token
+- ✅ **Platform Authentication**: Azure Functions built-in authentication validates JWT tokens automatically
+- ✅ **Role-Based Access Control**: Requires `Role.PasswordReset` claim
 - ✅ **Secure Password Generation**: Creates complex passwords meeting Azure AD requirements (12-256 chars)
 - ✅ **High Performance**: Configured for concurrency with 10 runspaces per worker, 2 workers
 - ✅ **Comprehensive Testing**: >80% test coverage with Pester unit and integration tests
@@ -73,8 +76,8 @@ Edit `infra/parameters.dev.json` (or test/prod) with your values:
     "tenantId": {
       "value": "YOUR_TENANT_ID"
     },
-    "expectedAudience": {
-      "value": "api://YOUR_APP_ID"
+    "clientId": {
+      "value": "YOUR_APP_ID"
     },
     "adServiceAccountUsername": {
       "value": "CONTOSO\\svc-pwdreset"
@@ -254,6 +257,8 @@ Authorization: Bearer <JWT_TOKEN>
 Content-Type: application/json
 ```
 
+**Note**: The Authorization header is validated by App Service Authentication middleware before reaching the function code. The function receives a decoded `X-MS-CLIENT-PRINCIPAL` header containing the authenticated user's claims.
+
 ### Request Body
 
 ```json
@@ -281,23 +286,28 @@ Note: `domainController` is optional. If not provided, Active Directory will use
 | Code | Description                                                                                  |
 | ---- | -------------------------------------------------------------------------------------------- |
 | 400  | Bad Request - Missing samAccountName or invalid format                                       |
-| 401  | Unauthorized - Missing, invalid, or expired JWT token                                        |
+| 401  | Unauthorized - Missing, invalid, or expired JWT token (validated by platform)                |
 | 403  | Forbidden - Missing Role.PasswordReset claim                                                 |
 | 404  | Not Found - User does not exist in Active Directory                                          |
 | 500  | Internal Server Error - Active Directory error, access denied, or network connectivity issue |
 
 ## 🔐 Security Considerations
 
-### JWT Token Validation
+### Authentication
 
-The function performs comprehensive JWT validation:
+Authentication is handled by **Azure Functions built-in authentication** (App Service Authentication / Easy Auth):
 
-1. **Format Check**: Verifies Bearer token format
-2. **Signature Validation**: Uses System.IdentityModel.Tokens.Jwt library
-3. **Expiration Check**: Validates `ValidTo` and `ValidFrom` claims
-4. **Issuer Validation**: Matches `EXPECTED_ISSUER` environment variable
-5. **Audience Validation**: Matches `EXPECTED_AUDIENCE` environment variable
-6. **Role Check**: Requires `Role.PasswordReset` in 'roles' or 'role' claim
+1. **Platform Validation**: App Service middleware validates JWT signature, expiration, issuer, and audience
+2. **Principal Injection**: Middleware injects `X-MS-CLIENT-PRINCIPAL` header with decoded claims
+3. **Function Code**: Decodes principal and checks for `Role.PasswordReset` claim
+
+**Benefits of delegated authentication**:
+- Microsoft-maintained validation logic reduces security risk
+- Automatic signing key rotation via OpenID Connect metadata
+- Centralized authentication policy (Conditional Access, MFA)
+- Simplified code - no manual cryptography required
+
+**Configuration**: Set in `infra/main.bicep` via `authsettingsV2` resource
 
 ### Active Directory Service Account
 
@@ -350,7 +360,7 @@ requests
 
 // Failed authentication attempts
 traces
-| where message contains "JWT validation failed" or message contains "Role check failed"
+| where message contains "X-MS-CLIENT-PRINCIPAL" or message contains "Role check failed"
 | where timestamp > ago(1h)
 | summarize count() by bin(timestamp, 5m)
 
@@ -376,7 +386,7 @@ tests/
 ### Test Coverage
 
 - **Module Load**: Verifies 4 exported functions
-- **Test-JwtToken**: 8 test cases (null, empty, invalid format, expiration, issuer, audience)
+- **Get-ClientPrincipal**: 6 test cases (null, empty, invalid base64, valid decoding, multiple claims)
 - **Test-RoleClaim**: 5 test cases (null principal, role exists, doesn't exist, no roles, case sensitivity)
 - **New-SecurePassword**: 11 test cases (length validation, complexity requirements, uniqueness)
 - **Set-UserPassword**: 8 test cases (parameter validation, Update-MgUser invocation, WhatIf support)
@@ -401,24 +411,36 @@ Invoke-Pester -Configuration $config
 
 ### Common Issues
 
-#### 1. "JWT validation failed"
+#### 1. "Authentication required" or 401 errors
 
-**Cause**: Token expired, invalid signature, or wrong issuer/audience
+**Cause**: App Service Authentication not configured, token expired, invalid signature, or wrong issuer/audience
 
 **Solution**:
 
-```powershell
-# Verify token claims
-$token = "YOUR_TOKEN"
-$claims = [System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler]::new().ReadJwtToken($token)
-$claims.Claims | Format-Table
-```
+1. Verify App Service Authentication is enabled:
+   ```powershell
+   az functionapp auth show --name <function-app-name> --resource-group <rg>
+   ```
+
+2. Check authentication settings in Azure Portal:
+   - Navigate to Function App → Authentication
+   - Verify Azure Active Directory provider is configured
+   - Check Client ID matches your App Registration
+   - Ensure "Require authentication" is enabled
+
+3. Test token locally:
+   ```powershell
+   # Decode token to inspect claims (without validation)
+   $token = "YOUR_TOKEN"
+   $parts = $token.Split('.')
+   $payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($parts[1]))
+   $payload | ConvertFrom-Json | Format-List
+   ```
 
 Check:
-
 - `exp` (expiration) is in the future
-- `iss` (issuer) matches `EXPECTED_ISSUER`
-- `aud` (audience) matches `EXPECTED_AUDIENCE`
+- `iss` (issuer) matches your tenant
+- `aud` (audience) matches `api://<clientId>`
 
 #### 2. "Role check failed: Role.PasswordReset not found"
 
