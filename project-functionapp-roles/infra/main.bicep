@@ -83,7 +83,7 @@ var nsgName = '${baseName}-nsg-${environment}-${uniqueSuffix}'
 
 // Log Analytics Workspace
 // https://learn.microsoft.com/azure/azure-monitor/logs/log-analytics-workspace-overview
-resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2025-07-01' = {
   name: logAnalyticsName
   location: location
   tags: tags
@@ -116,7 +116,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 
 // Storage Account for Function App
 // https://learn.microsoft.com/azure/storage/common/storage-account-overview
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+resource storageAccount 'Microsoft.Storage/storageAccounts@2025-06-01' = {
   name: storageAccountName
   location: location
   tags: tags
@@ -148,7 +148,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 
 // Key Vault
 // https://learn.microsoft.com/azure/key-vault/general/overview
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
   name: keyVaultName
   location: location
   tags: tags
@@ -171,7 +171,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 
 // Key Vault Secret for AD Service Account
 // https://learn.microsoft.com/azure/key-vault/secrets/about-secrets
-resource adServiceAccountSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+resource adServiceAccountSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' = {
   parent: keyVault
   name: 'ENTRA-PWDRESET-RW'
   properties: {
@@ -185,7 +185,7 @@ resource adServiceAccountSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' =
 
 // Network Security Group
 // https://learn.microsoft.com/azure/virtual-network/network-security-groups-overview
-resource nsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = if (deployDomainController) {
+resource nsg 'Microsoft.Network/networkSecurityGroups@2025-01-01' = if (deployDomainController) {
   name: nsgName
   location: location
   tags: tags
@@ -231,7 +231,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2023-11-01' = if (deployDo
 
 // Virtual Network
 // https://learn.microsoft.com/azure/virtual-network/virtual-networks-overview
-resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = if (deployDomainController) {
+resource vnet 'Microsoft.Network/virtualNetworks@2025-01-01' = if (deployDomainController) {
   name: vnetName
   location: location
   tags: tags
@@ -271,7 +271,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = if (deployDomainC
 
 // Public IP for Domain Controller
 // https://learn.microsoft.com/azure/virtual-network/ip-services/public-ip-addresses
-resource dcPublicIp 'Microsoft.Network/publicIPAddresses@2023-11-01' = if (deployDomainController) {
+resource dcPublicIp 'Microsoft.Network/publicIPAddresses@2025-01-01' = if (deployDomainController) {
   name: dcPublicIpName
   location: location
   tags: tags
@@ -288,7 +288,7 @@ resource dcPublicIp 'Microsoft.Network/publicIPAddresses@2023-11-01' = if (deplo
 
 // Network Interface for Domain Controller
 // https://learn.microsoft.com/azure/virtual-network/virtual-network-network-interface
-resource dcNic 'Microsoft.Network/networkInterfaces@2023-11-01' = if (deployDomainController) {
+resource dcNic 'Microsoft.Network/networkInterfaces@2025-01-01' = if (deployDomainController) {
   name: dcNicName
   location: location
   tags: tags
@@ -316,7 +316,7 @@ resource dcNic 'Microsoft.Network/networkInterfaces@2023-11-01' = if (deployDoma
 
 // Domain Controller Virtual Machine
 // https://learn.microsoft.com/azure/virtual-machines/windows/overview
-resource dcVm 'Microsoft.Compute/virtualMachines@2024-03-01' = if (deployDomainController) {
+resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = if (deployDomainController) {
   name: dcVmName
   location: location
   tags: tags
@@ -382,7 +382,7 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2024-03-01' = if (deployDomainC
 
 // Custom Script Extension to bootstrap AD DS
 // https://learn.microsoft.com/azure/virtual-machines/extensions/custom-script-windows
-resource dcBootstrap 'Microsoft.Compute/virtualMachines/extensions@2024-03-01' = if (deployDomainController) {
+resource dcBootstrap 'Microsoft.Compute/virtualMachines/extensions@2025-04-01' = if (deployDomainController) {
   parent: dcVm
   name: 'BootstrapADDS'
   location: location
@@ -402,7 +402,7 @@ resource dcBootstrap 'Microsoft.Compute/virtualMachines/extensions@2024-03-01' =
 
 // App Service Plan (Linux Consumption)
 // https://learn.microsoft.com/azure/app-service/overview-hosting-plans
-resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
+resource appServicePlan 'Microsoft.Web/serverfarms@2025-03-01' = {
   name: appServicePlanName
   location: location
   tags: tags
@@ -418,7 +418,7 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-12-01' = {
 
 // Function App with Managed Identity
 // https://learn.microsoft.com/azure/azure-functions/functions-overview
-resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
+resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
   name: functionAppName
   location: location
   tags: tags
@@ -504,7 +504,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
 
 // App Service Authentication / Authorization (Easy Auth)
 // https://learn.microsoft.com/azure/app-service/configure-authentication-provider-aad
-resource functionAppAuth 'Microsoft.Web/sites/config@2023-12-01' = {
+resource functionAppAuth 'Microsoft.Web/sites/config@2025-03-01' = {
   parent: functionApp
   name: 'authsettingsV2'
   properties: {
