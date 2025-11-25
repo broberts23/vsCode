@@ -57,6 +57,9 @@ param domainNetBiosName string = 'CONTOSO'
 @description('Deploy domain controller VM')
 param deployDomainController bool = true
 
+@description('Repository URL for bootstrap scripts')
+param repositoryUrl string = 'https://raw.githubusercontent.com/broberts23/vsCode/main/project-functionapp-roles/scripts'
+
 // ====================================
 // Variables
 // ====================================
@@ -390,7 +393,7 @@ resource dcBootstrap 'Microsoft.Compute/virtualMachines/extensions@2024-03-01' =
     autoUpgradeMinorVersion: true
     protectedSettings: {
       fileUris: [
-        'https://raw.githubusercontent.com/.../Bootstrap-ADDSDomain.ps1' // or from storage
+        '${repositoryUrl}/Bootstrap-ADDSDomain.ps1'
       ]
       commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Bootstrap-ADDSDomain.ps1 -DomainName "${domainName}" -DomainNetBiosName "${domainNetBiosName}" -SafeModeAdminPassword (ConvertTo-SecureString "${vmAdminPassword}" -AsPlainText -Force)'
     }
