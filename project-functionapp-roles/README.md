@@ -70,6 +70,8 @@ cd /home/ben/vsCode/project-functionapp-roles
 
 Edit `infra/parameters.dev.json` (or test/prod) with your values:
 
+**For self-contained domain controller deployment (demo/dev)**:
+
 ```json
 {
   "parameters": {
@@ -78,6 +80,33 @@ Edit `infra/parameters.dev.json` (or test/prod) with your values:
     },
     "clientId": {
       "value": "YOUR_APP_ID"
+    },
+    "deployDomainController": {
+      "value": true
+    },
+    "domainName": {
+      "value": "contoso.local"
+    },
+    "domainNetBiosName": {
+      "value": "CONTOSO"
+    }
+  }
+}
+```
+
+**For existing on-premises Active Directory**:
+
+```json
+{
+  "parameters": {
+    "tenantId": {
+      "value": "YOUR_TENANT_ID"
+    },
+    "clientId": {
+      "value": "YOUR_APP_ID"
+    },
+    "deployDomainController": {
+      "value": false
     },
     "adServiceAccountUsername": {
       "value": "CONTOSO\\svc-pwdreset"
@@ -97,17 +126,37 @@ Edit `infra/parameters.dev.json` (or test/prod) with your values:
 }
 ```
 
+**Note**: When `deployDomainController: true`, the `adServiceAccountUsername` and `adServiceAccountPassword` are automatically generated as `{domainNetBiosName}\svc-functionapp` with the `serviceAccountPassword` value.
+
 ### Step 3: Deploy Infrastructure
 
 ```powershell
 # Connect to Azure
 Connect-AzAccount
 
-# Deploy resources
+# Deploy with existing AD (uses parameters file for credentials)
 ./scripts/Deploy-Infrastructure.ps1 `
     -Environment dev `
     -ResourceGroupName rg-pwdreset-dev `
     -Location eastus
+
+# OR deploy with self-contained domain controller (auto-generates strong passwords)
+./scripts/Deploy-Complete.ps1 \
+  -Environment dev \
+  -ResourceGroupName rg-pwdreset-dev \
+  -Location eastus \
+  -DeployDomainController
+
+# Optionally override usernames and/or passwords
+./scripts/Deploy-Complete.ps1 \
+  -Environment dev \
+  -ResourceGroupName rg-pwdreset-dev \
+  -Location eastus \
+  -DeployDomainController \
+  -VmAdminUsername azureadmin \
+  -VmAdminPassword (ConvertTo-SecureString 'YourVmP@ssw0rd!' -AsPlainText -Force) \
+  -ServiceAccountUsername 'svc-functionapp' \
+  -ServiceAccountPassword (ConvertTo-SecureString 'YourSvcP@ssw0rd!' -AsPlainText -Force)
 ```
 
 **Outputs**:
@@ -160,15 +209,24 @@ To deploy with a domain controller, set `deployDomainController: true` in your p
     "value": "azureadmin"
   },
   "vmAdminPassword": {
-    "value": "SECURE_PASSWORD"
+    "value": "SECURE_VM_PASSWORD"
+  },
+  "serviceAccountPassword": {
+    "value": "SECURE_SERVICE_ACCOUNT_PASSWORD"
   },
   "domainName": {
     "value": "contoso.local"
+  },
+  "domainNetBiosName": {
+    "value": "CONTOSO"
   }
 }
 ```
 
-This creates a Windows Server 2022 VM with AD DS, service account, and test users automatically.
+This creates a Windows Server 2022 VM with AD DS, service account (`CONTOSO\svc-functionapp`), and test users automatically.
+
+**Important**: When deploying a domain controller, you do NOT need to specify `adServiceAccountUsername` or `adServiceAccountPassword` - these are automatically generated as `{domainNetBiosName}\svc-functionapp` using the `serviceAccountPassword` value.
+In addition, when using `./scripts/Deploy-Complete.ps1 -DeployDomainController` without overrides, the script will auto-generate strong random passwords for both the VM admin and the service account and pass them to Bicep, which stores the service account credentials in Key Vault during deployment.
 
 **Option 2: VNet Integration (Recommended for Production)**
 
@@ -327,6 +385,7 @@ Authentication is handled by **Azure Functions built-in authentication** (App Se
 3. **Function Code**: Decodes principal and checks for `Role.PasswordReset` claim
 
 **Benefits of delegated authentication**:
+
 - Microsoft-maintained validation logic reduces security risk
 - Automatic signing key rotation via OpenID Connect metadata
 - Centralized authentication policy (Conditional Access, MFA)
@@ -443,11 +502,13 @@ Invoke-Pester -Configuration $config
 **Solution**:
 
 1. Verify App Service Authentication is enabled:
+
    ```powershell
    az functionapp auth show --name <function-app-name> --resource-group <rg>
    ```
 
 2. Check authentication settings in Azure Portal:
+
    - Navigate to Function App → Authentication
    - Verify Azure Active Directory provider is configured
    - Check Client ID matches your App Registration
@@ -463,6 +524,7 @@ Invoke-Pester -Configuration $config
    ```
 
 Check:
+
 - `exp` (expiration) is in the future
 - `iss` (issuer) matches your tenant
 - `aud` (audience) matches `api://<clientId>`

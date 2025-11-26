@@ -20,19 +20,8 @@
     "requiredRole": {
       "value": "Role.PasswordReset"
     },
-    "adServiceAccountUsername": {
-      "value": "CONTOSO\\svc-pwdreset"
-    },
-    "adServiceAccountPassword": {
-      "reference": {
-        "keyVault": {
-          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/YOUR_RG/providers/Microsoft.KeyVault/vaults/YOUR_KV"
-        },
-        "secretName": "ad-service-account-password"
-      }
-    },
     "domainController": {
-      "value": "dc01.contoso.local"
+      "value": ""
     },
     "deployDomainController": {
       "value": true
@@ -42,6 +31,9 @@
     },
     "vmAdminPassword": {
       "value": "REPLACE_WITH_SECURE_PASSWORD"
+    },
+    "serviceAccountPassword": {
+      "value": "REPLACE_WITH_SERVICE_ACCOUNT_PASSWORD"
     },
     "domainName": {
       "value": "contoso.local"

@@ -68,7 +68,15 @@ param(
     [switch]$DeployDomainController,
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$VmAdminUsername,
+
+    [Parameter(Mandatory = $false)]
     [securestring]$VmAdminPassword,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ServiceAccountUsername,
 
     [Parameter(Mandatory = $false)]
     [securestring]$ServiceAccountPassword,
@@ -142,6 +150,35 @@ function Test-Prerequisites {
     }
 
     Write-Log "Prerequisites validated" -Level Success
+}
+
+function New-RandomPassword {
+    [CmdletBinding()]
+    [OutputType([securestring])]
+    param(
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(12, 128)]
+        [int]$Length = 20
+    )
+
+    # Generate a complex password meeting typical Windows AD complexity requirements
+    # Includes uppercase, lowercase, digits, and special characters
+    $upper = 1..1 | ForEach-Object { [char](Get-Random -Minimum 65 -Maximum 91) } # A-Z
+    $lower = 1..1 | ForEach-Object { [char](Get-Random -Minimum 97 -Maximum 123) } # a-z
+    $digit = 1..1 | ForEach-Object { [char](Get-Random -Minimum 48 -Maximum 58) } # 0-9
+    $specialChars = '!@#$%^&*()-_=+[]{};:,<.>/?'
+    $special = 1..1 | ForEach-Object { $specialChars[(Get-Random -Minimum 0 -Maximum $specialChars.Length)] }
+
+    $pool = @()
+    $pool += (65..90 + 97..122 + 48..57) | ForEach-Object { [char]$_ }
+    $pool += $specialChars.ToCharArray()
+
+    $remainingCount = [Math]::Max(($Length - 4), 0)
+    $remaining = 1..$remainingCount | ForEach-Object { $pool[(Get-Random -Minimum 0 -Maximum $pool.Count)] }
+
+    $chars = @($upper + $lower + $digit + $special + $remaining)
+    $passwordPlain = -join ($chars | Sort-Object { Get-Random })
+    return (ConvertTo-SecureString -String $passwordPlain -AsPlainText -Force)
 }
 
 function New-ResourceGroupIfNotExists {
@@ -236,7 +273,10 @@ function Invoke-DomainControllerPostConfig {
         [string]$DomainName,
 
         [Parameter(Mandatory = $true)]
-        [securestring]$ServiceAccountPassword
+        [securestring]$ServiceAccountPassword,
+
+        [Parameter(Mandatory = $false)]
+        [string]$ServiceAccountName
     )
 
     if ($PSCmdlet.ShouldProcess($VmName, "Configure AD post-promotion")) {
@@ -288,6 +328,7 @@ function Invoke-DomainControllerPostConfig {
             -Parameter @{
             DomainName             = $DomainName
             ServiceAccountPassword = $password
+            ServiceAccountName     = $ServiceAccountName
         }
 
         if ($result.Value[0].Message -like '*completed successfully*') {
@@ -324,15 +365,30 @@ try {
     $additionalParams = @{}
 
     if ($DeployDomainController) {
-        if ($null -eq $VmAdminPassword) {
-            throw "VmAdminPassword is required when DeployDomainController is specified"
-        }
-        if ($null -eq $ServiceAccountPassword) {
-            throw "ServiceAccountPassword is required when DeployDomainController is specified"
+        $additionalParams['deployDomainController'] = $true
+
+        # VM admin username/password: allow overrides, else default username in Bicep and auto-generated password here
+        if ($PSBoundParameters.ContainsKey('VmAdminUsername') -and [string]::IsNullOrWhiteSpace($VmAdminUsername) -eq $false) {
+            $additionalParams['vmAdminUsername'] = $VmAdminUsername
         }
 
-        $additionalParams['deployDomainController'] = $true
+        if ($null -eq $VmAdminPassword) {
+            Write-Log "VmAdminPassword not provided; generating a strong random password" -Level Warning
+            $VmAdminPassword = New-RandomPassword -Length 24
+        }
         $additionalParams['vmAdminPassword'] = $VmAdminPassword
+
+        # Service account username/password: allow overrides, else use default name and auto-generate password
+        if ($PSBoundParameters.ContainsKey('ServiceAccountUsername') -and [string]::IsNullOrWhiteSpace($ServiceAccountUsername) -eq $false) {
+            # Bicep marks adServiceAccountUsername as secure; we pass provided value
+            $additionalParams['adServiceAccountUsername'] = (ConvertTo-SecureString -String $ServiceAccountUsername -AsPlainText -Force)
+        }
+
+        if ($null -eq $ServiceAccountPassword) {
+            Write-Log "ServiceAccountPassword not provided; generating a strong random password" -Level Warning
+            $ServiceAccountPassword = New-RandomPassword -Length 24
+        }
+        $additionalParams['serviceAccountPassword'] = $ServiceAccountPassword
     }
 
     # Deploy infrastructure
@@ -353,13 +409,14 @@ try {
         $parameters = Get-Content $parametersFile | ConvertFrom-Json
         $domainName = $parameters.parameters.domainName.value
         $baseName = $parameters.parameters.baseName.value
-        $dcVmName = "dc-$baseName-$Environment"
+        $dcVmName = "$baseName-dc-$Environment"
 
         Invoke-DomainControllerPostConfig `
             -ResourceGroupName $ResourceGroupName `
             -VmName $dcVmName `
             -DomainName $domainName `
-            -ServiceAccountPassword $ServiceAccountPassword
+            -ServiceAccountPassword $ServiceAccountPassword `
+            -ServiceAccountName $ServiceAccountUsername
     }
 
     Write-Log "Deployment completed successfully!" -Level Success

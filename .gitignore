@@ -2,3 +2,4 @@
 *.env
 *.sln
 **/project-workload-identity/scripts/out
+project-bicep-graph/src/WebApi/obj

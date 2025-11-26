@@ -1,0 +1,728 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.38.33.27573",
+      "templateHash": "16905899966297311002"
+    }
+  },
+  "parameters": {
+    "environment": {
+      "type": "string",
+      "defaultValue": "dev",
+      "allowedValues": [
+        "dev",
+        "test",
+        "prod"
+      ],
+      "metadata": {
+        "description": "Environment name (dev, test, prod)"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources"
+      }
+    },
+    "baseName": {
+      "type": "string",
+      "defaultValue": "pwdreset",
+      "metadata": {
+        "description": "Base name for all resources"
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "Environment": "[parameters('environment')]",
+        "Application": "PasswordReset",
+        "ManagedBy": "Bicep"
+      },
+      "metadata": {
+        "description": "Tags to apply to all resources"
+      }
+    },
+    "tenantId": {
+      "type": "string",
+      "metadata": {
+        "description": "Entra ID Tenant ID"
+      }
+    },
+    "clientId": {
+      "type": "string",
+      "metadata": {
+        "description": "App Registration Client ID (Application ID) for authentication"
+      }
+    },
+    "requiredRole": {
+      "type": "string",
+      "defaultValue": "Role.PasswordReset",
+      "metadata": {
+        "description": "Required role claim for password reset"
+      }
+    },
+    "adServiceAccountUsername": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "AD service account username (e.g., DOMAIN\\svc-pwdreset). Auto-generated when deployDomainController is true."
+      }
+    },
+    "adServiceAccountPassword": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "AD service account password. Auto-generated from ServiceAccountPassword when deployDomainController is true."
+      }
+    },
+    "serviceAccountPassword": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Service account password for domain controller deployment (used for both DC post-config and AD service account)"
+      }
+    },
+    "domainController": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Domain controller FQDN (optional)"
+      }
+    },
+    "vmAdminUsername": {
+      "type": "string",
+      "defaultValue": "azureadmin",
+      "metadata": {
+        "description": "VM admin username for domain controller"
+      }
+    },
+    "vmAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "VM admin password for domain controller"
+      }
+    },
+    "domainName": {
+      "type": "string",
+      "defaultValue": "contoso.local",
+      "metadata": {
+        "description": "Active Directory domain name"
+      }
+    },
+    "domainNetBiosName": {
+      "type": "string",
+      "defaultValue": "CONTOSO",
+      "metadata": {
+        "description": "Active Directory NetBIOS name"
+      }
+    },
+    "deployDomainController": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy domain controller VM"
+      }
+    },
+    "repositoryUrl": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/broberts23/vsCode/main/project-functionapp-roles/scripts",
+      "metadata": {
+        "description": "Repository URL for bootstrap scripts"
+      }
+    }
+  },
+  "variables": {
+    "uniqueSuffix": "[uniqueString(resourceGroup().id, parameters('baseName'))]",
+    "functionAppName": "[format('{0}-func-{1}-{2}', parameters('baseName'), parameters('environment'), variables('uniqueSuffix'))]",
+    "appServicePlanName": "[format('{0}-asp-{1}-{2}', parameters('baseName'), parameters('environment'), variables('uniqueSuffix'))]",
+    "storageAccountName": "[format('{0}st{1}{2}', parameters('baseName'), parameters('environment'), take(variables('uniqueSuffix'), 8))]",
+    "keyVaultName": "[format('{0}-kv-{1}-{2}', parameters('baseName'), parameters('environment'), take(variables('uniqueSuffix'), 8))]",
+    "logAnalyticsName": "[format('{0}-log-{1}-{2}', parameters('baseName'), parameters('environment'), variables('uniqueSuffix'))]",
+    "appInsightsName": "[format('{0}-ai-{1}-{2}', parameters('baseName'), parameters('environment'), variables('uniqueSuffix'))]",
+    "vnetName": "[format('{0}-vnet-{1}-{2}', parameters('baseName'), parameters('environment'), variables('uniqueSuffix'))]",
+    "dcVmName": "[format('{0}-dc-{1}', parameters('baseName'), parameters('environment'))]",
+    "dcNicName": "[format('{0}-nic', variables('dcVmName'))]",
+    "dcPublicIpName": "[format('{0}-pip', variables('dcVmName'))]",
+    "nsgName": "[format('{0}-nsg-{1}-{2}', parameters('baseName'), parameters('environment'), variables('uniqueSuffix'))]",
+    "effectiveAdServiceAccountUsername": "[if(parameters('deployDomainController'), format('{0}\\svc-functionapp', parameters('domainNetBiosName')), parameters('adServiceAccountUsername'))]",
+    "effectiveAdServiceAccountPassword": "[if(parameters('deployDomainController'), parameters('serviceAccountPassword'), parameters('adServiceAccountPassword'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2025-07-01",
+      "name": "[variables('logAnalyticsName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": 30,
+        "features": {
+          "enableLogAccessUsingOnlyResourcePermissions": true
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+        "IngestionMode": "LogAnalytics",
+        "publicNetworkAccessForIngestion": "Enabled",
+        "publicNetworkAccessForQuery": "Enabled"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2025-06-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "minimumTlsVersion": "TLS1_2",
+        "allowBlobPublicAccess": false,
+        "supportsHttpsTrafficOnly": true,
+        "encryption": {
+          "services": {
+            "blob": {
+              "enabled": true
+            },
+            "file": {
+              "enabled": true
+            }
+          },
+          "keySource": "Microsoft.Storage"
+        },
+        "networkAcls": {
+          "defaultAction": "Allow",
+          "bypass": "AzureServices"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2025-05-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "tenantId": "[subscription().tenantId]",
+        "enableRbacAuthorization": true,
+        "enableSoftDelete": true,
+        "softDeleteRetentionInDays": 90,
+        "enablePurgeProtection": true,
+        "networkAcls": {
+          "defaultAction": "Allow",
+          "bypass": "AzureServices"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2025-05-01",
+      "name": "[format('{0}/{1}', variables('keyVaultName'), 'ENTRA-PWDRESET-RW')]",
+      "properties": {
+        "value": "[format('{{\"username\":\"{0}\",\"password\":\"{1}\"}}', variables('effectiveAdServiceAccountUsername'), variables('effectiveAdServiceAccountPassword'))]",
+        "contentType": "application/json",
+        "attributes": {
+          "enabled": true
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployDomainController')]",
+      "type": "Microsoft.KeyVault/vaults/secrets",
+      "apiVersion": "2025-05-01",
+      "name": "[format('{0}/{1}', variables('keyVaultName'), 'DC-VM-ADMIN-CREDENTIAL')]",
+      "properties": {
+        "value": "[format('{{\"username\":\"{0}\",\"password\":\"{1}\"}}', parameters('vmAdminUsername'), parameters('vmAdminPassword'))]",
+        "contentType": "application/json",
+        "attributes": {
+          "enabled": true
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployDomainController')]",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2025-01-01",
+      "name": "[variables('nsgName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "AllowRDP",
+            "properties": {
+              "priority": 1000,
+              "protocol": "Tcp",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "3389"
+            }
+          },
+          {
+            "name": "AllowADDS",
+            "properties": {
+              "priority": 1010,
+              "protocol": "*",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRanges": [
+                "389",
+                "636",
+                "3268",
+                "3269",
+                "88",
+                "53",
+                "445"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "condition": "[parameters('deployDomainController')]",
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2025-01-01",
+      "name": "[variables('vnetName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.0.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "DomainControllerSubnet",
+            "properties": {
+              "addressPrefix": "10.0.1.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+              }
+            }
+          },
+          {
+            "name": "FunctionAppSubnet",
+            "properties": {
+              "addressPrefix": "10.0.2.0/24",
+              "delegations": [
+                {
+                  "name": "delegation",
+                  "properties": {
+                    "serviceName": "Microsoft.Web/serverFarms"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployDomainController')]",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2025-01-01",
+      "name": "[variables('dcPublicIpName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static",
+        "dnsSettings": {
+          "domainNameLabel": "[toLower(variables('dcVmName'))]"
+        }
+      }
+    },
+    {
+      "condition": "[parameters('deployDomainController')]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2025-01-01",
+      "name": "[variables('dcNicName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "10.0.1.4",
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'DomainControllerSubnet')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('dcPublicIpName'))]"
+              }
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('dcPublicIpName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployDomainController')]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2025-04-01",
+      "name": "[variables('dcVmName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "Standard_D2s_v3"
+        },
+        "osProfile": {
+          "computerName": "[take(variables('dcVmName'), 15)]",
+          "adminUsername": "[parameters('vmAdminUsername')]",
+          "adminPassword": "[parameters('vmAdminPassword')]",
+          "windowsConfiguration": {
+            "enableAutomaticUpdates": true,
+            "provisionVMAgent": true,
+            "timeZone": "UTC"
+          }
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2022-datacenter",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "[format('{0}-osdisk', variables('dcVmName'))]",
+            "caching": "ReadWrite",
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "Premium_LRS"
+            }
+          },
+          "dataDisks": [
+            {
+              "name": "[format('{0}-datadisk', variables('dcVmName'))]",
+              "diskSizeGB": 32,
+              "lun": 0,
+              "createOption": "Empty",
+              "managedDisk": {
+                "storageAccountType": "Premium_LRS"
+              }
+            }
+          ]
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('dcNicName'))]",
+              "properties": {
+                "primary": true
+              }
+            }
+          ]
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": true,
+            "storageUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2025-06-01').primaryEndpoints.blob]"
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('dcNicName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployDomainController')]",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}/{1}', variables('dcVmName'), 'BootstrapADDS')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "publisher": "Microsoft.Compute",
+        "type": "CustomScriptExtension",
+        "typeHandlerVersion": "1.10",
+        "autoUpgradeMinorVersion": true,
+        "protectedSettings": {
+          "fileUris": [
+            "[format('{0}/Bootstrap-ADDSDomain.ps1', parameters('repositoryUrl'))]"
+          ],
+          "commandToExecute": "[format('powershell.exe -ExecutionPolicy Bypass -File Bootstrap-ADDSDomain.ps1 -DomainName \"{0}\" -DomainNetBiosName \"{1}\" -SafeModeAdminPassword (ConvertTo-SecureString \"{2}\" -AsPlainText -Force)', parameters('domainName'), parameters('domainNetBiosName'), parameters('vmAdminPassword'))]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('dcVmName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2025-03-01",
+      "name": "[variables('appServicePlanName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "sku": {
+        "name": "Y1",
+        "tier": "Dynamic"
+      },
+      "kind": "functionapp",
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2025-03-01",
+      "name": "[variables('functionAppName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "kind": "functionapp,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "reserved": true,
+        "httpsOnly": true,
+        "clientAffinityEnabled": false,
+        "siteConfig": {
+          "linuxFxVersion": "PowerShell|7.4",
+          "powerShellVersion": "7.4",
+          "use32BitWorkerProcess": false,
+          "ftpsState": "Disabled",
+          "minTlsVersion": "1.2",
+          "scmMinTlsVersion": "1.2",
+          "http20Enabled": true,
+          "functionAppScaleLimit": 200,
+          "minimumElasticInstanceCount": 0,
+          "appSettings": [
+            {
+              "name": "FUNCTIONS_EXTENSION_VERSION",
+              "value": "~4"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME",
+              "value": "powershell"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_RUNTIME_VERSION",
+              "value": "7.4"
+            },
+            {
+              "name": "FUNCTIONS_WORKER_PROCESS_COUNT",
+              "value": "2"
+            },
+            {
+              "name": "PSWorkerInProcConcurrencyUpperBound",
+              "value": "10"
+            },
+            {
+              "name": "AzureWebJobsStorage",
+              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2025-06-01').keys[0].value, environment().suffixes.storage)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
+              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix={2}', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2025-06-01').keys[0].value, environment().suffixes.storage)]"
+            },
+            {
+              "name": "WEBSITE_CONTENTSHARE",
+              "value": "[toLower(variables('functionAppName'))]"
+            },
+            {
+              "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').InstrumentationKey]"
+            },
+            {
+              "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+              "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+            },
+            {
+              "name": "REQUIRED_ROLE",
+              "value": "[parameters('requiredRole')]"
+            },
+            {
+              "name": "KEY_VAULT_URI",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2025-05-01').vaultUri]"
+            },
+            {
+              "name": "DOMAIN_CONTROLLER",
+              "value": "[parameters('domainController')]"
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults/secrets', variables('keyVaultName'), 'ENTRA-PWDRESET-RW')]",
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2025-03-01",
+      "name": "[format('{0}/{1}', variables('functionAppName'), 'authsettingsV2')]",
+      "properties": {
+        "globalValidation": {
+          "requireAuthentication": true,
+          "unauthenticatedClientAction": "Return401"
+        },
+        "identityProviders": {
+          "azureActiveDirectory": {
+            "enabled": true,
+            "registration": {
+              "openIdIssuer": "[format('https://sts.windows.net/{0}/v2.0', parameters('tenantId'))]",
+              "clientId": "[parameters('clientId')]"
+            },
+            "validation": {
+              "allowedAudiences": [
+                "[format('api://{0}', parameters('clientId'))]"
+              ]
+            }
+          }
+        },
+        "login": {
+          "tokenStore": {
+            "enabled": true
+          }
+        },
+        "platform": {
+          "enabled": true
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[format('Microsoft.KeyVault/vaults/{0}', variables('keyVaultName'))]",
+      "name": "[guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.Web/sites', variables('functionAppName')), 'Key Vault Secrets User')]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2025-03-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "functionAppName": {
+      "type": "string",
+      "metadata": {
+        "description": "Function App name"
+      },
+      "value": "[variables('functionAppName')]"
+    },
+    "functionAppHostName": {
+      "type": "string",
+      "metadata": {
+        "description": "Function App hostname"
+      },
+      "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2025-03-01').defaultHostName]"
+    },
+    "functionAppPrincipalId": {
+      "type": "string",
+      "metadata": {
+        "description": "Function App Managed Identity Principal ID"
+      },
+      "value": "[reference(resourceId('Microsoft.Web/sites', variables('functionAppName')), '2025-03-01', 'full').identity.principalId]"
+    },
+    "functionAppResourceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Function App resource ID"
+      },
+      "value": "[resourceId('Microsoft.Web/sites', variables('functionAppName'))]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "metadata": {
+        "description": "Key Vault name"
+      },
+      "value": "[variables('keyVaultName')]"
+    },
+    "keyVaultUri": {
+      "type": "string",
+      "metadata": {
+        "description": "Key Vault URI"
+      },
+      "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2025-05-01').vaultUri]"
+    },
+    "appInsightsInstrumentationKey": {
+      "type": "string",
+      "metadata": {
+        "description": "Application Insights Instrumentation Key"
+      },
+      "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').InstrumentationKey]"
+    },
+    "appInsightsConnectionString": {
+      "type": "string",
+      "metadata": {
+        "description": "Application Insights Connection String"
+      },
+      "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName')), '2020-02-02').ConnectionString]"
+    },
+    "storageAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Storage Account name"
+      },
+      "value": "[variables('storageAccountName')]"
+    },
+    "logAnalyticsWorkspaceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Log Analytics Workspace ID"
+      },
+      "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+    }
+  }
+}

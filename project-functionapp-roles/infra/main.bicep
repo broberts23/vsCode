@@ -30,13 +30,17 @@ param clientId string
 @description('Required role claim for password reset')
 param requiredRole string = 'Role.PasswordReset'
 
-@description('AD service account username (e.g., DOMAIN\\svc-pwdreset)')
+@description('AD service account username (e.g., DOMAIN\\svc-pwdreset). Auto-generated when deployDomainController is true.')
 @secure()
-param adServiceAccountUsername string
+param adServiceAccountUsername string = ''
 
-@description('AD service account password')
+@description('AD service account password. Auto-generated from ServiceAccountPassword when deployDomainController is true.')
 @secure()
-param adServiceAccountPassword string
+param adServiceAccountPassword string = ''
+
+@description('Service account password for domain controller deployment (used for both DC post-config and AD service account)')
+@secure()
+param serviceAccountPassword string = ''
 
 @description('Domain controller FQDN (optional)')
 param domainController string = ''
@@ -76,6 +80,12 @@ var dcVmName = '${baseName}-dc-${environment}'
 var dcNicName = '${dcVmName}-nic'
 var dcPublicIpName = '${dcVmName}-pip'
 var nsgName = '${baseName}-nsg-${environment}-${uniqueSuffix}'
+
+// Conditional AD service account values
+var effectiveAdServiceAccountUsername = deployDomainController
+  ? '${domainNetBiosName}\\svc-functionapp'
+  : adServiceAccountUsername
+var effectiveAdServiceAccountPassword = deployDomainController ? serviceAccountPassword : adServiceAccountPassword
 
 // ====================================
 // Resources
@@ -175,7 +185,21 @@ resource adServiceAccountSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' =
   parent: keyVault
   name: 'ENTRA-PWDRESET-RW'
   properties: {
-    value: '{"username":"${adServiceAccountUsername}","password":"${adServiceAccountPassword}"}'
+    value: '{"username":"${effectiveAdServiceAccountUsername}","password":"${effectiveAdServiceAccountPassword}"}'
+    contentType: 'application/json'
+    attributes: {
+      enabled: true
+    }
+  }
+}
+
+// Key Vault Secret for Domain Controller VM Admin Credentials (optional storage)
+// Stores the VM administrator username and password used for the domain controller deployment
+resource vmAdminSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' = if (deployDomainController) {
+  parent: keyVault
+  name: 'DC-VM-ADMIN-CREDENTIAL'
+  properties: {
+    value: '{"username":"${vmAdminUsername}","password":"${vmAdminPassword}"}'
     contentType: 'application/json'
     attributes: {
       enabled: true
