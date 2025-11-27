@@ -45,7 +45,7 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [securestring]$SafeModeAdminPassword
+    [string]$SafeModeAdminPassword
 )
 
 Set-StrictMode -Version Latest
@@ -128,11 +128,13 @@ try {
         
         if ($PSCmdlet.ShouldProcess($env:COMPUTERNAME, "Promote to Domain Controller for $DomainName")) {
             Import-Module ADDSDeployment
+            # Convert plain text to SecureString locally to avoid CSE argument parsing issues
+            $dsrmSecure = ConvertTo-SecureString -String $SafeModeAdminPassword -AsPlainText -Force
             
             Install-ADDSForest `
                 -DomainName $DomainName `
                 -DomainNetbiosName $DomainNetBiosName `
-                -SafeModeAdministratorPassword $SafeModeAdminPassword `
+                -SafeModeAdministratorPassword $dsrmSecure `
                 -DatabasePath $databasePath `
                 -LogPath $logPath `
                 -SysvolPath $sysvolPath `

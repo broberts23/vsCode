@@ -419,7 +419,7 @@ resource dcBootstrap 'Microsoft.Compute/virtualMachines/extensions@2025-04-01' =
       fileUris: [
         '${repositoryUrl}/Bootstrap-ADDSDomain.ps1'
       ]
-      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Bootstrap-ADDSDomain.ps1 -DomainName "${domainName}" -DomainNetBiosName "${domainNetBiosName}" -SafeModeAdminPassword (ConvertTo-SecureString "${vmAdminPassword}" -AsPlainText -Force)'
+      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Bootstrap-ADDSDomain.ps1 -DomainName "${domainName}" -DomainNetBiosName "${domainNetBiosName}" -SafeModeAdminPassword "${vmAdminPassword}"'
     }
   }
 }
