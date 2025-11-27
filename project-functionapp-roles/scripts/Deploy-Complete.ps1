@@ -30,9 +30,6 @@
 .PARAMETER SkipPostConfiguration
     Skip post-deployment configuration (service account and test user creation).
 
-.PARAMETER WhatIf
-    Show what would be deployed without actually deploying.
-
 .EXAMPLE
     .\Deploy-Complete.ps1 -Environment dev -ResourceGroupName rg-pwdreset-dev -Location eastus
 
@@ -82,10 +79,7 @@ param(
     [securestring]$ServiceAccountPassword,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SkipPostConfiguration,
-
-    [Parameter(Mandatory = $false)]
-    [switch]$WhatIf
+    [switch]$SkipPostConfiguration
 )
 
 Set-StrictMode -Version Latest
@@ -161,12 +155,12 @@ function New-RandomPassword {
         [int]$Length = 20
     )
 
-    # Generate a complex password meeting typical Windows AD complexity requirements
-    # Includes uppercase, lowercase, digits, and special characters
+    # Generate a complex password meeting Azure VM (Windows) complexity requirements
+    # Use a conservative special character set to avoid API rejections and escape issues
     $upper = 1..1 | ForEach-Object { [char](Get-Random -Minimum 65 -Maximum 91) } # A-Z
     $lower = 1..1 | ForEach-Object { [char](Get-Random -Minimum 97 -Maximum 123) } # a-z
     $digit = 1..1 | ForEach-Object { [char](Get-Random -Minimum 48 -Maximum 58) } # 0-9
-    $specialChars = '!@#$%^&*()-_=+[]{};:,<.>/?'
+    $specialChars = '!@#$%^&*()-_=+[]{}:,.?'
     $special = 1..1 | ForEach-Object { $specialChars[(Get-Random -Minimum 0 -Maximum $specialChars.Length)] }
 
     $pool = @()
@@ -174,10 +168,17 @@ function New-RandomPassword {
     $pool += $specialChars.ToCharArray()
 
     $remainingCount = [Math]::Max(($Length - 4), 0)
-    $remaining = 1..$remainingCount | ForEach-Object { $pool[(Get-Random -Minimum 0 -Maximum $pool.Count)] }
+    $remaining = if ($remainingCount -gt 0) { 1..$remainingCount | ForEach-Object { $pool[(Get-Random -Minimum 0 -Maximum $pool.Count)] } } else { @() }
 
     $chars = @($upper + $lower + $digit + $special + $remaining)
     $passwordPlain = -join ($chars | Sort-Object { Get-Random })
+
+    # Final sanity checks: length and category coverage
+    if ($passwordPlain.Length -lt 8 -or $passwordPlain.Length -gt 123) {
+        # Regenerate with default length if out of bounds
+        return (New-RandomPassword -Length 20)
+    }
+
     return (ConvertTo-SecureString -String $passwordPlain -AsPlainText -Force)
 }
 

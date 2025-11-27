@@ -1,5 +1,5 @@
-#!/usr/bin/env pwsh
-#Requires -Version 7.4
+#!/usr/bin/env powershell
+#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -27,7 +27,7 @@
 .NOTES
     Author: GitHub Copilot
     Separation of concerns: Promotion only. Post provisioning: Configure-ADPostPromotion.ps1
-    Requires: Windows PowerShell 5.1 or later (runs on Windows Server) with Administrator privileges.
+    Requires: Windows PowerShell 5.1 or later (default on Windows Server 2022). Do NOT require PowerShell 7.x when run via Custom Script Extension.
 
 .LINK
     https://learn.microsoft.com/powershell/module/addsdeployment/install-addsforest?view=windowsserver2022-ps

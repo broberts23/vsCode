@@ -141,10 +141,10 @@ Connect-AzAccount
     -Location eastus
 
 # OR deploy with self-contained domain controller (auto-generates strong passwords)
-./scripts/Deploy-Complete.ps1 \
-  -Environment dev \
-  -ResourceGroupName rg-pwdreset-dev \
-  -Location eastus \
+./scripts/Deploy-Complete.ps1 `
+  -Environment dev `
+  -ResourceGroupName rg-pwdreset-dev `
+  -Location eastus `
   -DeployDomainController
 
 # Optionally override usernames and/or passwords

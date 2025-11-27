@@ -1,5 +1,5 @@
-#!/usr/bin/env pwsh
-#Requires -Version 7.4
+#!/usr/bin/env powershell
+#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -25,7 +25,7 @@
 
 .NOTES
     Author: GitHub Copilot
-    Requires: Windows PowerShell 5.1 or later (runs on Windows Server)
+    Requires: Windows PowerShell 5.1 or later (default shell on Windows Server). Compatible with Run Command and Custom Script Extension.
     This script must be run on the domain controller after promotion.
 
 .LINK
