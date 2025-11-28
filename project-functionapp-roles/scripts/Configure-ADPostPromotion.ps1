@@ -53,6 +53,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Initialize logging
+$logDir = 'C:\temp'
+$logFile = Join-Path $logDir "Configure-ADPostPromotion-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+if (-not (Test-Path $logDir)) {
+    New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+}
+
 # Function to write log messages
 function Write-Log {
     [CmdletBinding()]
@@ -68,10 +75,19 @@ function Write-Log {
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $logMessage = "[$timestamp] [$Level] $Message"
     
+    # Write to console
     switch ($Level) {
         'Information' { Write-Information -MessageData $logMessage -InformationAction Continue }
         'Warning' { Write-Warning -Message $Message }
         'Error' { Write-Error -Message $Message }
+    }
+    
+    # Write to file
+    try {
+        Add-Content -Path $script:logFile -Value $logMessage -ErrorAction SilentlyContinue
+    }
+    catch {
+        # Silently fail if we can't write to log file
     }
 }
 
@@ -209,10 +225,12 @@ try {
     Write-Log "Service Account: $ServiceAccountName"
     Write-Log "Test Users: $($testUsers.Name -join ', ')"
     Write-Log "Test User Initial Password: InitialP@ss123!"
+    Write-Log "Log file: $logFile"
 
 } catch {
     Write-Log "AD configuration failed: $_" -Level Error
     Write-Log "Exception Type: $($_.Exception.GetType().FullName)" -Level Error
     Write-Log "Stack Trace: $($_.Exception.StackTrace)" -Level Error
+    Write-Log "Log file: $logFile" -Level Error
     throw
 }

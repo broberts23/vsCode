@@ -51,6 +51,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Initialize logging
+$logDir = 'C:\temp'
+$logFile = Join-Path $logDir "Bootstrap-ADDSDomain-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+if (-not (Test-Path $logDir)) {
+    New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+}
+
 # Function to write log messages
 function Write-Log {
     [CmdletBinding()]
@@ -66,10 +73,19 @@ function Write-Log {
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $logMessage = "[$timestamp] [$Level] $Message"
     
+    # Write to console
     switch ($Level) {
         'Information' { Write-Information -MessageData $logMessage -InformationAction Continue }
         'Warning' { Write-Warning -Message $Message }
         'Error' { Write-Error -Message $Message }
+    }
+    
+    # Write to file
+    try {
+        Add-Content -Path $script:logFile -Value $logMessage -ErrorAction SilentlyContinue
+    }
+    catch {
+        # Silently fail if we can't write to log file
     }
 }
 
@@ -125,44 +141,54 @@ try {
     else {
         # Promote to domain controller
         Write-Log "Promoting server to domain controller for domain: $DomainName"
+        Write-Log "Database Path: $databasePath"
+        Write-Log "Log Path: $logPath"
+        Write-Log "Sysvol Path: $sysvolPath"
+        Write-Log "Promotion starting at: $(Get-Date)"
         
         if ($PSCmdlet.ShouldProcess($env:COMPUTERNAME, "Promote to Domain Controller for $DomainName")) {
             Import-Module ADDSDeployment
             # Convert plain text to SecureString locally to avoid CSE argument parsing issues
             $dsrmSecure = ConvertTo-SecureString -String $SafeModeAdminPassword -AsPlainText -Force
             
-            Install-ADDSForest `
-                -DomainName $DomainName `
-                -DomainNetbiosName $DomainNetBiosName `
-                -SafeModeAdministratorPassword $dsrmSecure `
-                -DatabasePath $databasePath `
-                -LogPath $logPath `
-                -SysvolPath $sysvolPath `
-                -InstallDns:$true `
-                -CreateDnsDelegation:$false `
-                -NoRebootOnCompletion:$true `
-                -Force:$true
+            Write-Log "Invoking Install-ADDSForest..."
+            try {
+                # Note: Using -NoRebootOnCompletion:$false to let Install-ADDSForest handle the reboot
+                $promotionResult = Install-ADDSForest `
+                    -DomainName $DomainName `
+                    -DomainNetbiosName $DomainNetBiosName `
+                    -SafeModeAdministratorPassword $dsrmSecure `
+                    -DatabasePath $databasePath `
+                    -LogPath $logPath `
+                    -SysvolPath $sysvolPath `
+                    -InstallDns:$true `
+                    -CreateDnsDelegation:$false `
+                    -NoRebootOnCompletion:$false `
+                    -Force:$true `
+                    -ErrorAction Stop
 
-            Write-Log "Domain controller promotion completed successfully"
-            
-            # Create a scheduled task to reboot after this script exits cleanly
-            Write-Log "Scheduling reboot via scheduled task to allow extension to complete..."
-            $action = New-ScheduledTaskAction -Execute 'shutdown.exe' -Argument '/r /t 60 /c "Completing AD DS promotion - rebooting in 60 seconds"'
-            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(10)
-            $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-            
-            Register-ScheduledTask -TaskName 'ADDSPromotionReboot' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-            Write-Log "Reboot scheduled; extension will exit cleanly"
+                Write-Log "Install-ADDSForest completed successfully"
+                Write-Log "Promotion result: $($promotionResult | ConvertTo-Json -Depth 2)"
+                Write-Log "System will reboot now at: $(Get-Date)"
+            }
+            catch {
+                Write-Log "Install-ADDSForest failed: $($_.Exception.Message)" -Level Error
+                Write-Log "Full error: $($_ | Out-String)" -Level Error
+                throw
+            }
         }
     }
 
     Write-Log "AD DS bootstrap completed successfully (promotion phase only)"
     Write-Log "Domain: $DomainName"
+    Write-Log "Log file: $logFile"
     Write-Log "Next: Run Configure-ADPostPromotion.ps1 for directory provisioning (OU, service account, test users)."
 
 }
 catch {
     Write-Log "AD DS bootstrap failed: $_" -Level Error
+    Write-Log "Exception details: $($_.Exception | Out-String)" -Level Error
+    Write-Log "Stack trace: $($_.ScriptStackTrace)" -Level Error
+    Write-Log "Log file: $logFile" -Level Error
     throw
 }

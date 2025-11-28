@@ -261,6 +261,76 @@ function Invoke-BicepDeployment {
     }
 }
 
+function Invoke-DomainControllerPromotion {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$VmName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DomainName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DomainNetBiosName,
+
+        [Parameter(Mandatory = $true)]
+        [securestring]$VmAdminPassword
+    )
+
+    if ($PSCmdlet.ShouldProcess($VmName, "Promote to AD DS domain controller")) {
+        Write-Log "Waiting for VM to be ready for promotion..." -Level Information
+        
+        # Wait for VM to be in running state
+        $timeout = 300
+        $elapsed = 0
+        $checkInterval = 15
+        
+        while ($elapsed -lt $timeout) {
+            $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -Status
+            $powerState = ($vm.Statuses | Where-Object { $_.Code -like 'PowerState/*' }).Code
+            
+            if ($powerState -eq 'PowerState/running') {
+                Write-Log "VM is running and ready" -Level Success
+                break
+            }
+            
+            Start-Sleep -Seconds $checkInterval
+            $elapsed += $checkInterval
+        }
+
+        if ($elapsed -ge $timeout) {
+            throw "Timeout waiting for VM to be ready"
+        }
+
+        # Invoke AD DS promotion via Run Command
+        Write-Log "Invoking AD DS promotion via Run Command (background job)..." -Level Information
+        $bootstrapScript = Get-Content (Join-Path $scriptDir 'Bootstrap-ADDSDomain.ps1') -Raw
+        $password = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($VmAdminPassword))
+
+        # Run command as background job since the VM will reboot and the command won't return normally
+        $job = Invoke-AzVMRunCommand `
+            -ResourceGroupName $ResourceGroupName `
+            -VMName $VmName `
+            -CommandId 'RunPowerShellScript' `
+            -ScriptString $bootstrapScript `
+            -Parameter @{
+            DomainName            = $DomainName
+            DomainNetBiosName     = $DomainNetBiosName
+            SafeModeAdminPassword = $password
+        } `
+            -AsJob
+
+        Write-Log "AD DS promotion command sent as background job; waiting for promotion to begin..." -Level Success
+        
+        # Give the promotion a moment to start
+        Start-Sleep -Seconds 30
+        Write-Log "Promotion should be in progress; VM will reboot when complete" -Level Information
+    }
+}
+
 function Invoke-DomainControllerPostConfig {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -431,19 +501,31 @@ try {
         Write-Log "  $($output.Key): $($output.Value.Value)" -Level Information
     }
 
-    # Post-deployment configuration for domain controller
-    if ($DeployDomainController -and -not $SkipPostConfiguration) {
+    # Domain controller configuration
+    if ($DeployDomainController) {
         $parameters = Get-Content $parametersFile | ConvertFrom-Json
         $domainName = $parameters.parameters.domainName.value
+        $domainNetBiosName = $parameters.parameters.domainNetBiosName.value
         $baseName = $parameters.parameters.baseName.value
         $dcVmName = "$baseName-dc-$Environment"
 
-        Invoke-DomainControllerPostConfig `
+        # Step 1: Promote to domain controller via Run Command
+        Invoke-DomainControllerPromotion `
             -ResourceGroupName $ResourceGroupName `
             -VmName $dcVmName `
             -DomainName $domainName `
-            -ServiceAccountPassword $ServiceAccountPassword `
-            -ServiceAccountName $ServiceAccountUsername
+            -DomainNetBiosName $domainNetBiosName `
+            -VmAdminPassword $VmAdminPassword
+
+        # Step 2: Post-configuration (OU, service account, test users)
+        if (-not $SkipPostConfiguration) {
+            Invoke-DomainControllerPostConfig `
+                -ResourceGroupName $ResourceGroupName `
+                -VmName $dcVmName `
+                -DomainName $domainName `
+                -ServiceAccountPassword $ServiceAccountPassword `
+                -ServiceAccountName $ServiceAccountUsername
+        }
     }
 
     Write-Log "Deployment completed successfully!" -Level Success

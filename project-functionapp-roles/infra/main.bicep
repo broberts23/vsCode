@@ -61,9 +61,6 @@ param domainNetBiosName string = 'CONTOSO'
 @description('Deploy domain controller VM')
 param deployDomainController bool = true
 
-@description('Repository URL for bootstrap scripts')
-param repositoryUrl string = 'https://raw.githubusercontent.com/broberts23/vsCode/main/project-functionapp-roles/scripts'
-
 // ====================================
 // Variables
 // ====================================
@@ -169,8 +166,8 @@ resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
     }
     tenantId: subscription().tenantId
     enableRbacAuthorization: true
-    enableSoftDelete: false
-    enablePurgeProtection: false
+    // enableSoftDelete: false
+    // enablePurgeProtection: false
     networkAcls: {
       defaultAction: 'Allow'
       bypass: 'AzureServices'
@@ -403,25 +400,13 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = if (deployDomainC
   }
 }
 
-// Custom Script Extension to bootstrap AD DS
-// https://learn.microsoft.com/azure/virtual-machines/extensions/custom-script-windows
-resource dcBootstrap 'Microsoft.Compute/virtualMachines/extensions@2025-04-01' = if (deployDomainController) {
-  parent: dcVm
-  name: 'BootstrapADDS'
-  location: location
-  properties: {
-    publisher: 'Microsoft.Compute'
-    type: 'CustomScriptExtension'
-    typeHandlerVersion: '1.10'
-    autoUpgradeMinorVersion: true
-    protectedSettings: {
-      fileUris: [
-        '${repositoryUrl}/Bootstrap-ADDSDomain.ps1'
-      ]
-      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File Bootstrap-ADDSDomain.ps1 -DomainName "${domainName}" -DomainNetBiosName "${domainNetBiosName}" -SafeModeAdminPassword "${vmAdminPassword}"'
-    }
-  }
-}
+// Custom Script Extension removed - AD DS promotion now handled via Run Command in deployment script
+// This approach avoids extension timeout issues with reboot-requiring operations
+// The deployment script will:
+// 1. Wait for VM to be ready
+// 2. Invoke Bootstrap-ADDSDomain.ps1 via Run Command
+// 3. Monitor for reboot and AD readiness
+// 4. Invoke Configure-ADPostPromotion.ps1 via Run Command
 
 // App Service Plan (Linux Consumption)
 // https://learn.microsoft.com/azure/app-service/overview-hosting-plans
