@@ -169,9 +169,8 @@ resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
     }
     tenantId: subscription().tenantId
     enableRbacAuthorization: true
-    enableSoftDelete: true
-    softDeleteRetentionInDays: 90
-    enablePurgeProtection: true
+    enableSoftDelete: false
+    enablePurgeProtection: false
     networkAcls: {
       defaultAction: 'Allow'
       bypass: 'AzureServices'
