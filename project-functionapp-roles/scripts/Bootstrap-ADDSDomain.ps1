@@ -140,11 +140,20 @@ try {
                 -SysvolPath $sysvolPath `
                 -InstallDns:$true `
                 -CreateDnsDelegation:$false `
-                -NoRebootOnCompletion:$false `
+                -NoRebootOnCompletion:$true `
                 -Force:$true
 
-            Write-Log "Domain controller promotion initiated; server will reboot"
-            # Note: Script execution stops here as the server reboots
+            Write-Log "Domain controller promotion completed successfully"
+            
+            # Create a scheduled task to reboot after this script exits cleanly
+            Write-Log "Scheduling reboot via scheduled task to allow extension to complete..."
+            $action = New-ScheduledTaskAction -Execute 'shutdown.exe' -Argument '/r /t 60 /c "Completing AD DS promotion - rebooting in 60 seconds"'
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(10)
+            $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+            
+            Register-ScheduledTask -TaskName 'ADDSPromotionReboot' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+            Write-Log "Reboot scheduled; extension will exit cleanly"
         }
     }
 

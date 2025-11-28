@@ -282,36 +282,62 @@ function Invoke-DomainControllerPostConfig {
 
     if ($PSCmdlet.ShouldProcess($VmName, "Configure AD post-promotion")) {
         Write-Log "Waiting for domain controller promotion to complete..."
-        Write-Log "This may take 15-20 minutes. Checking VM status every 60 seconds..."
+        Write-Log "Monitoring for reboot cycle and AD Web Services availability..."
 
-        $timeout = 1200  # 20 minutes
+        $timeout = 1800  # 30 minutes
         $elapsed = 0
-        $checkInterval = 60
+        $checkInterval = 30
+        $initialBootTime = $null
+        $rebootDetected = $false
+
+        # Get initial boot time
+        Write-Log "Querying initial VM boot time..." -Level Information
+        $bootTimeScript = 'Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object -ExpandProperty LastBootUpTime'
+        $bootResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $bootTimeScript -ErrorAction SilentlyContinue
+        if ($bootResult -and $bootResult.Value[0].Message) {
+            $initialBootTime = ($bootResult.Value[0].Message).Trim()
+            Write-Log "Initial boot time: $initialBootTime" -Level Information
+        }
+        else {
+            Write-Log "Unable to query initial boot time; proceeding without reboot detection." -Level Warning
+        }
 
         while ($elapsed -lt $timeout) {
-            $vm = Get-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -Status
-            $powerState = ($vm.Statuses | Where-Object { $_.Code -like 'PowerState/*' }).Code
+            try {
+                # Query current boot time
+                $currentBootResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $bootTimeScript -ErrorAction SilentlyContinue
+                $currentBootTime = $null
+                if ($currentBootResult -and $currentBootResult.Value[0].Message) {
+                    $currentBootTime = ($currentBootResult.Value[0].Message).Trim()
+                }
 
-            if ($powerState -eq 'PowerState/running') {
-                Write-Log "VM is running; waiting for AD Web Services..." -Level Information
-                Start-Sleep -Seconds $checkInterval
-                $elapsed += $checkInterval
+                if ($initialBootTime -and $currentBootTime -and ($currentBootTime -ne $initialBootTime)) {
+                    Write-Log "VM reboot detected (boot time changed)!" -Level Success
+                    $rebootDetected = $true
+                }
 
-                # After 10 minutes, assume promotion is complete and try configuration
-                if ($elapsed -ge 600) {
-                    Write-Log "Attempting post-promotion configuration..."
-                    break
+                if ($rebootDetected) {
+                    Write-Log "Checking AD Web Services readiness..." -Level Information
+                    $testScript = 'try { Import-Module ActiveDirectory -ErrorAction Stop; Get-ADDomain -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }'
+                    $testResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $testScript -ErrorAction SilentlyContinue
+                    if ($testResult -and $testResult.Value[0].Message -notlike '*exit code*1*') {
+                        Write-Log "AD Web Services is ready; proceeding with post-configuration" -Level Success
+                        break
+                    }
+                }
+                else {
+                    Write-Log "Waiting for VM reboot (boot time change)..." -Level Information
                 }
             }
-            else {
-                Write-Log "VM power state: $powerState; waiting for restart..." -Level Warning
-                Start-Sleep -Seconds $checkInterval
-                $elapsed += $checkInterval
+            catch {
+                Write-Log "Error checking VM boot time or AD status: $($_.Exception.Message)" -Level Warning
             }
+            Start-Sleep -Seconds $checkInterval
+            $elapsed += $checkInterval
         }
 
         if ($elapsed -ge $timeout) {
-            Write-Log "Timeout waiting for domain controller; manual configuration may be required" -Level Warning
+            Write-Log "Timeout waiting for domain controller reboot and AD readiness; manual configuration may be required" -Level Warning
             return
         }
 
