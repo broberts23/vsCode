@@ -138,20 +138,21 @@ Connect-AzAccount
 ./scripts/Deploy-Infrastructure.ps1 `
     -Environment dev `
     -ResourceGroupName rg-pwdreset-dev `
-    -Location eastus
+    # https://cloudprice.net/regions
+    -Location centralindia
 
 # OR deploy with self-contained domain controller (auto-generates strong passwords)
 ./scripts/Deploy-Complete.ps1 `
   -Environment dev `
   -ResourceGroupName rg-pwdreset-dev `
-  -Location eastus `
+  -Location centralindia `
   -DeployDomainController
 
 # Optionally override usernames and/or passwords
 ./scripts/Deploy-Complete.ps1 \
   -Environment dev \
   -ResourceGroupName rg-pwdreset-dev \
-  -Location eastus \
+  -Location centralindia \
   -DeployDomainController \
   -VmAdminUsername azureadmin \
   -VmAdminPassword (ConvertTo-SecureString 'YourVmP@ssw0rd!' -AsPlainText -Force) \

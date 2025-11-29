@@ -308,7 +308,8 @@ function Invoke-DomainControllerPromotion {
         # Invoke AD DS promotion via Run Command
         Write-Log "Invoking AD DS promotion via Run Command (background job)..." -Level Information
         $bootstrapScript = Get-Content (Join-Path $scriptDir 'Bootstrap-ADDSDomain.ps1') -Raw
-        $password = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($VmAdminPassword))
+        $plainPassword = [System.Net.NetworkCredential]::new('', $VmAdminPassword).Password
+        $passwordBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($plainPassword))
 
         # Run command as background job since the VM will reboot and the command won't return normally
         $job = Invoke-AzVMRunCommand `
@@ -317,9 +318,9 @@ function Invoke-DomainControllerPromotion {
             -CommandId 'RunPowerShellScript' `
             -ScriptString $bootstrapScript `
             -Parameter @{
-            DomainName            = $DomainName
-            DomainNetBiosName     = $DomainNetBiosName
-            SafeModeAdminPassword = $password
+            DomainName                  = $DomainName
+            DomainNetBiosName           = $DomainNetBiosName
+            SafeModeAdminPasswordBase64 = $passwordBase64
         } `
             -AsJob
 
@@ -356,17 +357,23 @@ function Invoke-DomainControllerPostConfig {
 
         $timeout = 1800  # 30 minutes
         $elapsed = 0
-        $checkInterval = 30
+        $checkInterval = 60
         $initialBootTime = $null
         $rebootDetected = $false
+        $rebootWindowObserved = $false
 
         # Get initial boot time
         Write-Log "Querying initial VM boot time..." -Level Information
         $bootTimeScript = 'Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object -ExpandProperty LastBootUpTime'
         $bootResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $bootTimeScript -ErrorAction SilentlyContinue
         if ($bootResult -and $bootResult.Value[0].Message) {
-            $initialBootTime = ($bootResult.Value[0].Message).Trim()
-            Write-Log "Initial boot time: $initialBootTime" -Level Information
+            try {
+                $initialBootTime = [DateTime]::Parse(($bootResult.Value[0].Message).Trim())
+                Write-Log "Initial boot time: $($initialBootTime.ToString('u'))" -Level Information
+            }
+            catch {
+                Write-Log "Failed to parse initial boot time; raw: $($bootResult.Value[0].Message)" -Level Warning
+            }
         }
         else {
             Write-Log "Unable to query initial boot time; proceeding without reboot detection." -Level Warning
@@ -378,11 +385,30 @@ function Invoke-DomainControllerPostConfig {
                 $currentBootResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $bootTimeScript -ErrorAction SilentlyContinue
                 $currentBootTime = $null
                 if ($currentBootResult -and $currentBootResult.Value[0].Message) {
-                    $currentBootTime = ($currentBootResult.Value[0].Message).Trim()
+                    try {
+                        $currentBootTime = [DateTime]::Parse(($currentBootResult.Value[0].Message).Trim())
+                    }
+                    catch {
+                        Write-Log "Failed to parse current boot time; raw: $($currentBootResult.Value[0].Message)" -Level Warning
+                    }
+                }
+                else {
+                    # During reboot the Run Command often fails; treat this transient failure as reboot window
+                    $rebootWindowObserved = $true
                 }
 
                 if ($initialBootTime -and $currentBootTime -and ($currentBootTime -ne $initialBootTime)) {
                     Write-Log "VM reboot detected (boot time changed)!" -Level Success
+                    $rebootDetected = $true
+                }
+                elseif ($rebootWindowObserved -and $currentBootTime) {
+                    # We observed a failure (likely reboot), and now boot time is available again; mark reboot detected
+                    if ($initialBootTime -and ($currentBootTime -ne $initialBootTime)) {
+                        Write-Log "VM reboot detected after transient unavailability!" -Level Success
+                    }
+                    else {
+                        Write-Log "VM likely rebooted (transient unavailability observed)." -Level Success
+                    }
                     $rebootDetected = $true
                 }
 
@@ -415,7 +441,7 @@ function Invoke-DomainControllerPostConfig {
         Write-Log "Running AD post-configuration script via Run Command..."
         
         $postConfigScript = Get-Content (Join-Path $scriptDir 'Configure-ADPostPromotion.ps1') -Raw
-        $password = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($ServiceAccountPassword))
+        $password = [System.Net.NetworkCredential]::new('', $ServiceAccountPassword).Password
 
         $result = Invoke-AzVMRunCommand `
             -ResourceGroupName $ResourceGroupName `
@@ -473,11 +499,12 @@ try {
             Write-Log "VmAdminPassword not provided; generating a strong random password" -Level Warning
             $VmAdminPassword = New-RandomPassword -Length 24
         }
+        # Pass SecureString for secure Bicep parameters (dynamic parameter binding expects SecureString)
         $additionalParams['vmAdminPassword'] = $VmAdminPassword
 
         # Service account username/password: allow overrides, else use default name and auto-generate password
         if ($PSBoundParameters.ContainsKey('ServiceAccountUsername') -and [string]::IsNullOrWhiteSpace($ServiceAccountUsername) -eq $false) {
-            # Bicep marks adServiceAccountUsername as secure; we pass provided value
+            # Convert to SecureString as Bicep marks username secure
             $additionalParams['adServiceAccountUsername'] = (ConvertTo-SecureString -String $ServiceAccountUsername -AsPlainText -Force)
         }
 
@@ -485,6 +512,7 @@ try {
             Write-Log "ServiceAccountPassword not provided; generating a strong random password" -Level Warning
             $ServiceAccountPassword = New-RandomPassword -Length 24
         }
+        # Pass SecureString for secure Bicep parameter
         $additionalParams['serviceAccountPassword'] = $ServiceAccountPassword
     }
 

@@ -45,9 +45,10 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$ServiceAccountName = 'svc-functionapp',
 
+    # Accept plain text (Run Command cannot pass SecureString reliably); convert to SecureString in-script
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [securestring]$ServiceAccountPassword
+    [string]$ServiceAccountPassword
 )
 
 Set-StrictMode -Version Latest
@@ -72,23 +73,21 @@ function Write-Log {
         [string]$Level = 'Information'
     )
 
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        $Message = '(no message)'
+    }
+
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $logMessage = "[$timestamp] [$Level] $Message"
-    
-    # Write to console
+
+    # Unified console output (avoid binding errors on empty messages)
     switch ($Level) {
-        'Information' { Write-Information -MessageData $logMessage -InformationAction Continue }
-        'Warning' { Write-Warning -Message $Message }
-        'Error' { Write-Error -Message $Message }
+        'Information' { Write-Host $logMessage }
+        'Warning' { Write-Host $logMessage }
+        'Error' { Write-Host $logMessage }
     }
-    
-    # Write to file
-    try {
-        Add-Content -Path $script:logFile -Value $logMessage -ErrorAction SilentlyContinue
-    }
-    catch {
-        # Silently fail if we can't write to log file
-    }
+
+    try { Add-Content -Path $script:logFile -Value $logMessage -ErrorAction SilentlyContinue } catch {}
 }
 
 try {
@@ -104,7 +103,8 @@ try {
             Get-ADDomain -ErrorAction Stop | Out-Null
             Write-Log "AD Web Services is available"
             break
-        } catch {
+        }
+        catch {
             Start-Sleep -Seconds 10
             $elapsed += 10
             Write-Log "Waiting for AD Web Services... ($elapsed/$timeout seconds)" -Level Warning
@@ -123,25 +123,29 @@ try {
     try {
         Get-ADOrganizationalUnit -Identity $ouPath -ErrorAction Stop | Out-Null
         Write-Log "OU already exists: $ouPath" -Level Warning
-    } catch {
+    }
+    catch {
         if ($PSCmdlet.ShouldProcess($ouPath, "Create Organizational Unit")) {
             New-ADOrganizationalUnit -Name 'FunctionAppResources' -Path $domainDN -ProtectedFromAccidentalDeletion $true
             Write-Log "OU created successfully"
         }
     }
 
+    # Convert incoming plain password to SecureString
+    $serviceAccountPasswordSecure = ConvertTo-SecureString -String $ServiceAccountPassword -AsPlainText -Force
+
     # Create service account for function app
     Write-Log "Creating service account: $ServiceAccountName"
     $serviceAccountParams = @{
-        Name                  = $ServiceAccountName
-        SamAccountName        = $ServiceAccountName
-        UserPrincipalName     = "$ServiceAccountName@$DomainName"
-        AccountPassword       = $ServiceAccountPassword
-        Enabled               = $true
-        PasswordNeverExpires  = $true
-        CannotChangePassword  = $true
-        Path                  = $ouPath
-        Description           = 'Service account for Azure Function App password reset operations'
+        Name                 = $ServiceAccountName
+        SamAccountName       = $ServiceAccountName
+        UserPrincipalName    = "$ServiceAccountName@$DomainName"
+        AccountPassword      = $serviceAccountPasswordSecure
+        Enabled              = $true
+        PasswordNeverExpires = $true
+        CannotChangePassword = $true
+        Path                 = $ouPath
+        Description          = 'Service account for Azure Function App password reset operations'
     }
 
     try {
@@ -150,10 +154,11 @@ try {
         
         # Update password if account exists
         if ($PSCmdlet.ShouldProcess($ServiceAccountName, "Update password")) {
-            Set-ADAccountPassword -Identity $ServiceAccountName -NewPassword $ServiceAccountPassword -Reset
+            Set-ADAccountPassword -Identity $ServiceAccountName -NewPassword $serviceAccountPasswordSecure -Reset
             Write-Log "Service account password updated"
         }
-    } catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+    }
+    catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
         if ($PSCmdlet.ShouldProcess($ServiceAccountName, "Create service account")) {
             New-ADUser @serviceAccountParams
             Write-Log "Service account created successfully"
@@ -198,21 +203,22 @@ try {
     foreach ($user in $testUsers) {
         $initialPassword = ConvertTo-SecureString 'InitialP@ss123!' -AsPlainText -Force
         $userParams = @{
-            Name                 = $user.Name
-            SamAccountName       = $user.Name
-            UserPrincipalName    = "$($user.Name)@$DomainName"
-            DisplayName          = $user.DisplayName
-            AccountPassword      = $initialPassword
-            Enabled              = $true
+            Name                  = $user.Name
+            SamAccountName        = $user.Name
+            UserPrincipalName     = "$($user.Name)@$DomainName"
+            DisplayName           = $user.DisplayName
+            AccountPassword       = $initialPassword
+            Enabled               = $true
             ChangePasswordAtLogon = $false
-            Path                 = $ouPath
-            Description          = $user.Description
+            Path                  = $ouPath
+            Description           = $user.Description
         }
 
         try {
             Get-ADUser -Identity $user.Name -ErrorAction Stop | Out-Null
             Write-Log "User already exists: $($user.Name)" -Level Warning
-        } catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+        }
+        catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
             if ($PSCmdlet.ShouldProcess($user.Name, "Create test user")) {
                 New-ADUser @userParams
                 Write-Log "Test user created: $($user.Name)"
@@ -227,7 +233,8 @@ try {
     Write-Log "Test User Initial Password: InitialP@ss123!"
     Write-Log "Log file: $logFile"
 
-} catch {
+}
+catch {
     Write-Log "AD configuration failed: $_" -Level Error
     Write-Log "Exception Type: $($_.Exception.GetType().FullName)" -Level Error
     Write-Log "Stack Trace: $($_.Exception.StackTrace)" -Level Error

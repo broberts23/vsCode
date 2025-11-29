@@ -45,7 +45,7 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$SafeModeAdminPassword
+    [string]$SafeModeAdminPasswordBase64
 )
 
 Set-StrictMode -Version Latest
@@ -139,44 +139,110 @@ try {
         Write-Log "Server is already a domain controller; skipping promotion" -Level Warning
     }
     else {
-        # Promote to domain controller
-        Write-Log "Promoting server to domain controller for domain: $DomainName"
-        Write-Log "Database Path: $databasePath"
-        Write-Log "Log Path: $logPath"
-        Write-Log "Sysvol Path: $sysvolPath"
-        Write-Log "Promotion starting at: $(Get-Date)"
-        
-        if ($PSCmdlet.ShouldProcess($env:COMPUTERNAME, "Promote to Domain Controller for $DomainName")) {
-            Import-Module ADDSDeployment
-            # Convert plain text to SecureString locally to avoid CSE argument parsing issues
-            $dsrmSecure = ConvertTo-SecureString -String $SafeModeAdminPassword -AsPlainText -Force
-            
-            Write-Log "Invoking Install-ADDSForest..."
-            try {
-                # Note: Using -NoRebootOnCompletion:$false to let Install-ADDSForest handle the reboot
-                $promotionResult = Install-ADDSForest `
-                    -DomainName $DomainName `
-                    -DomainNetbiosName $DomainNetBiosName `
-                    -SafeModeAdministratorPassword $dsrmSecure `
-                    -DatabasePath $databasePath `
-                    -LogPath $logPath `
-                    -SysvolPath $sysvolPath `
-                    -InstallDns:$true `
-                    -CreateDnsDelegation:$false `
-                    -NoRebootOnCompletion:$false `
-                    -Force:$true `
-                    -ErrorAction Stop
-
-                Write-Log "Install-ADDSForest completed successfully"
-                Write-Log "Promotion result: $($promotionResult | ConvertTo-Json -Depth 2)"
-                Write-Log "System will reboot now at: $(Get-Date)"
-            }
-            catch {
-                Write-Log "Install-ADDSForest failed: $($_.Exception.Message)" -Level Error
-                Write-Log "Full error: $($_ | Out-String)" -Level Error
-                throw
-            }
+        # Prepare directory paths explicitly to avoid delays during promotion
+        foreach ($p in @($databasePath, $logPath, $sysvolPath)) {
+            try { if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null } } catch { }
         }
+
+        # Non-blocking promotion: prefer detached PowerShell process over scheduled task
+        Write-Log "Creating detached promotion script process (non-blocking)" -Level Information
+        $promoScriptPath = Join-Path $logDir 'Promote-ADDSForest.ps1'
+        $promoLogPath = Join-Path $logDir 'Promote-ADDSForest-Progress.log'
+        $transcriptPath = Join-Path $logDir "Promote-ADDSForest-Transcript-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+
+        # Build promotion script as single-quoted here-string to avoid premature interpolation
+        $promotionScript = @'
+Function Write-ProgressLog {
+    param([string]$Message)
+    $ts = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    "[$ts] [Information] $Message" | Tee-Object -FilePath "${promoLogPath}" -Append | Out-Null
+}
+Write-ProgressLog 'Promotion script launched'
+try {
+    Import-Module ADDSDeployment -ErrorAction Stop
+}
+catch {
+    # Fallback: import by explicit path (Windows PowerShell module location)
+    $modulePath = Join-Path $env:WinDir 'System32\WindowsPowerShell\v1.0\Modules\ADDSDeployment'
+    if (Test-Path $modulePath) {
+        Import-Module $modulePath -ErrorAction Stop
+    }
+    else {
+        Write-ProgressLog "ADDSDeployment module not found at $modulePath"
+        throw "ADDSDeployment module not found at $modulePath"
+    }
+}
+Write-ProgressLog 'Starting transcript'
+Start-Transcript -Path "${transcriptPath}" -Force | Out-Null
+try {
+    Write-ProgressLog 'Decoding DSRM password and converting to SecureString'
+    $plain = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("${SafeModeAdminPasswordBase64}"))
+    $dsrmSecure = ConvertTo-SecureString -String $plain -AsPlainText -Force
+    Write-ProgressLog 'Invoking Install-ADDSForest'
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $result = Install-ADDSForest -DomainName "${DomainName}" -DomainNetbiosName "${DomainNetBiosName}" -SafeModeAdministratorPassword $dsrmSecure -DatabasePath "${databasePath}" -LogPath "${logPath}" -SysvolPath "${sysvolPath}" -InstallDns:$true -CreateDnsDelegation:$false -NoRebootOnCompletion:$false -Force:$true -ErrorAction Stop -Verbose 4>&1
+    $sw.Stop()
+    Write-ProgressLog ("Install-ADDSForest returned after " + $sw.Elapsed.ToString())
+    $json = ($result | ConvertTo-Json -Depth 4)
+    Add-Content -Path "${promoLogPath}" -Value "RESULT_JSON_START"
+    Add-Content -Path "${promoLogPath}" -Value $json
+    Add-Content -Path "${promoLogPath}" -Value "RESULT_JSON_END"
+    Write-ProgressLog 'Promotion succeeded; system will reboot shortly'
+}
+catch {
+    Write-ProgressLog ("Promotion failed: " + $_.Exception.Message)
+    Write-ProgressLog ("Full error: " + ($_ | Out-String))
+    exit 1
+}
+Stop-Transcript | Out-Null
+'@
+
+        # Replace template tokens with concrete values while preserving runtime variables like $ts and $sw
+        $promotionScript = $promotionScript.Replace('${promoLogPath}', $promoLogPath)
+        $promotionScript = $promotionScript.Replace('${transcriptPath}', $transcriptPath)
+        $promotionScript = $promotionScript.Replace('${SafeModeAdminPasswordBase64}', $SafeModeAdminPasswordBase64)
+        $promotionScript = $promotionScript.Replace('${DomainName}', $DomainName)
+        $promotionScript = $promotionScript.Replace('${DomainNetBiosName}', $DomainNetBiosName)
+        $promotionScript = $promotionScript.Replace('${databasePath}', $databasePath)
+        $promotionScript = $promotionScript.Replace('${logPath}', $logPath)
+        $promotionScript = $promotionScript.Replace('${sysvolPath}', $sysvolPath)
+
+        try {
+            Set-Content -Path $promoScriptPath -Value $promotionScript -Force -Encoding UTF8
+            Write-Log "Promotion script written to $promoScriptPath" -Level Information
+        }
+        catch {
+            Write-Log "Failed to write promotion script: $($_.Exception.Message)" -Level Error
+            throw
+        }
+
+        # Launch detached PowerShell 5.1 process to run promotion script
+        $pwshPath = Join-Path $env:WinDir 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path $pwshPath)) { $pwshPath = 'PowerShell.exe' }
+        Write-Log "Starting detached PowerShell process: $pwshPath -File $promoScriptPath" -Level Information
+        try {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $pwshPath
+            $psi.Arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$promoScriptPath`""
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $proc = [System.Diagnostics.Process]::Start($psi)
+            Write-Log "Detached process started (Id=$($proc.Id))" -Level Information
+        }
+        catch {
+            Write-Log "Failed to start detached process: $($_.Exception.Message)" -Level Error
+            throw
+        }
+        # Brief wait and check for progress log creation
+        Start-Sleep -Seconds 5
+        if (Test-Path $promoLogPath) {
+            Write-Log "Progress log created: $promoLogPath" -Level Information
+        }
+        else {
+            Write-Log "Progress log not yet created; promotion script may still be initializing" -Level Warning
+        }
+        Write-Log "Non-blocking promotion initiated via detached process; Run Command can now return" -Level Information
     }
 
     Write-Log "AD DS bootstrap completed successfully (promotion phase only)"

@@ -166,8 +166,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
     }
     tenantId: subscription().tenantId
     enableRbacAuthorization: true
-    // enableSoftDelete: false
-    // enablePurgeProtection: false
+    enableSoftDelete: false
     networkAcls: {
       defaultAction: 'Allow'
       bypass: 'AzureServices'
@@ -343,6 +342,13 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = if (deployDomainC
   properties: {
     hardwareProfile: {
       vmSize: 'Standard_D2s_v3'
+    }
+    // Enable Spot pricing for cost savings
+    priority: 'Spot'
+    evictionPolicy: 'Deallocate'
+    billingProfile: {
+      // -1 means pay up to the on-demand price (no cap)
+      maxPrice: -1
     }
     osProfile: {
       computerName: take(dcVmName, 15)
