@@ -1,4 +1,4 @@
-# The Story Behind Our Active Directory Infrastructure: From Bicep to PowerShell
+# Zero-to-DC: Building a Disposable Active Directory Lab in Azure with Bicep and PowerShell
 
 ## Introduction
 
@@ -17,18 +17,21 @@ flowchart TB
     subgraph Azure["Azure Resource Group"]
         subgraph VNet["Virtual Network (10.0.0.0/16)"]
             subgraph DCSub["DC Subnet (10.0.1.0/24)"]
-                DC["Domain Controller VM\n(Windows Server 2022)"]
+                DC["Domain Controller VM
+                (Windows Server 2022)"]
             end
             subgraph FuncSub["Function App Subnet (10.0.2.0/24)"]
-                FA["Function App\n(PowerShell 7.4)"]
+                FA["Function App
+                (PowerShell 7.4)"]
             end
         end
-        KV["Key Vault\n(Secrets)"]
-        LA["Log Analytics\n+ App Insights"]
+        KV["Key Vault
+        (Secrets)"]
+        LA["Log Analytics
+        + App Insights"]
         ST["Storage Account"]
     end
 
-    DC -->|AD DS| DCSub
     FA -->|Managed Identity| KV
     FA -->|LDAP/Password Reset| DC
     FA --> LA
