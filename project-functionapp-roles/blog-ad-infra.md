@@ -4,7 +4,7 @@
 
 This all started from a very practical problem: I wanted a **disposable, repeatable Active Directory lab** I could spin up for demos, tutorials, and future blog posts (stay tuned). I needed something I could tear down and rebuild without fear—no hand-configured servers, no “click-next-until-it-works” wizards.
 
-The goal was simple: run one command, get a fully functional AD domain in Azure; run another, and everything disappears again. Under the hood, though, that meant solving some surprisingly gnarly problems: secure credential handling, domain controller promotion across reboots, post-configuration of service accounts and test users, and enough logging that I could actually debug it at 2 a.m. when something went sideways.
+The goal was simple: run one command, get a fully functional AD domain in Azure; run another, and everything disappears again. Under the hood, though, that meant solving some surprisingly gnarly problems: secure credential handling, domain controller promotion across reboots, post-configuration of service accounts and test users, and enough logging that I could actually debug it at 2 a.m. when something went sideways. 🤣
 
 This post walks through how that infrastructure works: the **Bicep template** that defines the environment, the **`Deploy-Complete.ps1`** script that orchestrates it, and the **PowerShell that runs inside the VM** to actually stand up and configure the domain controller.
 
@@ -237,9 +237,9 @@ When `Get-ADDomain` finally succeeds, I know that AD Web Services are up and the
 
 ## Post-Configuration: Making AD Useful
 
-With the domain up, I run another script, `scripts/Configure-ADPostPromotion.ps1`, via Run Command. This is where the environment turns from “just a domain” into something that’s actually useful for the password reset API.
+With the domain up, I run another script, `scripts/Configure-ADPostPromotion.ps1`, via Run Command. This is where the environment turns from “just a domain” into something that’s actually useful.
 
-The script waits for AD Web Services to be available, then creates an **Organizational Unit** and a **service account** that will later be used by the function app. It also creates a handful of test users so you can validate the end‑to‑end reset flow.
+The script waits for AD Web Services to be available, then creates an **Organizational Unit** and a **service account** that will later be used by a function app. It also creates a handful of test users so you can validate the end‑to‑end reset flow.
 
 The heart of the service account creation looks like this:
 
@@ -293,7 +293,7 @@ I wasted hours watching the VM's `PowerState` flip to `running` and assuming AD 
 
 ### Log Everything to Disk
 
-This sounds obvious, but it saved me more than once. Every script writes progress and errors to `C:\temp`. When something breaks at 2 a.m., I can RDP in, open the logs, and see exactly where the process stopped. Transcripts, timestamps, and descriptive messages—don't skip them.
+This sounds obvious, but it saved me more than once. Every script writes progress and errors to `C:\temp`. When something breaks, I can RDP in, open the logs, and see exactly where the process stopped. Transcripts, timestamps, and descriptive messages—don't skip them.
 
 ## The End Result: Automated, Auditable, and Secure
 
@@ -309,14 +309,11 @@ If you want to explore or reuse this setup, here’s the key structure of the re
 project-functionapp-roles/
 	infra/
 		main.bicep                  # All Azure resources, including the domain controller VM
+        parameters.dev.json         # Parameter file for deployments
 	scripts/
 		Deploy-Complete.ps1         # Orchestrates deployment, promotion, and post-config
 		Bootstrap-ADDSDomain.ps1    # Runs inside the VM to install AD DS and promote to DC
 		Configure-ADPostPromotion.ps1 # Creates OU, service account, and test users
-	src/
-		WebApi/                     # Function app code that talks to AD (covered in the other blog)
-	blog.md                       # API-focused blog (JWT, password reset endpoint)
-	blog-ad-infra.md              # This post – the AD infra story
 ```
 
 You can clone the repo, tweak the parameters, and use it as your own disposable AD lab.
@@ -342,7 +339,7 @@ At the end of the day, this whole setup is about confidence. I can spin up a ful
 
 If you want to follow along or adapt it for your own scenarios, all of the code in this post lives in my GitHub repository:
 
-- GitHub repo: https://github.com/broberts23/vsCode (project: `project-functionapp-roles`)
+- GitHub repo: https://github.com/broberts23/vsCode/project-functionapp-roles
 
 Clone it, customize the parameters, and you’ve got your own disposable AD playground ready for experiments, demos, and (in future posts) the password reset API that sits on top of it.
 
