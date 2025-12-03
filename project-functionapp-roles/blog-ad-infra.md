@@ -307,13 +307,20 @@ If you want to explore or reuse this setup, here’s the key structure of the re
 
 ```text
 project-functionapp-roles/
+	FunctionApp/                  # Deployable function app code (ready to deploy as-is)
+		ResetUserPassword/          # Password reset function endpoint
+		host.json
+		profile.ps1
+		requirements.psd1
 	infra/
 		main.bicep                  # All Azure resources, including the domain controller VM
         parameters.dev.json         # Parameter file for deployments
 	scripts/
 		Deploy-Complete.ps1         # Orchestrates deployment, promotion, and post-config
+		Deploy-FunctionApp.ps1      # Deploys the function app code
 		Bootstrap-ADDSDomain.ps1    # Runs inside the VM to install AD DS and promote to DC
 		Configure-ADPostPromotion.ps1 # Creates OU, service account, and test users
+	tests/                        # Pester tests for the function app
 ```
 
 You can clone the repo, tweak the parameters, and use it as your own disposable AD lab.

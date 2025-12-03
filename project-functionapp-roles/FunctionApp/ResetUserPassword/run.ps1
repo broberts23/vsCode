@@ -34,7 +34,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Import helper module
-Import-Module (Join-Path $PSScriptRoot '../Modules/PasswordResetHelpers/PasswordResetHelpers.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'PasswordResetHelpers.psm1') -Force
 
 try {
     Write-Information "HTTP trigger function 'ResetUserPassword' processing request"

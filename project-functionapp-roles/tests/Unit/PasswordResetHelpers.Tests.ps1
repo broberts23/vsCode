@@ -16,7 +16,7 @@ using namespace System.Collections.Generic
 
 BeforeAll {
     # Import module
-    $modulePath = Join-Path $PSScriptRoot '../../Modules/PasswordResetHelpers/PasswordResetHelpers.psm1'
+    $modulePath = Join-Path $PSScriptRoot '../ResetUserPassword/PasswordResetHelpers.psm1'
     Import-Module $modulePath -Force
     
     # Mock AD cmdlets (not available in test environment)

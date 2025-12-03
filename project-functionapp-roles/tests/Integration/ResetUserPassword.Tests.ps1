@@ -25,7 +25,7 @@ BeforeAll {
     Write-Host "ProjectRoot set to: $script:TestProjectRoot" -ForegroundColor Cyan
     
     # Import required modules
-    $modulePath = Join-Path $script:TestProjectRoot 'Modules/PasswordResetHelpers/PasswordResetHelpers.psm1'
+    $modulePath = Join-Path $script:TestProjectRoot '../ResetUserPassword/PasswordResetHelpers.psm1'
     Write-Host "Loading module from: $modulePath" -ForegroundColor Cyan
     Import-Module $modulePath -Force
     

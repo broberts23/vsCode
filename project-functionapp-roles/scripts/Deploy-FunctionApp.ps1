@@ -155,56 +155,19 @@ function New-DeploymentPackage {
     
     Write-StatusMessage "Creating deployment package..." -Type Info
     
-    # Exclude test files and other unnecessary items
-    $excludePatterns = @(
-        '*.Tests.ps1'
-        'tests/*'
-        '.git/*'
-        '.vscode/*'
-        'infra/*'
-        'scripts/*'
-        '.gitignore'
-        '.funcignore'
-        'README.md'
-    )
+    # FunctionApp folder contains only deployable content, so package it directly
+    Write-StatusMessage "Creating zip archive from FunctionApp directory..." -Type Info
     
-    # Create temp directory for packaging
-    $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "funcapp-$(New-Guid)"
-    New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+    # Verify source path exists
+    if (-not (Test-Path $SourcePath)) {
+        throw "Source path not found: $SourcePath"
+    }
     
-    try {
-        # Copy files
-        Write-StatusMessage "Copying files to temp directory..." -Type Info
-        $itemsToCopy = @(
-            'host.json'
-            'profile.ps1'
-            'requirements.psd1'
-            'Modules'
-            'ResetUserPassword'
-        )
-        
-        foreach ($item in $itemsToCopy) {
-            $sourcePath = Join-Path $SourcePath $item
-            if (Test-Path $sourcePath) {
-                $destPath = Join-Path $tempDir $item
-                Copy-Item -Path $sourcePath -Destination $destPath -Recurse -Force
-                Write-Verbose "Copied: $item"
-            }
-        }
-        
-        # Create zip
-        Write-StatusMessage "Creating zip archive..." -Type Info
-        Compress-Archive -Path "$tempDir/*" -DestinationPath $OutputPath -Force
-        
-        Write-StatusMessage "Deployment package created: $OutputPath" -Type Success
-        return $OutputPath
-    }
-    finally {
-        # Cleanup temp directory
-        if (Test-Path $tempDir) {
-            Remove-Item -Path $tempDir -Recurse -Force
-        }
-    }
+    # Create zip from FunctionApp directory contents
+    Compress-Archive -Path "$SourcePath/*" -DestinationPath $OutputPath -Force
+    
+    Write-StatusMessage "Deployment package created: $OutputPath" -Type Success
+    return $OutputPath
 }
 
 function Publish-FunctionAppCode {
@@ -281,8 +244,8 @@ try {
     
     # Determine source path
     if (-not $SourcePath) {
-        $scriptRoot = Split-Path -Parent $PSScriptRoot
-        $SourcePath = $scriptRoot
+        $projectRoot = Split-Path -Parent $PSScriptRoot
+        $SourcePath = Join-Path $projectRoot 'FunctionApp'
     }
     
     Write-StatusMessage "Source Path: $SourcePath" -Type Info
@@ -300,7 +263,8 @@ try {
     
     # Run tests
     if ($RunTests) {
-        $testsPass = Invoke-PesterTests -ProjectRoot $SourcePath
+        $projectRoot = Split-Path -Parent $PSScriptRoot
+        $testsPass = Invoke-PesterTests -ProjectRoot $projectRoot
         if (-not $testsPass) {
             throw 'Tests failed. Deployment aborted.'
         }
