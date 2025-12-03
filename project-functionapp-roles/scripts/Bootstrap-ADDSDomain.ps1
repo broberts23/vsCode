@@ -25,7 +25,6 @@
     .\Bootstrap-ADDSDomain.ps1 -DomainName 'contoso.local' -DomainNetBiosName 'CONTOSO' -SafeModeAdminPassword (ConvertTo-SecureString 'P@ssw0rd123!' -AsPlainText -Force)
 
 .NOTES
-    Author: GitHub Copilot
     Separation of concerns: Promotion only. Post provisioning: Configure-ADPostPromotion.ps1
     Requires: Windows PowerShell 5.1 or later (default on Windows Server 2022). Do NOT require PowerShell 7.x when run via Custom Script Extension.
 

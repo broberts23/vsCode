@@ -24,7 +24,6 @@
     .\Configure-ADPostPromotion.ps1 -DomainName 'contoso.local' -ServiceAccountPassword (ConvertTo-SecureString 'SvcP@ss123!' -AsPlainText -Force)
 
 .NOTES
-    Author: GitHub Copilot
     Requires: Windows PowerShell 5.1 or later (default shell on Windows Server). Compatible with Run Command and Custom Script Extension.
     This script must be run on the domain controller after promotion.
 
@@ -48,7 +47,15 @@ param(
     # Accept plain text (Run Command cannot pass SecureString reliably); convert to SecureString in-script
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$ServiceAccountPassword
+    [string]$ServiceAccountPassword,
+    
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$LdapsCertificatePfxBase64,
+    
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$LdapsCertificatePfxPassword
 )
 
 Set-StrictMode -Version Latest
@@ -113,6 +120,73 @@ try {
 
     if ($elapsed -ge $timeout) {
         throw "Timed out waiting for AD Web Services"
+    }
+
+    # Install LDAPS certificate if provided
+    if ($LdapsCertificatePfxBase64 -and $LdapsCertificatePfxPassword) {
+        Write-Log "Installing LDAPS certificate..."
+        
+        try {
+            # Decode base64 PFX
+            $pfxBytes = [Convert]::FromBase64String($LdapsCertificatePfxBase64)
+            $pfxPath = Join-Path $logDir 'ldaps-cert.pfx'
+            [System.IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+            
+            # Convert password to SecureString
+            $pfxPasswordSecure = ConvertTo-SecureString -String $LdapsCertificatePfxPassword -AsPlainText -Force
+            
+            # Import certificate to Local Machine Personal store
+            # Reference: https://learn.microsoft.com/troubleshoot/windows-server/active-directory/enable-ldap-over-ssl-3rd-certification-authority
+            $cert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation 'Cert:\LocalMachine\My' -Password $pfxPasswordSecure
+            Write-Log "LDAPS certificate imported: $($cert.Thumbprint)" -Level Information
+            
+            # Clean up temp file
+            Remove-Item -Path $pfxPath -Force -ErrorAction SilentlyContinue
+            
+            # Configure Windows Firewall for LDAPS (port 636)
+            Write-Log "Configuring firewall for LDAPS (port 636)..."
+            $firewallRule = Get-NetFirewallRule -DisplayName 'LDAPS (TCP-In)' -ErrorAction SilentlyContinue
+            if (-not $firewallRule) {
+                New-NetFirewallRule `
+                    -DisplayName 'LDAPS (TCP-In)' `
+                    -Direction Inbound `
+                    -Protocol TCP `
+                    -LocalPort 636 `
+                    -Action Allow `
+                    -Profile Any `
+                    -Description 'Allow inbound LDAPS (LDAP over SSL) traffic on port 636'
+                Write-Log "Firewall rule created for LDAPS"
+            }
+            else {
+                Write-Log "Firewall rule for LDAPS already exists"
+            }
+            
+            # Test LDAPS listener (AD DS automatically enables LDAPS when valid cert is present)
+            Write-Log "Waiting for LDAPS to become available..."
+            Start-Sleep -Seconds 5
+            
+            try {
+                $ldapsTest = Test-NetConnection -ComputerName localhost -Port 636 -WarningAction SilentlyContinue
+                if ($ldapsTest.TcpTestSucceeded) {
+                    Write-Log "LDAPS is listening on port 636" -Level Information
+                }
+                else {
+                    Write-Log "LDAPS port test failed - may require DC restart" -Level Warning
+                }
+            }
+            catch {
+                Write-Log "Unable to test LDAPS port: $_" -Level Warning
+            }
+            
+            Write-Log "LDAPS configuration completed successfully" -Level Information
+        }
+        catch {
+            Write-Log "Failed to install LDAPS certificate: $_" -Level Error
+            throw
+        }
+    }
+    else {
+        Write-Log "No LDAPS certificate provided - skipping LDAPS configuration" -Level Warning
     }
 
     # Create Organizational Unit for function app resources

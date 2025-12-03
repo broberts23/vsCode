@@ -37,7 +37,6 @@
     .\Deploy-Complete.ps1 -Environment dev -ResourceGroupName rg-pwdreset-dev -Location eastus -DeployDomainController -VmAdminPassword (ConvertTo-SecureString 'P@ssw0rd123!' -AsPlainText -Force) -ServiceAccountPassword (ConvertTo-SecureString 'SvcP@ss123!' -AsPlainText -Force)
 
 .NOTES
-    Author: GitHub Copilot
     Requires: Az PowerShell module, Bicep CLI
 
 .LINK
@@ -180,6 +179,166 @@ function New-RandomPassword {
     }
 
     return (ConvertTo-SecureString -String $passwordPlain -AsPlainText -Force)
+}
+
+function New-LdapsCertificate {
+    <#
+    .SYNOPSIS
+        Generates a self-signed certificate for LDAPS
+    .DESCRIPTION
+        Creates a self-signed X.509 certificate suitable for LDAPS on a domain controller.
+        Returns both PFX (with private key) and CER (public key only) as base64 strings.
+    .PARAMETER DomainControllerFqdn
+        The fully qualified domain name of the domain controller
+    .PARAMETER DomainName
+        The Active Directory domain name
+    .OUTPUTS
+        Hashtable with PfxBase64, CerBase64, and Thumbprint
+    .LINK
+        https://learn.microsoft.com/powershell/module/pki/new-selfsignedcertificate?view=windowsserver2022-ps
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$DomainControllerFqdn,
+        
+        [Parameter(Mandatory = $true)]
+        [string]$DomainName
+    )
+    
+    Write-Log "Generating self-signed LDAPS certificate for: $DomainControllerFqdn"
+    
+    try {
+        # Generate a random password for PFX export
+        $pfxPassword = New-RandomPassword -Length 24
+        $pfxPasswordPlain = [System.Net.NetworkCredential]::new('', $pfxPassword).Password
+        
+        # Create certificate with proper settings for LDAPS
+        # Reference: https://learn.microsoft.com/troubleshoot/windows-server/active-directory/enable-ldap-over-ssl-3rd-certification-authority
+        $certParams = @{
+            Subject           = "CN=$DomainControllerFqdn"
+            DnsName           = @($DomainControllerFqdn, "*.$DomainName")
+            KeyAlgorithm      = 'RSA'
+            KeyLength         = 2048
+            HashAlgorithm     = 'SHA256'
+            NotAfter          = (Get-Date).AddYears(2)
+            KeyUsage          = 'DigitalSignature', 'KeyEncipherment'
+            TextExtension     = @("2.5.29.37={text}1.3.6.1.5.5.7.3.1")  # Server Authentication EKU
+            CertStoreLocation = 'Cert:\CurrentUser\My'
+            Provider          = 'Microsoft RSA SChannel Cryptographic Provider'
+        }
+        
+        $cert = New-SelfSignedCertificate @certParams
+        Write-Log "Certificate generated with thumbprint: $($cert.Thumbprint)" -Level Success
+        
+        # Export as PFX (with private key) for domain controller
+        $pfxPath = [System.IO.Path]::GetTempFileName() + '.pfx'
+        $null = Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $pfxPassword
+        $pfxBytes = [System.IO.File]::ReadAllBytes($pfxPath)
+        $pfxBase64 = [Convert]::ToBase64String($pfxBytes)
+        
+        # Export as CER (public key only) for Function App trust
+        $cerPath = [System.IO.Path]::GetTempFileName() + '.cer'
+        $null = Export-Certificate -Cert $cert -FilePath $cerPath -Type CERT
+        $cerBytes = [System.IO.File]::ReadAllBytes($cerPath)
+        $cerBase64 = [Convert]::ToBase64String($cerBytes)
+        
+        # Clean up temp files and certificate from store
+        Remove-Item -Path $pfxPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $cerPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force -ErrorAction SilentlyContinue
+        
+        Write-Log "Certificate exported successfully" -Level Success
+        
+        return @{
+            PfxBase64   = $pfxBase64
+            PfxPassword = $pfxPasswordPlain
+            CerBase64   = $cerBase64
+            Thumbprint  = $cert.Thumbprint
+            Subject     = $cert.Subject
+            NotAfter    = $cert.NotAfter
+        }
+    }
+    catch {
+        Write-Log "Failed to generate LDAPS certificate: $_" -Level Error
+        throw
+    }
+}
+
+function Set-LdapsCertificateInKeyVault {
+    <#
+    .SYNOPSIS
+        Stores LDAPS certificates in Azure Key Vault
+    .DESCRIPTION
+        Stores both the PFX (with private key) and CER (public key) certificates in Key Vault as secrets
+    .PARAMETER KeyVaultName
+        Name of the Key Vault
+    .PARAMETER CertificateData
+        Hashtable from New-LdapsCertificate containing PfxBase64, CerBase64, PfxPassword
+    .LINK
+        https://learn.microsoft.com/powershell/module/az.keyvault/set-azkeyvaultsecret?view=azps-latest
+    #>
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$KeyVaultName,
+        
+        [Parameter(Mandatory = $true)]
+        [hashtable]$CertificateData
+    )
+    
+    Write-Log "Storing LDAPS certificates in Key Vault: $KeyVaultName"
+    
+    try {
+        # Store PFX certificate with private key (for DC installation)
+        if ($PSCmdlet.ShouldProcess("$KeyVaultName/LDAPS-Certificate-PFX", "Store PFX certificate")) {
+            $pfxSecret = ConvertTo-SecureString -String $CertificateData.PfxBase64 -AsPlainText -Force
+            $null = Set-AzKeyVaultSecret `
+                -VaultName $KeyVaultName `
+                -Name 'LDAPS-Certificate-PFX' `
+                -SecretValue $pfxSecret `
+                -ContentType 'application/x-pkcs12' `
+                -Tag @{
+                Thumbprint = $CertificateData.Thumbprint
+                Subject    = $CertificateData.Subject
+                NotAfter   = $CertificateData.NotAfter.ToString('yyyy-MM-dd')
+            }
+            Write-Log "  Stored PFX certificate secret" -Level Success
+        }
+        
+        # Store PFX password (for DC installation)
+        if ($PSCmdlet.ShouldProcess("$KeyVaultName/LDAPS-Certificate-PFX-Password", "Store PFX password")) {
+            $pfxPasswordSecret = ConvertTo-SecureString -String $CertificateData.PfxPassword -AsPlainText -Force
+            $null = Set-AzKeyVaultSecret `
+                -VaultName $KeyVaultName `
+                -Name 'LDAPS-Certificate-PFX-Password' `
+                -SecretValue $pfxPasswordSecret
+            Write-Log "  Stored PFX password secret" -Level Success
+        }
+        
+        # Store CER certificate (public key only, for Function App trust)
+        if ($PSCmdlet.ShouldProcess("$KeyVaultName/LDAPS-Certificate-CER", "Store CER certificate")) {
+            $cerSecret = ConvertTo-SecureString -String $CertificateData.CerBase64 -AsPlainText -Force
+            $null = Set-AzKeyVaultSecret `
+                -VaultName $KeyVaultName `
+                -Name 'LDAPS-Certificate-CER' `
+                -SecretValue $cerSecret `
+                -ContentType 'application/x-x509-ca-cert' `
+                -Tag @{
+                Thumbprint = $CertificateData.Thumbprint
+                Subject    = $CertificateData.Subject
+                NotAfter   = $CertificateData.NotAfter.ToString('yyyy-MM-dd')
+            }
+            Write-Log "  Stored CER certificate secret" -Level Success
+        }
+        
+        Write-Log "LDAPS certificates stored successfully in Key Vault" -Level Success
+    }
+    catch {
+        Write-Log "Failed to store LDAPS certificates in Key Vault: $_" -Level Error
+        throw
+    }
 }
 
 function New-ResourceGroupIfNotExists {
@@ -348,7 +507,10 @@ function Invoke-DomainControllerPostConfig {
         [securestring]$ServiceAccountPassword,
 
         [Parameter(Mandatory = $false)]
-        [string]$ServiceAccountName
+        [string]$ServiceAccountName,
+        
+        [Parameter(Mandatory = $false)]
+        [hashtable]$LdapsCertificate
     )
 
     if ($PSCmdlet.ShouldProcess($VmName, "Configure AD post-promotion")) {
@@ -443,16 +605,24 @@ function Invoke-DomainControllerPostConfig {
         $postConfigScript = Get-Content (Join-Path $scriptDir 'Configure-ADPostPromotion.ps1') -Raw
         $password = [System.Net.NetworkCredential]::new('', $ServiceAccountPassword).Password
 
+        $runCommandParams = @{
+            DomainName             = $DomainName
+            ServiceAccountPassword = $password
+            ServiceAccountName     = $ServiceAccountName
+        }
+        
+        # Add LDAPS certificate if provided
+        if ($LdapsCertificate) {
+            $runCommandParams['LdapsCertificatePfxBase64'] = $LdapsCertificate.PfxBase64
+            $runCommandParams['LdapsCertificatePfxPassword'] = $LdapsCertificate.PfxPassword
+        }
+
         $result = Invoke-AzVMRunCommand `
             -ResourceGroupName $ResourceGroupName `
             -VMName $VmName `
             -CommandId 'RunPowerShellScript' `
             -ScriptString $postConfigScript `
-            -Parameter @{
-            DomainName             = $DomainName
-            ServiceAccountPassword = $password
-            ServiceAccountName     = $ServiceAccountName
-        }
+            -Parameter $runCommandParams
 
         if ($result.Value[0].Message -like '*completed successfully*') {
             Write-Log "AD post-configuration completed successfully" -Level Success
@@ -486,9 +656,20 @@ try {
 
     # Prepare deployment parameters
     $additionalParams = @{}
+    $ldapsCertificate = $null
 
     if ($DeployDomainController) {
         $additionalParams['deployDomainController'] = $true
+        
+        # Generate LDAPS certificate before deployment
+        $parameters = Get-Content $parametersFile | ConvertFrom-Json
+        $domainName = $parameters.parameters.domainName.value
+        $baseName = $parameters.parameters.baseName.value
+        $dcVmName = "$baseName-dc-$Environment"
+        $dcFqdn = "$dcVmName.$domainName"
+        
+        Write-Log "Generating LDAPS certificate for domain controller..."
+        $ldapsCertificate = New-LdapsCertificate -DomainControllerFqdn $dcFqdn -DomainName $domainName
 
         # VM admin username/password: allow overrides, else default username in Bicep and auto-generated password here
         if ($PSBoundParameters.ContainsKey('VmAdminUsername') -and [string]::IsNullOrWhiteSpace($VmAdminUsername) -eq $false) {
@@ -529,6 +710,12 @@ try {
         Write-Log "  $($output.Key): $($output.Value.Value)" -Level Information
     }
 
+    # Store LDAPS certificate in Key Vault (if generated)
+    if ($ldapsCertificate -and $deployment.Outputs.ContainsKey('keyVaultName')) {
+        $keyVaultName = $deployment.Outputs['keyVaultName'].Value
+        Set-LdapsCertificateInKeyVault -KeyVaultName $keyVaultName -CertificateData $ldapsCertificate
+    }
+
     # Domain controller configuration
     if ($DeployDomainController) {
         $parameters = Get-Content $parametersFile | ConvertFrom-Json
@@ -545,14 +732,15 @@ try {
             -DomainNetBiosName $domainNetBiosName `
             -VmAdminPassword $VmAdminPassword
 
-        # Step 2: Post-configuration (OU, service account, test users)
+        # Step 2: Post-configuration (OU, service account, test users, LDAPS)
         if (-not $SkipPostConfiguration) {
             Invoke-DomainControllerPostConfig `
                 -ResourceGroupName $ResourceGroupName `
                 -VmName $dcVmName `
                 -DomainName $domainName `
                 -ServiceAccountPassword $ServiceAccountPassword `
-                -ServiceAccountName $ServiceAccountUsername
+                -ServiceAccountName $ServiceAccountUsername `
+                -LdapsCertificate $ldapsCertificate
         }
     }
 

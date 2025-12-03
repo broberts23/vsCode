@@ -599,3 +599,15 @@ output storageAccountName string = storageAccount.name
 
 @description('Log Analytics Workspace ID')
 output logAnalyticsWorkspaceId string = logAnalyticsWorkspace.id
+
+@description('Domain Controller VM name')
+output domainControllerVmName string = deployDomainController ? dcVm.name : ''
+
+@description('Domain Controller FQDN (internal)')
+output domainControllerFqdn string = deployDomainController ? '${dcVmName}.${domainName}' : ''
+
+@description('Domain Controller private IP address')
+output domainControllerPrivateIp string = deployDomainController ? '10.0.1.4' : ''
+
+@description('Domain Name')
+output domainName string = domainName

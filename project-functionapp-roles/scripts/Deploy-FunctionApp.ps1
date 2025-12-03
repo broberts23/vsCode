@@ -49,7 +49,19 @@ param(
     [switch]$ZipDeploy,
 
     [Parameter()]
-    [bool]$RunTests = $true
+    [bool]$RunTests = $true,
+    
+    [Parameter()]
+    [string]$KeyVaultUri,
+    
+    [Parameter()]
+    [string]$DomainControllerFqdn,
+    
+    [Parameter()]
+    [string]$DomainName,
+    
+    [Parameter()]
+    [switch]$UpdateSettings
 )
 
 Set-StrictMode -Version Latest
@@ -117,6 +129,81 @@ function Test-FunctionApp {
     
     Write-StatusMessage "Function App found: $($app.Name) in $($app.ResourceGroup)" -Type Success
     return $app
+}
+
+function Update-FunctionAppSettings {
+    <#
+    .SYNOPSIS
+        Updates Function App application settings
+    .DESCRIPTION
+        Configures required environment variables for LDAPS password reset functionality
+    .PARAMETER FunctionAppName
+        Name of the Function App
+    .PARAMETER ResourceGroupName
+        Resource group containing the Function App
+    .PARAMETER KeyVaultUri
+        Key Vault URI for secret access
+    .PARAMETER DomainControllerFqdn
+        Domain controller FQDN
+    .PARAMETER DomainName
+        Active Directory domain name
+    .LINK
+        https://learn.microsoft.com/powershell/module/az.functions/update-azfunctionappsetting?view=azps-latest
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$FunctionAppName,
+        
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName,
+        
+        [Parameter(Mandatory)]
+        [string]$KeyVaultUri,
+        
+        [Parameter(Mandatory)]
+        [string]$DomainControllerFqdn,
+        
+        [Parameter(Mandatory)]
+        [string]$DomainName
+    )
+    
+    Write-StatusMessage "Updating Function App settings for LDAPS configuration..." -Type Info
+    
+    try {
+        # Get current app settings
+        $currentSettings = Get-AzFunctionAppSetting -Name $FunctionAppName -ResourceGroupName $ResourceGroupName
+        
+        # Prepare new settings (merge with existing)
+        $newSettings = @{
+            'KEY_VAULT_URI'           = $KeyVaultUri
+            'DOMAIN_CONTROLLER_FQDN'  = $DomainControllerFqdn
+            'DOMAIN_NAME'             = $DomainName
+        }
+        
+        # Merge with existing settings (preserve existing values)
+        foreach ($key in $currentSettings.Keys) {
+            if (-not $newSettings.ContainsKey($key)) {
+                $newSettings[$key] = $currentSettings[$key]
+            }
+        }
+        
+        # Update Function App settings
+        Update-AzFunctionAppSetting `
+            -Name $FunctionAppName `
+            -ResourceGroupName $ResourceGroupName `
+            -AppSetting $newSettings `
+            -Force `
+            -ErrorAction Stop
+        
+        Write-StatusMessage "Function App settings updated successfully" -Type Success
+        Write-StatusMessage "  KEY_VAULT_URI: $KeyVaultUri" -Type Info
+        Write-StatusMessage "  DOMAIN_CONTROLLER_FQDN: $DomainControllerFqdn" -Type Info
+        Write-StatusMessage "  DOMAIN_NAME: $DomainName" -Type Info
+    }
+    catch {
+        Write-StatusMessage "Failed to update Function App settings: $_" -Type Error
+        throw
+    }
 }
 
 function Invoke-PesterTests {
@@ -279,6 +366,19 @@ try {
         -ResourceGroupName $ResourceGroupName `
         -SourcePath $SourcePath `
         -UseZip:$ZipDeploy
+    
+    # Update Function App settings (if parameters provided)
+    if ($UpdateSettings -and $KeyVaultUri -and $DomainControllerFqdn -and $DomainName) {
+        Update-FunctionAppSettings `
+            -FunctionAppName $FunctionAppName `
+            -ResourceGroupName $ResourceGroupName `
+            -KeyVaultUri $KeyVaultUri `
+            -DomainControllerFqdn $DomainControllerFqdn `
+            -DomainName $DomainName
+    }
+    elseif ($UpdateSettings) {
+        Write-StatusMessage "UpdateSettings specified but missing required parameters (KeyVaultUri, DomainControllerFqdn, DomainName)" -Type Warning
+    }
     
     Write-StatusMessage "`nDeployment process completed!" -Type Success
     Write-StatusMessage "Function App URL: https://$($app.DefaultHostName)/api/ResetUserPassword" -Type Info

@@ -58,6 +58,8 @@ try {
     
     # Get configuration from environment variables
     $requiredRole = $env:REQUIRED_ROLE
+    $domainControllerFqdn = $env:DOMAIN_CONTROLLER_FQDN
+    $domainName = $env:DOMAIN_NAME
     
     if (-not $requiredRole) {
         Write-Error "Missing required environment variable: REQUIRED_ROLE"
@@ -67,6 +69,19 @@ try {
                 Body       = @{
                     error   = 'Configuration Error'
                     message = 'Function app is not configured correctly'
+                } | ConvertTo-Json
+            })
+        return
+    }
+    
+    if (-not $domainControllerFqdn -or -not $domainName) {
+        Write-Error "Missing required environment variables: DOMAIN_CONTROLLER_FQDN or DOMAIN_NAME"
+        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+                StatusCode = [HttpStatusCode]::InternalServerError
+                Headers    = @{ 'Content-Type' = 'application/json' }
+                Body       = @{
+                    error   = 'Configuration Error'
+                    message = 'Domain controller configuration missing'
                 } | ConvertTo-Json
             })
         return
@@ -168,6 +183,25 @@ try {
         return
     }
     
+    # Install LDAPS certificate (if not already installed)
+    if (-not $global:LdapsCertificateInstalled) {
+        Write-Information "Installing LDAPS trusted certificate..."
+        try {
+            if ($global:LdapsCertificateCer) {
+                Install-LdapsTrustedCertificate -CertificateBase64 $global:LdapsCertificateCer
+                $global:LdapsCertificateInstalled = $true
+                Write-Information "LDAPS certificate installed successfully"
+            }
+            else {
+                Write-Warning "LDAPS certificate not available in global cache"
+            }
+        }
+        catch {
+            Write-Warning "Failed to install LDAPS certificate: $_"
+            # Continue anyway - connection may still work if cert is already trusted
+        }
+    }
+    
     #endregion
     
     #region Generate and Set Password
@@ -179,18 +213,18 @@ try {
     Write-Information "Setting password for AD user: $samAccountName"
     
     try {
+        # Use LDAPS for password reset (no AD PowerShell module required)
         $setParams = @{
             SamAccountName        = $samAccountName
             Password              = $newPassword
             Credential            = $global:ADServiceCredential
+            DomainController      = $domainController ?? $domainControllerFqdn
+            DomainName            = $domainName
             ChangePasswordAtLogon = $false
             ErrorAction           = 'Stop'
         }
         
-        if ($domainController) {
-            $setParams['DomainController'] = $domainController
-            Write-Information "Using domain controller: $domainController"
-        }
+        Write-Information "Using LDAPS connection to: $($setParams['DomainController'])"
         
         Set-ADUserPassword @setParams | Out-Null
     }

@@ -200,29 +200,198 @@ function New-SecurePassword {
     }
 }
 
+function Install-LdapsTrustedCertificate {
+    <#
+    .SYNOPSIS
+        Installs a trusted root certificate for LDAPS connections
+    .DESCRIPTION
+        Retrieves the LDAPS certificate from Key Vault and installs it in the
+        current user's Trusted Root Certification Authorities store
+    .PARAMETER CertificateBase64
+        Base64-encoded certificate (DER format)
+    .OUTPUTS
+        System.Boolean
+    .LINK
+        https://learn.microsoft.com/dotnet/api/system.security.cryptography.x509certificates.x509certificate2
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$CertificateBase64
+    )
+    
+    try {
+        Write-Verbose "Installing LDAPS trusted certificate..."
+        
+        # Decode certificate from base64
+        $certBytes = [Convert]::FromBase64String($CertificateBase64)
+        
+        # Create X509Certificate2 object
+        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certBytes)
+        
+        # Open the Trusted Root store for the current user
+        # Reference: https://learn.microsoft.com/dotnet/api/system.security.cryptography.x509certificates.x509store
+        $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+        )
+        
+        $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        
+        # Check if certificate already exists
+        $existingCert = $store.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+        
+        if (-not $existingCert) {
+            $store.Add($cert)
+            Write-Verbose "Certificate installed: $($cert.Thumbprint)"
+        }
+        else {
+            Write-Verbose "Certificate already exists: $($cert.Thumbprint)"
+        }
+        
+        $store.Close()
+        
+        return $true
+    }
+    catch {
+        Write-Error "Failed to install LDAPS certificate: $_"
+        throw
+    }
+}
+
+function Get-ADUserDistinguishedName {
+    <#
+    .SYNOPSIS
+        Retrieves a user's Distinguished Name from Active Directory via LDAPS
+    .DESCRIPTION
+        Performs an LDAPS search to find a user by sAMAccountName and returns their DN
+    .PARAMETER SamAccountName
+        The user's sAMAccountName
+    .PARAMETER DomainController
+        Domain controller FQDN or IP address
+    .PARAMETER Credential
+        Service account credential for LDAP bind
+    .PARAMETER DomainName
+        The AD domain name (e.g., 'contoso.local')
+    .OUTPUTS
+        System.String
+    .LINK
+        https://learn.microsoft.com/dotnet/api/system.directoryservices.protocols.ldapconnection
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SamAccountName,
+        
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$DomainController,
+        
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [System.Management.Automation.PSCredential]$Credential,
+        
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$DomainName
+    )
+    
+    try {
+        Write-Verbose "Searching for user DN: $SamAccountName"
+        
+        # Create LDAP connection
+        # Reference: https://learn.microsoft.com/dotnet/api/system.directoryservices.protocols
+        $ldapIdentifier = [System.DirectoryServices.Protocols.LdapDirectoryIdentifier]::new($DomainController, 636)
+        $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($ldapIdentifier)
+        
+        # Configure for LDAPS (SSL/TLS)
+        $connection.SessionOptions.SecureSocketLayer = $true
+        $connection.SessionOptions.ProtocolVersion = 3
+        
+        # Set authentication credentials
+        $networkCred = [System.Net.NetworkCredential]::new(
+            $Credential.UserName,
+            $Credential.Password
+        )
+        $connection.Credential = $networkCred
+        $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Basic
+        
+        # Bind to verify connection
+        $connection.Bind()
+        Write-Verbose "LDAPS connection established"
+        
+        # Build search base from domain name
+        $domainComponents = $DomainName.Split('.') | ForEach-Object { "DC=$_" }
+        $searchBase = $domainComponents -join ','
+        
+        # Create search request
+        $searchRequest = [System.DirectoryServices.Protocols.SearchRequest]::new(
+            $searchBase,
+            "(sAMAccountName=$SamAccountName)",
+            [System.DirectoryServices.Protocols.SearchScope]::Subtree,
+            @('distinguishedName')
+        )
+        
+        # Execute search
+        $searchResponse = [System.DirectoryServices.Protocols.SearchResponse]$connection.SendRequest($searchRequest)
+        
+        if ($searchResponse.Entries.Count -eq 0) {
+            throw "User not found: $SamAccountName"
+        }
+        
+        if ($searchResponse.Entries.Count -gt 1) {
+            Write-Warning "Multiple users found for sAMAccountName: $SamAccountName - using first result"
+        }
+        
+        $userEntry = $searchResponse.Entries[0]
+        $distinguishedName = $userEntry.Attributes['distinguishedName'][0]
+        
+        Write-Verbose "Found user DN: $distinguishedName"
+        
+        return $distinguishedName
+    }
+    catch {
+        Write-Error "Failed to retrieve user DN for $SamAccountName : $_"
+        throw
+    }
+    finally {
+        if ($connection) {
+            $connection.Dispose()
+        }
+    }
+}
+
 function Set-ADUserPassword {
     <#
     .SYNOPSIS
-        Sets a user's password in on-premises Active Directory
+        Sets a user's password in on-premises Active Directory via LDAPS
     .DESCRIPTION
         Updates the password for a specified user in Active Directory Domain Services (ADDS)
-        using provided service account credentials
+        using LDAPS connection (without requiring AD PowerShell module)
     .PARAMETER SamAccountName
         The user's sAMAccountName
     .PARAMETER Password
-        The new password
+        The new password (plain text)
     .PARAMETER Credential
         Service account credential with permissions to reset passwords in AD
     .PARAMETER DomainController
-        Domain controller to connect to (optional)
+        Domain controller FQDN or IP address
+    .PARAMETER DomainName
+        The AD domain name (e.g., 'contoso.local')
     .PARAMETER ChangePasswordAtLogon
-        Whether user must change password at next logon
+        Whether user must change password at next logon (not implemented via LDAPS)
     .OUTPUTS
         System.Boolean
     .EXAMPLE
-        $success = Set-ADUserPassword -SamAccountName 'jdoe' -Password $newPassword -Credential $adCred
+        $success = Set-ADUserPassword -SamAccountName 'jdoe' -Password $newPassword -Credential $adCred -DomainController 'dc01.contoso.local' -DomainName 'contoso.local'
     .LINK
-        https://learn.microsoft.com/powershell/module/activedirectory/set-adaccountpassword
+        https://learn.microsoft.com/dotnet/api/system.directoryservices.protocols.modifyrequest
+    .LINK
+        https://learn.microsoft.com/troubleshoot/windows-server/active-directory/set-user-password-with-ldifde
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     [OutputType([bool])]
@@ -239,8 +408,13 @@ function Set-ADUserPassword {
         [ValidateNotNull()]
         [System.Management.Automation.PSCredential]$Credential,
         
-        [Parameter()]
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string]$DomainController,
+        
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$DomainName,
         
         [Parameter()]
         [bool]$ChangePasswordAtLogon = $false
@@ -248,55 +422,76 @@ function Set-ADUserPassword {
     
     Process {
         try {
-            Write-Verbose "Setting password for AD user: $SamAccountName"
+            Write-Verbose "Setting password for AD user via LDAPS: $SamAccountName"
             
-            if ($PSCmdlet.ShouldProcess($SamAccountName, 'Set AD user password')) {
-                # Convert password to SecureString
-                $securePassword = ConvertTo-SecureString -String $Password -AsPlainText -Force
+            if ($PSCmdlet.ShouldProcess($SamAccountName, 'Set AD user password via LDAPS')) {
+                # Get user's Distinguished Name
+                $userDN = Get-ADUserDistinguishedName `
+                    -SamAccountName $SamAccountName `
+                    -DomainController $DomainController `
+                    -Credential $Credential `
+                    -DomainName $DomainName
                 
-                # Build Set-ADAccountPassword parameters
-                $params = @{
-                    Identity    = $SamAccountName
-                    NewPassword = $securePassword
-                    Reset       = $true
-                    Credential  = $Credential
-                    ErrorAction = 'Stop'
-                }
+                # Create LDAP connection
+                $ldapIdentifier = [System.DirectoryServices.Protocols.LdapDirectoryIdentifier]::new($DomainController, 636)
+                $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($ldapIdentifier)
                 
-                if ($DomainController) {
-                    $params['Server'] = $DomainController
-                }
+                # Configure for LDAPS
+                $connection.SessionOptions.SecureSocketLayer = $true
+                $connection.SessionOptions.ProtocolVersion = 3
                 
-                # Reset the password using AD cmdlet
-                # https://learn.microsoft.com/powershell/module/activedirectory/set-adaccountpassword
-                Set-ADAccountPassword @params
+                # Set authentication
+                $networkCred = [System.Net.NetworkCredential]::new(
+                    $Credential.UserName,
+                    $Credential.Password
+                )
+                $connection.Credential = $networkCred
+                $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Basic
                 
-                # Set password change at logon flag if requested
-                if ($ChangePasswordAtLogon) {
-                    $setParams = @{
-                        Identity               = $SamAccountName
-                        ChangePasswordAtLogon = $true
-                        Credential             = $Credential
-                        ErrorAction            = 'Stop'
+                # Bind
+                $connection.Bind()
+                Write-Verbose "LDAPS connection established for password reset"
+                
+                # Convert password to UTF-16LE format with quotes (required for unicodePwd attribute)
+                # Reference: https://learn.microsoft.com/troubleshoot/windows-server/active-directory/set-user-password-with-ldifde
+                $passwordWithQuotes = "`"$Password`""
+                $passwordBytes = [System.Text.Encoding]::Unicode.GetBytes($passwordWithQuotes)
+                
+                # Create modify request for unicodePwd attribute
+                $modifyRequest = [System.DirectoryServices.Protocols.ModifyRequest]::new(
+                    $userDN,
+                    [System.DirectoryServices.Protocols.DirectoryAttributeOperation]::Replace,
+                    'unicodePwd',
+                    $passwordBytes
+                )
+                
+                # Execute password reset
+                $modifyResponse = [System.DirectoryServices.Protocols.ModifyResponse]$connection.SendRequest($modifyRequest)
+                
+                if ($modifyResponse.ResultCode -eq [System.DirectoryServices.Protocols.ResultCode]::Success) {
+                    Write-Verbose "Password set successfully for AD user: $SamAccountName"
+                    
+                    if ($ChangePasswordAtLogon) {
+                        Write-Warning "ChangePasswordAtLogon not implemented via LDAPS in this version"
                     }
                     
-                    if ($DomainController) {
-                        $setParams['Server'] = $DomainController
-                    }
-                    
-                    Set-ADUser @setParams
-                    Write-Verbose "Set ChangePasswordAtLogon flag for user: $SamAccountName"
+                    return $true
                 }
-                
-                Write-Verbose "Password set successfully for AD user: $SamAccountName"
-                return $true
+                else {
+                    throw "LDAP modify failed with result code: $($modifyResponse.ResultCode)"
+                }
             }
             
             return $false
         }
         catch {
-            Write-Error "Failed to set password for AD user $SamAccountName : $_"
+            Write-Error "Failed to set password via LDAPS for AD user $SamAccountName : $_"
             throw
+        }
+        finally {
+            if ($connection) {
+                $connection.Dispose()
+            }
         }
     }
 }
@@ -308,5 +503,7 @@ Export-ModuleMember -Function @(
     'Get-ClientPrincipal'
     'Test-RoleClaim'
     'New-SecurePassword'
+    'Install-LdapsTrustedCertificate'
+    'Get-ADUserDistinguishedName'
     'Set-ADUserPassword'
 )

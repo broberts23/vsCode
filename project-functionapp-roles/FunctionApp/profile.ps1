@@ -11,9 +11,11 @@
     https://learn.microsoft.com/azure/azure-functions/functions-reference-powershell#powershell-profile
 #>
 
-# Retrieve AD service account credentials from Key Vault using Managed Identity
+# Retrieve AD service account credentials and LDAPS certificate from Key Vault using Managed Identity
 # Reference: https://learn.microsoft.com/azure/key-vault/general/overview
 $global:ADServiceCredential = $null
+$global:LdapsCertificateCer = $null
+$global:LdapsCertificateInstalled = $false
 
 if ($env:MSI_ENDPOINT -and $env:KEY_VAULT_URI) {
     Write-Information "Retrieving AD service account credentials from Key Vault"
@@ -25,14 +27,16 @@ if ($env:MSI_ENDPOINT -and $env:KEY_VAULT_URI) {
             -Headers @{"X-IDENTITY-HEADER" = $env:MSI_SECRET } `
             -Method Get
         
-        # Retrieve secret from Key Vault
-        $secretName = 'ENTRA-PWDRESET-RW'
         $keyVaultUri = $env:KEY_VAULT_URI.TrimEnd('/')
+        $authHeader = @{"Authorization" = "Bearer $($tokenResponse.access_token)" }
+        
+        # Retrieve AD service account secret
+        $secretName = 'ENTRA-PWDRESET-RW'
         $secretUri = "$keyVaultUri/secrets/$secretName?api-version=7.4"
         
         $secretResponse = Invoke-RestMethod `
             -Uri $secretUri `
-            -Headers @{"Authorization" = "Bearer $($tokenResponse.access_token)" } `
+            -Headers $authHeader `
             -Method Get
         
         # Parse credential (format: {"username":"DOMAIN\\user","password":"pwd"})
@@ -44,6 +48,24 @@ if ($env:MSI_ENDPOINT -and $env:KEY_VAULT_URI) {
         )
         
         Write-Information "Successfully retrieved AD service account: $($credentialObject.username)"
+        
+        # Retrieve LDAPS certificate (public key for trust)
+        $certSecretName = 'LDAPS-Certificate-CER'
+        $certSecretUri = "$keyVaultUri/secrets/$certSecretName?api-version=7.4"
+        
+        try {
+            $certResponse = Invoke-RestMethod `
+                -Uri $certSecretUri `
+                -Headers $authHeader `
+                -Method Get
+            
+            $global:LdapsCertificateCer = $certResponse.value
+            Write-Information "Successfully retrieved LDAPS certificate from Key Vault"
+        }
+        catch {
+            Write-Warning "Failed to retrieve LDAPS certificate from Key Vault: $_"
+            # Non-fatal - connection may still work without explicit trust
+        }
     }
     catch {
         Write-Error "Failed to retrieve AD credentials from Key Vault: $_"
