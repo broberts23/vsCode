@@ -326,81 +326,6 @@ DNS.2 = *.$DomainName
     }
 }
 
-function Set-LdapsCertificateInKeyVault {
-    <#
-    .SYNOPSIS
-        Stores LDAPS certificates in Azure Key Vault
-    .DESCRIPTION
-        Stores both the PFX (with private key) and CER (public key) certificates in Key Vault as secrets
-    .PARAMETER KeyVaultName
-        Name of the Key Vault
-    .PARAMETER CertificateData
-        Hashtable from New-LdapsCertificate containing PfxBase64, CerBase64, PfxPassword
-    .LINK
-        https://learn.microsoft.com/powershell/module/az.keyvault/set-azkeyvaultsecret?view=azps-latest
-    #>
-    [CmdletBinding(SupportsShouldProcess = $true)]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$KeyVaultName,
-        
-        [Parameter(Mandatory = $true)]
-        [hashtable]$CertificateData
-    )
-    
-    Write-Log "Storing LDAPS certificates in Key Vault: $KeyVaultName"
-    
-    try {
-        # Store PFX certificate with private key (for DC installation)
-        if ($PSCmdlet.ShouldProcess("$KeyVaultName/LDAPS-Certificate-PFX", "Store PFX certificate")) {
-            $pfxSecret = ConvertTo-SecureString -String $CertificateData.PfxBase64 -AsPlainText -Force
-            $null = Set-AzKeyVaultSecret `
-                -VaultName $KeyVaultName `
-                -Name 'LDAPS-Certificate-PFX' `
-                -SecretValue $pfxSecret `
-                -ContentType 'application/x-pkcs12' `
-                -Tag @{
-                Thumbprint = $CertificateData.Thumbprint
-                Subject    = $CertificateData.Subject
-                NotAfter   = $CertificateData.NotAfter.ToString('yyyy-MM-dd')
-            }
-            Write-Log "  Stored PFX certificate secret" -Level Success
-        }
-        
-        # Store PFX password (for DC installation)
-        if ($PSCmdlet.ShouldProcess("$KeyVaultName/LDAPS-Certificate-PFX-Password", "Store PFX password")) {
-            $pfxPasswordSecret = ConvertTo-SecureString -String $CertificateData.PfxPassword -AsPlainText -Force
-            $null = Set-AzKeyVaultSecret `
-                -VaultName $KeyVaultName `
-                -Name 'LDAPS-Certificate-PFX-Password' `
-                -SecretValue $pfxPasswordSecret
-            Write-Log "  Stored PFX password secret" -Level Success
-        }
-        
-        # Store CER certificate (public key only, for Function App trust)
-        if ($PSCmdlet.ShouldProcess("$KeyVaultName/LDAPS-Certificate-CER", "Store CER certificate")) {
-            $cerSecret = ConvertTo-SecureString -String $CertificateData.CerBase64 -AsPlainText -Force
-            $null = Set-AzKeyVaultSecret `
-                -VaultName $KeyVaultName `
-                -Name 'LDAPS-Certificate-CER' `
-                -SecretValue $cerSecret `
-                -ContentType 'application/x-x509-ca-cert' `
-                -Tag @{
-                Thumbprint = $CertificateData.Thumbprint
-                Subject    = $CertificateData.Subject
-                NotAfter   = $CertificateData.NotAfter.ToString('yyyy-MM-dd')
-            }
-            Write-Log "  Stored CER certificate secret" -Level Success
-        }
-        
-        Write-Log "LDAPS certificates stored successfully in Key Vault" -Level Success
-    }
-    catch {
-        Write-Log "Failed to store LDAPS certificates in Key Vault: $_" -Level Error
-        throw
-    }
-}
-
 function New-ResourceGroupIfNotExists {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -730,6 +655,11 @@ try {
         
         Write-Log "Generating LDAPS certificate for domain controller..."
         $ldapsCertificate = New-LdapsCertificate -DomainControllerFqdn $dcFqdn -DomainName $domainName
+        
+        # Pass LDAPS certificate data to Bicep as secure parameters
+        $additionalParams['ldapsCertificatePfxBase64'] = (ConvertTo-SecureString -String $ldapsCertificate.PfxBase64 -AsPlainText -Force)
+        $additionalParams['ldapsCertificatePfxPassword'] = (ConvertTo-SecureString -String $ldapsCertificate.PfxPassword -AsPlainText -Force)
+        $additionalParams['ldapsCertificateCerBase64'] = (ConvertTo-SecureString -String $ldapsCertificate.CerBase64 -AsPlainText -Force)
 
         # VM admin username/password: allow overrides, else default username in Bicep and auto-generated password here
         if ($PSBoundParameters.ContainsKey('VmAdminUsername') -and [string]::IsNullOrWhiteSpace($VmAdminUsername) -eq $false) {
@@ -770,10 +700,12 @@ try {
         Write-Log "  $($output.Key): $($output.Value.Value)" -Level Information
     }
 
-    # Store LDAPS certificate in Key Vault (if generated)
-    if ($ldapsCertificate -and $deployment.Outputs.ContainsKey('keyVaultName')) {
-        $keyVaultName = $deployment.Outputs['keyVaultName'].Value
-        Set-LdapsCertificateInKeyVault -KeyVaultName $keyVaultName -CertificateData $ldapsCertificate
+    # LDAPS certificate is now stored in Key Vault via Bicep template
+    if ($ldapsCertificate) {
+        Write-Log "LDAPS certificate stored in Key Vault via Bicep deployment" -Level Success
+        Write-Log "  Thumbprint: $($ldapsCertificate.Thumbprint)" -Level Information
+        Write-Log "  Subject: $($ldapsCertificate.Subject)" -Level Information
+        Write-Log "  NotAfter: $($ldapsCertificate.NotAfter)" -Level Information
     }
 
     # Domain controller configuration

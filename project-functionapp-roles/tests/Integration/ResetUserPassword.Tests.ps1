@@ -24,13 +24,15 @@ BeforeAll {
     
     Write-Host "ProjectRoot set to: $script:TestProjectRoot" -ForegroundColor Cyan
     
-    # Import required modules
-    $modulePath = Join-Path $script:TestProjectRoot '../ResetUserPassword/PasswordResetHelpers.psm1'
+    # Import required modules from FunctionApp directory
+    $modulePath = Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/PasswordResetHelpers.psm1'
     Write-Host "Loading module from: $modulePath" -ForegroundColor Cyan
     Import-Module $modulePath -Force
     
     # Mock environment variables
     $env:REQUIRED_ROLE = 'Role.PasswordReset'
+    $env:DOMAIN_CONTROLLER_FQDN = 'dc.contoso.local'
+    $env:DOMAIN_NAME = 'contoso.local'
     
     # Helper to create client principal header
     function New-ClientPrincipalHeader {
@@ -66,6 +68,12 @@ Describe 'ResetUserPassword Function' {
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
+            Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
+            Mock Get-ADUserDistinguishedName { 'CN=Test,DC=contoso,DC=local' } -ModuleName PasswordResetHelpers
+            
+            # Set global variables for LDAPS
+            $global:LdapsCertificateCer = 'base64cert'
+            $global:LdapsCertificateInstalled = $false
             
             # Simulate function execution
             $script:response = $null
@@ -83,7 +91,7 @@ Describe 'ResetUserPassword Function' {
             }
             
             # Execute function script
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 401
@@ -96,7 +104,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 401
@@ -110,7 +118,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{} | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 400
@@ -143,7 +151,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 401
@@ -181,7 +189,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 403
@@ -198,7 +206,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 200
@@ -219,8 +227,11 @@ Describe 'ResetUserPassword Function' {
                 }
             } -ModuleName PasswordResetHelpers
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
+            Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
             
             $global:ADServiceCredential = [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
+            $global:LdapsCertificateCer = 'base64cert'
+            $global:LdapsCertificateInstalled = $false
             
             $script:response = $null
             
@@ -240,7 +251,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 200
@@ -259,7 +270,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ samAccountName = 'nonexistent' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.StatusCode | Should -Be 500
@@ -275,7 +286,7 @@ Describe 'ResetUserPassword Function' {
                 Body    = @{ samAccountName = 'jdoe' } | ConvertTo-Json
             }
             
-            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'ResetUserPassword/run.ps1') -Raw
+            $functionScript = Get-Content (Join-Path $script:TestProjectRoot 'FunctionApp/ResetUserPassword/run.ps1') -Raw
             Invoke-Expression $functionScript
             
             $script:response.Headers.'Cache-Control' | Should -Match 'no-store'

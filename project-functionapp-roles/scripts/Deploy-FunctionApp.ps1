@@ -344,9 +344,6 @@ try {
     
     # Verify Function App exists
     $app = Test-FunctionApp -Name $FunctionAppName -ResourceGroup $ResourceGroupName
-    if (-not $ResourceGroupName) {
-        $ResourceGroupName = $app.ResourceGroup
-    }
     
     # Run tests
     if ($RunTests) {

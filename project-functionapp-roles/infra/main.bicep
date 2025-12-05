@@ -61,6 +61,18 @@ param domainNetBiosName string = 'CONTOSO'
 @description('Deploy domain controller VM')
 param deployDomainController bool = true
 
+@description('LDAPS certificate PFX (Base64 encoded) - passed from deployment script')
+@secure()
+param ldapsCertificatePfxBase64 string = ''
+
+@description('LDAPS certificate PFX password - passed from deployment script')
+@secure()
+param ldapsCertificatePfxPassword string = ''
+
+@description('LDAPS certificate CER (Base64 encoded) - passed from deployment script')
+@secure()
+param ldapsCertificateCerBase64 string = ''
+
 // ====================================
 // Variables
 // ====================================
@@ -196,6 +208,47 @@ resource vmAdminSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' = if (depl
   properties: {
     value: '{"username":"${vmAdminUsername}","password":"${vmAdminPassword}"}'
     contentType: 'application/json'
+    attributes: {
+      enabled: true
+    }
+  }
+}
+
+// Key Vault Secret for LDAPS Certificate PFX (with private key)
+// Used by domain controller for LDAPS installation
+resource ldapsCertificatePfxSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' = if (deployDomainController && !empty(ldapsCertificatePfxBase64)) {
+  parent: keyVault
+  name: 'LDAPS-Certificate-PFX'
+  properties: {
+    value: ldapsCertificatePfxBase64
+    contentType: 'application/x-pkcs12'
+    attributes: {
+      enabled: true
+    }
+  }
+}
+
+// Key Vault Secret for LDAPS Certificate PFX Password
+resource ldapsCertificatePfxPasswordSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' = if (deployDomainController && !empty(ldapsCertificatePfxPassword)) {
+  parent: keyVault
+  name: 'LDAPS-Certificate-PFX-Password'
+  properties: {
+    value: ldapsCertificatePfxPassword
+    contentType: 'text/plain'
+    attributes: {
+      enabled: true
+    }
+  }
+}
+
+// Key Vault Secret for LDAPS Certificate CER (public key only)
+// Used by Function App to trust the domain controller's LDAPS certificate
+resource ldapsCertificateCerSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' = if (deployDomainController && !empty(ldapsCertificateCerBase64)) {
+  parent: keyVault
+  name: 'LDAPS-Certificate-CER'
+  properties: {
+    value: ldapsCertificateCerBase64
+    contentType: 'application/x-x509-ca-cert'
     attributes: {
       enabled: true
     }

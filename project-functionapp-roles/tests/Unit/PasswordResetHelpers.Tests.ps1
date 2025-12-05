@@ -15,19 +15,14 @@ using namespace System.Collections.Generic
 #>
 
 BeforeAll {
-    # Import module
-    $modulePath = Join-Path $PSScriptRoot '../ResetUserPassword/PasswordResetHelpers.psm1'
+    # Import module from FunctionApp directory
+    $projectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    $modulePath = Join-Path $projectRoot 'FunctionApp/ResetUserPassword/PasswordResetHelpers.psm1'
     Import-Module $modulePath -Force
     
-    # Mock AD cmdlets (not available in test environment)
-    function Set-ADAccountPassword {
-        [CmdletBinding(SupportsShouldProcess)]
-        param($Identity, $NewPassword, $Reset, $Credential, $Server)
-    }
-    function Set-ADUser {
-        [CmdletBinding(SupportsShouldProcess)]
-        param($Identity, $ChangePasswordAtLogon, $Credential, $Server)
-    }
+    # Mock environment variables for LDAPS
+    $env:DOMAIN_CONTROLLER_FQDN = 'dc.contoso.local'
+    $env:DOMAIN_NAME = 'contoso.local'
 }
 
 Describe 'PasswordResetHelpers Module' {
@@ -51,6 +46,14 @@ Describe 'PasswordResetHelpers Module' {
         
         It 'Should export Set-ADUserPassword function' {
             Get-Command Set-ADUserPassword -Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
+        }
+        
+        It 'Should export Install-LdapsTrustedCertificate function' {
+            Get-Command Install-LdapsTrustedCertificate -Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
+        }
+        
+        It 'Should export Get-ADUserDistinguishedName function' {
+            Get-Command Get-ADUserDistinguishedName -Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
         }
     }
     
@@ -245,75 +248,85 @@ Describe 'PasswordResetHelpers Module' {
         }
     }
     
-    Context 'Set-ADUserPassword' {
-        BeforeAll {
-            # Mock AD cmdlets that would be called by the module
-            Mock -CommandName Set-ADAccountPassword -MockWith { } -ModuleName PasswordResetHelpers
-            Mock -CommandName Set-ADUser -MockWith { } -ModuleName PasswordResetHelpers
+    Context 'Install-LdapsTrustedCertificate' {
+        It 'Should throw on null certificate' {
+            { Install-LdapsTrustedCertificate -CertificateBase64 $null } | Should -Throw
         }
         
+        It 'Should throw on empty certificate' {
+            { Install-LdapsTrustedCertificate -CertificateBase64 '' } | Should -Throw
+        }
+        
+        It 'Should throw on invalid base64' {
+            { Install-LdapsTrustedCertificate -CertificateBase64 'not-valid-base64!!!' } | Should -Throw
+        }
+    }
+    
+    Context 'Get-ADUserDistinguishedName' {
         It 'Should throw on null SamAccountName' {
             $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            { Set-ADUserPassword -SamAccountName $null -Password 'SecurePass123!' -Credential $testCred } | Should -Throw
+            { Get-ADUserDistinguishedName -SamAccountName $null -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Credential $testCred } | Should -Throw
         }
         
         It 'Should throw on empty SamAccountName' {
             $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            { Set-ADUserPassword -SamAccountName '' -Password 'SecurePass123!' -Credential $testCred } | Should -Throw
+            { Get-ADUserDistinguishedName -SamAccountName '' -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Credential $testCred } | Should -Throw
+        }
+    }
+    
+    Context 'Set-ADUserPassword' {
+        BeforeAll {
+            # Mock LDAPS functions used by Set-ADUserPassword
+            Mock -CommandName Get-ADUserDistinguishedName -MockWith { 'CN=John Doe,OU=Users,DC=contoso,DC=local' } -ModuleName PasswordResetHelpers
+        }
+        
+        It 'Should throw on null SamAccountName' {
+            $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
+            { Set-ADUserPassword -SamAccountName $null -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
+        }
+        
+        It 'Should throw on empty SamAccountName' {
+            $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
+            { Set-ADUserPassword -SamAccountName '' -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
         }
         
         It 'Should throw on null Password' {
             $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            { Set-ADUserPassword -SamAccountName 'jdoe' -Password $null -Credential $testCred } | Should -Throw
+            { Set-ADUserPassword -SamAccountName 'jdoe' -Password $null -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
         }
         
         It 'Should throw on empty Password' {
             $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            { Set-ADUserPassword -SamAccountName 'jdoe' -Password '' -Credential $testCred } | Should -Throw
+            { Set-ADUserPassword -SamAccountName 'jdoe' -Password '' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
         }
         
-        It 'Should call Set-ADAccountPassword with correct parameters' {
+        It 'Should successfully set password via LDAPS' {
             $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            Set-ADUserPassword -SamAccountName 'jdoe' -Password 'SecurePass123!' -Credential $testCred -Confirm:$false
+            { Set-ADUserPassword -SamAccountName 'jdoe' -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Not -Throw
             
-            Should -Invoke Set-ADAccountPassword -ModuleName PasswordResetHelpers -Times 1
+            Should -Invoke Get-ADUserDistinguishedName -ModuleName PasswordResetHelpers -Times 1
         }
         
-        It 'Should call Set-ADUser for password change requirement' {
+        It 'Should throw when user not found' {
             $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            Set-ADUserPassword -SamAccountName 'jdoe' -Password 'SecurePass123!' -Credential $testCred -ChangePasswordAtLogon $true -Confirm:$false
+            Mock Get-ADUserDistinguishedName { throw 'User not found' } -ModuleName PasswordResetHelpers
             
-            Should -Invoke Set-ADUser -ModuleName PasswordResetHelpers -Times 1
-        }
-        
-        It 'Should support ChangePasswordAtLogon parameter' {
-            $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            Set-ADUserPassword -SamAccountName 'jdoe' -Password 'SecurePass123!' -Credential $testCred -ChangePasswordAtLogon $true -Confirm:$false
-            
-            Should -Invoke Set-ADUser -ModuleName PasswordResetHelpers -Times 1 -ParameterFilter {
-                $ChangePasswordAtLogon -eq $true
-            }
-        }
-        
-        It 'Should throw when Set-ADAccountPassword fails' {
-            $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            Mock Set-ADAccountPassword { throw 'Cannot find an object with identity' } -ModuleName PasswordResetHelpers
-            
-            { Set-ADUserPassword -SamAccountName 'nonexistent' -Password 'SecurePass123!' -Credential $testCred -Confirm:$false } | Should -Throw
+            { Set-ADUserPassword -SamAccountName 'nonexistent' -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Throw
         }
         
         It 'Should accept pipeline input for SamAccountName' {
             $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            'jdoe' | Set-ADUserPassword -Password 'SecurePass123!' -Credential $testCred -Confirm:$false
+            { 'jdoe' | Set-ADUserPassword -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Not -Throw
             
-            Should -Invoke Set-ADAccountPassword -ModuleName PasswordResetHelpers -Times 1
+            Should -Invoke Get-ADUserDistinguishedName -ModuleName PasswordResetHelpers -Times 1
         }
         
         It 'Should support -WhatIf' {
             $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            Set-ADUserPassword -SamAccountName 'jdoe' -Password 'SecurePass123!' -Credential $testCred -WhatIf
+            Set-ADUserPassword -SamAccountName 'jdoe' -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -WhatIf
             
-            Should -Invoke Set-ADAccountPassword -ModuleName PasswordResetHelpers -Times 0
+            # WhatIf should not invoke the actual LDAPS operation
+            Should -Invoke Get-ADUserDistinguishedName -ModuleName PasswordResetHelpers -Times 0
         }
     }
 }
