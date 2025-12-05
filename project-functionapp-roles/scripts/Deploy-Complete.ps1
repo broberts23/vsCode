@@ -184,10 +184,11 @@ function New-RandomPassword {
 function New-LdapsCertificate {
     <#
     .SYNOPSIS
-        Generates a self-signed certificate for LDAPS
+        Generates a self-signed certificate for LDAPS using OpenSSL
     .DESCRIPTION
         Creates a self-signed X.509 certificate suitable for LDAPS on a domain controller.
         Returns both PFX (with private key) and CER (public key only) as base64 strings.
+        Uses OpenSSL for cross-platform compatibility (works on Linux, macOS, and Windows).
     .PARAMETER DomainControllerFqdn
         The fully qualified domain name of the domain controller
     .PARAMETER DomainName
@@ -195,7 +196,9 @@ function New-LdapsCertificate {
     .OUTPUTS
         Hashtable with PfxBase64, CerBase64, and Thumbprint
     .LINK
-        https://learn.microsoft.com/powershell/module/pki/new-selfsignedcertificate?view=windowsserver2022-ps
+        https://www.openssl.org/docs/
+    .LINK
+        https://learn.microsoft.com/troubleshoot/windows-server/active-directory/enable-ldap-over-ssl-3rd-certification-authority
     #>
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -207,61 +210,118 @@ function New-LdapsCertificate {
         [string]$DomainName
     )
     
-    Write-Log "Generating self-signed LDAPS certificate for: $DomainControllerFqdn"
+    Write-Log "Generating self-signed LDAPS certificate using OpenSSL for: $DomainControllerFqdn"
     
     try {
+        # Check for OpenSSL (cross-platform)
+        $opensslPath = Get-Command openssl -ErrorAction SilentlyContinue
+        if (-not $opensslPath) {
+            throw "OpenSSL not found. Please install OpenSSL (e.g., 'sudo pacman -S openssl' on Arch)"
+        }
+        
+        Write-Log "Using OpenSSL at: $($opensslPath.Source)"
+        
         # Generate a random password for PFX export
         $pfxPassword = New-RandomPassword -Length 24
         $pfxPasswordPlain = [System.Net.NetworkCredential]::new('', $pfxPassword).Password
         
-        # Create certificate with proper settings for LDAPS
+        # Create temporary directory for certificate files
+        $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "ldaps-cert-$(Get-Date -Format 'yyyyMMddHHmmss')"
+        New-Item -Path $tempDir -ItemType Directory -Force | Out-Null
+        
+        $keyPath = Join-Path $tempDir 'ldaps.key'
+        $certPath = Join-Path $tempDir 'ldaps.crt'
+        $pfxPath = Join-Path $tempDir 'ldaps.pfx'
+        $configPath = Join-Path $tempDir 'openssl.cnf'
+        
+        # Create OpenSSL config file with proper extensions for LDAPS
         # Reference: https://learn.microsoft.com/troubleshoot/windows-server/active-directory/enable-ldap-over-ssl-3rd-certification-authority
-        $certParams = @{
-            Subject           = "CN=$DomainControllerFqdn"
-            DnsName           = @($DomainControllerFqdn, "*.$DomainName")
-            KeyAlgorithm      = 'RSA'
-            KeyLength         = 2048
-            HashAlgorithm     = 'SHA256'
-            NotAfter          = (Get-Date).AddYears(2)
-            KeyUsage          = 'DigitalSignature', 'KeyEncipherment'
-            TextExtension     = @("2.5.29.37={text}1.3.6.1.5.5.7.3.1")  # Server Authentication EKU
-            CertStoreLocation = 'Cert:\CurrentUser\My'
-            Provider          = 'Microsoft RSA SChannel Cryptographic Provider'
+        $opensslConfig = @"
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = v3_req
+
+[dn]
+CN = $DomainControllerFqdn
+
+[v3_req]
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = $DomainControllerFqdn
+DNS.2 = *.$DomainName
+"@
+        
+        Set-Content -Path $configPath -Value $opensslConfig -Encoding UTF8
+        
+        # Generate private key and certificate in one command
+        Write-Log "Generating RSA key and self-signed certificate..."
+        $opensslGenCmd = @(
+            'openssl', 'req', '-x509', '-nodes', '-days', '730',
+            '-newkey', 'rsa:2048',
+            '-keyout', $keyPath,
+            '-out', $certPath,
+            '-config', $configPath
+        )
+        & $opensslGenCmd[0] $opensslGenCmd[1..($opensslGenCmd.Length - 1)] 2>&1 | Out-Null
+        
+        if ($LASTEXITCODE -ne 0) {
+            throw "OpenSSL certificate generation failed with exit code: $LASTEXITCODE"
         }
         
-        $cert = New-SelfSignedCertificate @certParams
-        Write-Log "Certificate generated with thumbprint: $($cert.Thumbprint)" -Level Success
+        Write-Log "Certificate and key generated successfully"
         
-        # Export as PFX (with private key) for domain controller
-        $pfxPath = [System.IO.Path]::GetTempFileName() + '.pfx'
-        $null = Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $pfxPassword
+        # Convert to PFX (PKCS#12) format with password
+        Write-Log "Converting to PFX format..."
+        & openssl pkcs12 -export -out $pfxPath -inkey $keyPath -in $certPath -passout "pass:$pfxPasswordPlain" 2>&1 | Out-Null
+        
+        if ($LASTEXITCODE -ne 0) {
+            throw "OpenSSL PFX conversion failed with exit code: $LASTEXITCODE"
+        }
+        
+        # Read certificate and extract thumbprint
+        $certContent = Get-Content -Path $certPath -Raw
+        $certBytes = [System.Text.Encoding]::UTF8.GetBytes($certContent)
+        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certBytes)
+        $thumbprint = $cert.Thumbprint
+        $subject = $cert.Subject
+        $notAfter = $cert.NotAfter
+        
+        Write-Log "Certificate thumbprint: $thumbprint" -Level Success
+        
+        # Read PFX file and encode to base64
         $pfxBytes = [System.IO.File]::ReadAllBytes($pfxPath)
         $pfxBase64 = [Convert]::ToBase64String($pfxBytes)
         
-        # Export as CER (public key only) for Function App trust
-        $cerPath = [System.IO.Path]::GetTempFileName() + '.cer'
-        $null = Export-Certificate -Cert $cert -FilePath $cerPath -Type CERT
-        $cerBytes = [System.IO.File]::ReadAllBytes($cerPath)
+        # Read certificate file (PEM format) and encode to base64
+        $cerBytes = [System.IO.File]::ReadAllBytes($certPath)
         $cerBase64 = [Convert]::ToBase64String($cerBytes)
         
-        # Clean up temp files and certificate from store
-        Remove-Item -Path $pfxPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path $cerPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force -ErrorAction SilentlyContinue
-        
         Write-Log "Certificate exported successfully" -Level Success
+        
+        # Clean up temp directory
+        Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         
         return @{
             PfxBase64   = $pfxBase64
             PfxPassword = $pfxPasswordPlain
             CerBase64   = $cerBase64
-            Thumbprint  = $cert.Thumbprint
-            Subject     = $cert.Subject
-            NotAfter    = $cert.NotAfter
+            Thumbprint  = $thumbprint
+            Subject     = $subject
+            NotAfter    = $notAfter
         }
     }
     catch {
         Write-Log "Failed to generate LDAPS certificate: $_" -Level Error
+        # Clean up temp directory on error
+        if ($tempDir -and (Test-Path $tempDir)) {
+            Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
         throw
     }
 }
