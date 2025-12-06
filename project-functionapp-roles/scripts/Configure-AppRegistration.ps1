@@ -124,23 +124,37 @@ function New-AppRegistration {
         Write-StatusMessage "Creating new App Registration: $DisplayName" -Type Info
         
         $appRole = New-AppRoleDefinition
-        $appIdUri = "api://password-reset-$(New-Guid)"
-        
+
         $params = @{
             DisplayName            = $DisplayName
             SignInAudience         = 'AzureADMyOrg'
-            IdentifierUris         = @($appIdUri)
             AppRoles               = @($appRole)
             RequiredResourceAccess = @()
+            # Do not set IdentifierUris at creation; set after
         }
-        
+
         $app = New-MgApplication -BodyParameter $params -ErrorAction Stop
-        
+
         Write-StatusMessage "App Registration created successfully!" -Type Success
         Write-StatusMessage "Application ID: $($app.AppId)" -Type Info
         Write-StatusMessage "Object ID: $($app.Id)" -Type Info
-        Write-StatusMessage "App ID URI: $appIdUri" -Type Info
-        
+
+        # Set IdentifierUris to api://<app-id> after creation
+        $identifierUri = "api://$($app.AppId)"
+        Update-MgApplication -ApplicationId $app.Id -BodyParameter @{ IdentifierUris = @($identifierUri) } -ErrorAction Stop
+        Write-StatusMessage "Set Identifier URI: $identifierUri" -Type Info
+
+        # Create Service Principal (required for other apps to request permissions)
+        Write-StatusMessage "Creating Service Principal (Enterprise Application)..." -Type Info
+        $spParams = @{
+            AppId = $app.AppId
+        }
+        $servicePrincipal = New-MgServicePrincipal -BodyParameter $spParams -ErrorAction Stop
+        Write-StatusMessage "Service Principal created successfully!" -Type Success
+        Write-StatusMessage "Service Principal Object ID: $($servicePrincipal.Id)" -Type Info
+
+        # Refresh app object
+        $app = Get-MgApplication -ApplicationId $app.Id
         return $app
     }
 }
@@ -237,22 +251,25 @@ try {
     else {
         $app = Update-ExistingAppRegistration -AppId $AppId -DisplayName $DisplayName
     }
-    
+
     # Show summary
     Show-AppRegistrationSummary -Application $app
-    
+
     Write-StatusMessage "Next Steps:" -Type Info
     Write-Host "  1. Update the parameter files with the Application ID:" -ForegroundColor Yellow
     Write-Host "     - expectedAudience: " -NoNewline -ForegroundColor Yellow
     Write-Host $app.IdentifierUris[0] -ForegroundColor White
-    Write-Host "`n  2. Create a client secret or certificate for authentication" -ForegroundColor Yellow
-    Write-Host "     - Portal: " -NoNewline -ForegroundColor Yellow
-    Write-Host "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Credentials/appId/$($app.AppId)" -ForegroundColor White
+    Write-Host "`n  2. Create a client app registration to call this API:" -ForegroundColor Yellow
+    Write-Host "     Run: ./Create-ClientAppRegistration.ps1 -DisplayName 'My Client' -ApiAppId $($app.AppId)" -ForegroundColor Gray
     Write-Host "`n  3. Assign the Role.PasswordReset role to users or service principals" -ForegroundColor Yellow
     Write-Host "     - Portal: " -NoNewline -ForegroundColor Yellow
     Write-Host "https://portal.azure.com/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Users/objectId/$($app.AppId)/appId/$($app.AppId)" -ForegroundColor White
-    
+
     Write-StatusMessage "`nConfiguration completed successfully!" -Type Success
+    Write-StatusMessage "Service Principal created - client apps can now request permissions to this API." -Type Info
+
+    # Output the app object for caller scripts
+    $app
 }
 catch {
     Write-StatusMessage "Configuration failed: $_" -Type Error
