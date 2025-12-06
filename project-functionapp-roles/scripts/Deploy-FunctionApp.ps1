@@ -268,6 +268,12 @@ function Publish-FunctionAppCode {
     if ($UseZip) {
         Write-StatusMessage "Using zip deployment..." -Type Info
         
+        # Check if Azure CLI is installed
+        $azPath = Get-Command 'az' -ErrorAction SilentlyContinue
+        if (-not $azPath) {
+            throw "Azure CLI not found. Install from: https://learn.microsoft.com/cli/azure/install-azure-cli"
+        }
+        
         $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) "funcapp-deploy-$(Get-Date -Format 'yyyyMMddHHmmss').zip"
         
         try {
@@ -281,21 +287,20 @@ function Publish-FunctionAppCode {
                 }
                 Write-StatusMessage "  Zip File: $zipFile ($('{0:N0}' -f (Get-Item $zipFile).Length) bytes)" -Type Info
                 
-                # Use Publish-AzFunctionApp for Azure Functions (not Publish-AzWebApp which is for App Service)
-                if ($ResourceGroupName) {
-                    Publish-AzFunctionApp `
-                        -ResourceGroupName $ResourceGroupName `
-                        -Name $FunctionAppName `
-                        -ArchivePath $zipFile `
-                        -Force `
-                        -ErrorAction Stop
-                }
-                else {
-                    Publish-AzFunctionApp `
-                        -Name $FunctionAppName `
-                        -ArchivePath $zipFile `
-                        -Force `
-                        -ErrorAction Stop
+                # Use Azure CLI for deployment
+                $azCommand = @(
+                    'functionapp', 'deployment', 'source', 'config-zip',
+                    '--resource-group', $ResourceGroupName,
+                    '--name', $FunctionAppName,
+                    '--src', $zipFile
+                )
+                
+                Write-StatusMessage "Executing: az $($azCommand -join ' ')" -Type Info
+                $output = az @azCommand 2>&1
+                $exitCode = $LASTEXITCODE
+                
+                if ($exitCode -ne 0) {
+                    throw "Deployment failed with exit code: $exitCode`n$output"
                 }
                 
                 Write-StatusMessage "Deployment completed successfully!" -Type Success
@@ -311,19 +316,12 @@ function Publish-FunctionAppCode {
             
             # Check if the Function App exists
             try {
-                if ($ResourceGroupName) {
-                    $existingApp = Get-AzFunctionApp -Name $FunctionAppName -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue
+                $showOutput = az functionapp show --name $FunctionAppName --resource-group $ResourceGroupName 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    Write-StatusMessage "  ✓ Function App exists" -Type Success
                 }
                 else {
-                    $existingApp = Get-AzFunctionApp -Name $FunctionAppName -ErrorAction SilentlyContinue
-                }
-                
-                if ($existingApp) {
-                    Write-StatusMessage "  Function App found: $($existingApp.Name)" -Type Success
-                    Write-StatusMessage "  Location: $($existingApp.Location)" -Type Info
-                }
-                else {
-                    Write-StatusMessage "  ⚠️ Function App NOT found - verify the name and resource group" -Type Error
+                    Write-StatusMessage "  ✗ Function App NOT found - verify the name and resource group" -Type Error
                 }
             }
             catch {
@@ -332,8 +330,11 @@ function Publish-FunctionAppCode {
             
             # Check Azure subscription context
             try {
-                $context = Get-AzContext
-                Write-StatusMessage "  Current Subscription: $($context.Subscription.Name) ($($context.Subscription.Id))" -Type Info
+                $accountOutput = az account show --query "[name,id]" -o tsv 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    $parts = $accountOutput -split '\t'
+                    Write-StatusMessage "  Current Subscription: $($parts[0]) ($($parts[1]))" -Type Info
+                }
             }
             catch {
                 Write-StatusMessage "  Could not determine current subscription" -Type Warning
