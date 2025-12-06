@@ -242,18 +242,39 @@ function New-DeploymentPackage {
     
     Write-StatusMessage "Creating deployment package..." -Type Info
     
-    # FunctionApp folder contains only deployable content, so package it directly
-    Write-StatusMessage "Creating zip archive from FunctionApp directory..." -Type Info
-    
     # Verify source path exists
     if (-not (Test-Path $SourcePath)) {
         throw "Source path not found: $SourcePath"
     }
     
-    # Create zip from FunctionApp directory contents
-    Compress-Archive -Path "$SourcePath/*" -DestinationPath $OutputPath -Force
+    # Get all items in the FunctionApp directory
+    $items = Get-ChildItem -Path $SourcePath -Force
     
-    Write-StatusMessage "Deployment package created: $OutputPath" -Type Success
+    if ($items.Count -eq 0) {
+        throw "FunctionApp directory is empty: $SourcePath"
+    }
+    
+    Write-StatusMessage "Creating zip archive from FunctionApp directory..." -Type Info
+    Write-StatusMessage "  Contents to include:" -Type Info
+    foreach ($item in $items) {
+        Write-StatusMessage "    - $($item.Name)" -Type Info
+    }
+    
+    # Remove existing zip if it exists
+    if (Test-Path $OutputPath) {
+        Remove-Item -Path $OutputPath -Force
+    }
+    
+    # Create zip with all items at the root level
+    # PowerShell 7.4+ supports multiple paths in Compress-Archive
+    $itemPaths = $items | Select-Object -ExpandProperty FullName
+    Compress-Archive -Path $itemPaths -DestinationPath $OutputPath -CompressionLevel Optimal
+    
+    if (-not (Test-Path $OutputPath)) {
+        throw "Failed to create deployment package at: $OutputPath"
+    }
+    
+    Write-StatusMessage "Deployment package created: $OutputPath ($('{0:N0}' -f (Get-Item $OutputPath).Length) bytes)" -Type Success
     return $OutputPath
 }
 
