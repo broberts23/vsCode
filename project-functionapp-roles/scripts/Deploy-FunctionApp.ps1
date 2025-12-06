@@ -175,9 +175,9 @@ function Update-FunctionAppSettings {
         
         # Prepare new settings (merge with existing)
         $newSettings = @{
-            'KEY_VAULT_URI'           = $KeyVaultUri
-            'DOMAIN_CONTROLLER_FQDN'  = $DomainControllerFqdn
-            'DOMAIN_NAME'             = $DomainName
+            'KEY_VAULT_URI'          = $KeyVaultUri
+            'DOMAIN_CONTROLLER_FQDN' = $DomainControllerFqdn
+            'DOMAIN_NAME'            = $DomainName
         }
         
         # Merge with existing settings (preserve existing values)
@@ -275,16 +275,71 @@ function Publish-FunctionAppCode {
             
             if ($PSCmdlet.ShouldProcess($FunctionAppName, 'Deploy Function App via zip')) {
                 Write-StatusMessage "Publishing to Azure..." -Type Info
+                Write-StatusMessage "  Function App: $FunctionAppName" -Type Info
+                if ($ResourceGroupName) {
+                    Write-StatusMessage "  Resource Group: $ResourceGroupName" -Type Info
+                }
+                Write-StatusMessage "  Zip File: $zipFile ($('{0:N0}' -f (Get-Item $zipFile).Length) bytes)" -Type Info
                 
-                Publish-AzWebApp `
-                    -ResourceGroupName $ResourceGroupName `
-                    -Name $FunctionAppName `
-                    -ArchivePath $zipFile `
-                    -Force `
-                    -ErrorAction Stop
+                # Use Publish-AzFunctionApp for Azure Functions (not Publish-AzWebApp which is for App Service)
+                if ($ResourceGroupName) {
+                    Publish-AzFunctionApp `
+                        -ResourceGroupName $ResourceGroupName `
+                        -Name $FunctionAppName `
+                        -ArchivePath $zipFile `
+                        -Force `
+                        -ErrorAction Stop
+                }
+                else {
+                    Publish-AzFunctionApp `
+                        -Name $FunctionAppName `
+                        -ArchivePath $zipFile `
+                        -Force `
+                        -ErrorAction Stop
+                }
                 
                 Write-StatusMessage "Deployment completed successfully!" -Type Success
             }
+        }
+        catch {
+            Write-StatusMessage "Deployment failed: $_" -Type Error
+            
+            # Provide diagnostic information
+            Write-StatusMessage "`nDiagnostic Information:" -Type Warning
+            Write-StatusMessage "  Function App Name: $FunctionAppName" -Type Info
+            Write-StatusMessage "  Resource Group: $ResourceGroupName" -Type Info
+            
+            # Check if the Function App exists
+            try {
+                if ($ResourceGroupName) {
+                    $existingApp = Get-AzFunctionApp -Name $FunctionAppName -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue
+                }
+                else {
+                    $existingApp = Get-AzFunctionApp -Name $FunctionAppName -ErrorAction SilentlyContinue
+                }
+                
+                if ($existingApp) {
+                    Write-StatusMessage "  Function App found: $($existingApp.Name)" -Type Success
+                    Write-StatusMessage "  Location: $($existingApp.Location)" -Type Info
+                }
+                else {
+                    Write-StatusMessage "  ⚠️ Function App NOT found - verify the name and resource group" -Type Error
+                }
+            }
+            catch {
+                Write-StatusMessage "  Could not verify Function App existence" -Type Warning
+            }
+            
+            # Check Azure subscription context
+            try {
+                $context = Get-AzContext
+                Write-StatusMessage "  Current Subscription: $($context.Subscription.Name) ($($context.Subscription.Id))" -Type Info
+            }
+            catch {
+                Write-StatusMessage "  Could not determine current subscription" -Type Warning
+            }
+            
+            throw
         }
         finally {
             if (Test-Path $zipPath) {
