@@ -27,6 +27,9 @@
 .PARAMETER ServiceAccountPassword
     Password for the AD service account (required if DeployDomainController is $true).
 
+.PARAMETER ConfigureAppRegistration
+    When specified, creates a new Entra ID App Registration (Role.PasswordReset) and uses its AppId as clientId for Bicep deployment.
+
 .PARAMETER SkipPostConfiguration
     Skip post-deployment configuration (service account and test user creation).
 
@@ -76,6 +79,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [securestring]$ServiceAccountPassword,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ConfigureAppRegistration,
 
     [Parameter(Mandatory = $false)]
     [switch]$SkipPostConfiguration
@@ -685,6 +691,26 @@ try {
         }
         # Pass SecureString for secure Bicep parameter
         $additionalParams['serviceAccountPassword'] = $ServiceAccountPassword
+    }
+
+    if ($ConfigureAppRegistration) {
+        $configureScript = Join-Path $scriptDir 'Configure-AppRegistration.ps1'
+        if (-not (Test-Path $configureScript)) {
+            throw "Configure-AppRegistration.ps1 not found at: $configureScript"
+        }
+
+        Write-Log "Creating/Updating Entra ID App Registration and capturing clientId..." -Level Information
+
+        # Create a new app registration with environment-specific display name
+        $appRegistration = & $configureScript -CreateNew -DisplayName "Password Reset API ($Environment)"
+
+        if (-not $appRegistration -or -not $appRegistration.AppId) {
+            throw "App registration creation failed or did not return an AppId"
+        }
+
+        # Pass clientId to Bicep deployment
+        $additionalParams['clientId'] = $appRegistration.AppId
+        Write-Log "Using clientId from App Registration: $($appRegistration.AppId)" -Level Success
     }
 
     # Deploy infrastructure
