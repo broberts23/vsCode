@@ -421,6 +421,7 @@ function Set-ADUserPassword {
     )
     
     Process {
+        $connection = $null
         try {
             Write-Verbose "Setting password for AD user via LDAPS: $SamAccountName"
             

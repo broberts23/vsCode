@@ -153,8 +153,9 @@ try {
         return
     }
     
-    $samAccountName = $requestBody.samAccountName
-    $domainController = $requestBody.domainController  # Optional
+    # Safely access properties (handle Set-StrictMode)
+    $samAccountName = if ($requestBody.PSObject.Properties['samAccountName']) { $requestBody.samAccountName } else { $null }
+    $domainController = if ($requestBody.PSObject.Properties['domainController']) { $requestBody.domainController } else { $null }
     
     if (-not $samAccountName) {
         Write-Warning "Missing samAccountName in request body"
