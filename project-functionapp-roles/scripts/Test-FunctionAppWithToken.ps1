@@ -26,6 +26,9 @@
 .PARAMETER FunctionAppUrl
     The URL of the Function App (e.g., https://your-function-app.azurewebsites.net).
 
+.PARAMETER FunctionKey
+    Optional function access key. Provide this if the function's auth level requires a key (`function` or `admin`).
+
 .PARAMETER UserPrincipalName
     The UPN of the user to reset password for (e.g., testuser@contoso.com).
 
@@ -71,6 +74,9 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$FunctionAppUrl,
 
+    [Parameter(Mandatory = $false)]
+    [string]$FunctionKey,
+
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
     [string]$UserPrincipalName,
@@ -113,14 +119,14 @@ function Get-AccessToken {
         [string]$Scope
     )
     
-    Write-StatusMessage "Requesting access token from Azure AD..." -Type Info
+    Write-StatusMessage "Requesting access token from Azure AD (v1)..." -Type Info
     
-    $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+    $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/token"
     
     $body = @{
         client_id     = $ClientId
         client_secret = $ClientSecret
-        scope         = $Scope
+        resource      = $Scope.Replace('/.default', '') # v1 uses resource, not scope
         grant_type    = 'client_credentials'
     }
     
@@ -144,7 +150,8 @@ function Invoke-PasswordReset {
         [string]$FunctionAppUrl,
         [string]$AccessToken,
         [string]$UserPrincipalName,
-        [string]$NewPassword
+        [string]$NewPassword,
+        [string]$FunctionKey
     )
     
     Write-StatusMessage "Calling Password Reset Function App..." -Type Info
@@ -152,11 +159,16 @@ function Invoke-PasswordReset {
     # Remove trailing slash from URL
     $FunctionAppUrl = $FunctionAppUrl.TrimEnd('/')
     
-    $apiUrl = "$FunctionAppUrl/api/ResetPassword"
+    $apiUrl = "$FunctionAppUrl/api/ResetUserPassword"
     
     $headers = @{
         'Authorization' = "Bearer $AccessToken"
         'Content-Type'  = 'application/json'
+    }
+
+    if ($FunctionKey) {
+        Write-StatusMessage "Including x-functions-key header." -Type Info
+        $headers['x-functions-key'] = $FunctionKey
     }
     
     $body = @{
@@ -186,6 +198,10 @@ function Invoke-PasswordReset {
         
         Write-Host "`nStatus Code: $($_.Exception.Response.StatusCode.value__)" -ForegroundColor Red
         Write-Host "Status Description: $($_.Exception.Response.StatusDescription)" -ForegroundColor Red
+        
+        if ($_.Exception.Response.Headers['WWW-Authenticate']) {
+            Write-Host "WWW-Authenticate: $($_.Exception.Response.Headers['WWW-Authenticate'])" -ForegroundColor Yellow
+        }
         
         throw
     }
@@ -266,7 +282,8 @@ try {
         -FunctionAppUrl $FunctionAppUrl `
         -AccessToken $accessToken `
         -UserPrincipalName $UserPrincipalName `
-        -NewPassword $NewPassword
+        -NewPassword $NewPassword `
+        -FunctionKey $FunctionKey
     
     Write-StatusMessage "`n===== Test Completed Successfully! =====" -Type Success
     
