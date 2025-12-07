@@ -138,16 +138,30 @@ try {
     Write-Information "Processing request body"
     
     try {
-        $requestBody = $Request.Body | ConvertFrom-Json -ErrorAction Stop
+        # Handle case where host has already deserialized the body (Content-Type: application/json)
+        if ($Request.Body -is [string]) {
+            $requestBody = $Request.Body | ConvertFrom-Json -ErrorAction Stop
+        }
+        elseif ($Request.Body -is [System.Collections.Hashtable]) {
+            # Convert Hashtable to PSCustomObject for consistent property access via PSObject.Properties
+            $requestBody = [PSCustomObject]$Request.Body
+        }
+        else {
+            $requestBody = $Request.Body
+        }
+        
+        # Debug logging
+        Write-Information "Body type: $($Request.Body.GetType().FullName)"
+        Write-Information "Processed Body type: $($requestBody.GetType().FullName)"
     }
     catch {
-        Write-Warning "Invalid JSON in request body"
+        Write-Warning "Invalid JSON in request body: $_"
         Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::BadRequest
                 Headers    = @{ 'Content-Type' = 'application/json' }
                 Body       = @{
                     error   = 'Bad Request'
-                    message = 'Invalid JSON format'
+                    message = "Invalid JSON format: $_"
                 } | ConvertTo-Json
             })
         return

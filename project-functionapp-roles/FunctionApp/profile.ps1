@@ -17,30 +17,76 @@ $global:ADServiceCredential = $null
 $global:LdapsCertificateCer = $null
 $global:LdapsCertificateInstalled = $false
 
-if ($env:MSI_ENDPOINT -and $env:KEY_VAULT_URI) {
-    Write-Information "Retrieving AD service account credentials from Key Vault"
+# Determine Managed Identity variables (preferring new IDENTITY_* over legacy MSI_*)
+$miEndpoint = $env:IDENTITY_ENDPOINT
+$miHeader = $env:IDENTITY_HEADER
+
+# Fallback to MSI_* if IDENTITY_ENDPOINT is missing or whitespace
+if ([string]::IsNullOrWhiteSpace($miEndpoint) -and -not [string]::IsNullOrWhiteSpace($env:MSI_ENDPOINT)) {
+    Write-Information "Using legacy MSI_ENDPOINT"
+    $miEndpoint = $env:MSI_ENDPOINT
+    $miHeader = $env:MSI_SECRET
+}
+
+# Only proceed if we have a valid endpoint and Key Vault URI
+if (-not [string]::IsNullOrWhiteSpace($miEndpoint) -and $env:KEY_VAULT_URI) {
+    Write-Information "Retrieving AD service account credentials from Key Vault using Managed Identity"
     
     try {
-        # Get Managed Identity token for Key Vault
+        # Debug logging
+        Write-Information "Raw IDENTITY_ENDPOINT: '$env:IDENTITY_ENDPOINT'"
+        Write-Information "Raw KEY_VAULT_URI: '$env:KEY_VAULT_URI'"
+
+        # Clean up endpoint: remove quotes, whitespace, trailing slash
+        $miEndpoint = $miEndpoint.Trim().Trim('"').Trim("'").TrimEnd('/')
+        
+        # Validate URI format
+        if (-not ($miEndpoint -as [System.Uri]) -or -not ([System.Uri]$miEndpoint).IsAbsoluteUri) {
+            throw "Managed Identity Endpoint is not a valid absolute URI: '$miEndpoint'. (IDENTITY_ENDPOINT: '$env:IDENTITY_ENDPOINT', MSI_ENDPOINT: '$env:MSI_ENDPOINT')"
+        }
+
+        # Use UriBuilder to safely construct the token URI
+        $uriBuilder = New-Object System.UriBuilder($miEndpoint)
+        $uriBuilder.Query = "resource=https://vault.azure.net&api-version=2019-08-01"
+        $tokenUri = $uriBuilder.Uri.AbsoluteUri
+        
+        Write-Information "Fetching Managed Identity token from: $tokenUri"
+
         $tokenResponse = Invoke-RestMethod `
-            -Uri "$($env:MSI_ENDPOINT)?resource=https://vault.azure.net&api-version=2019-08-01" `
-            -Headers @{"X-IDENTITY-HEADER" = $env:MSI_SECRET } `
+            -Uri $tokenUri `
+            -Headers @{"X-IDENTITY-HEADER" = $miHeader } `
             -Method Get
         
-        $keyVaultUri = $env:KEY_VAULT_URI.TrimEnd('/')
+        # Clean up Key Vault URI
+        $keyVaultUri = $env:KEY_VAULT_URI.Trim().Trim('"').Trim("'").TrimEnd('/')
+        
+        if (-not ($keyVaultUri -as [System.Uri]) -or -not ([System.Uri]$keyVaultUri).IsAbsoluteUri) {
+            throw "Key Vault URI is not a valid absolute URI: '$keyVaultUri'"
+        }
+
         $authHeader = @{"Authorization" = "Bearer $($tokenResponse.access_token)" }
         
         # Retrieve AD service account secret
         $secretName = 'ENTRA-PWDRESET-RW'
-        $secretUri = "$keyVaultUri/secrets/$secretName?api-version=7.4"
+        $secretUri = "$keyVaultUri/secrets/${secretName}?api-version=7.4"
         
+        Write-Information "Fetching secret from: $secretUri"
+
         $secretResponse = Invoke-RestMethod `
             -Uri $secretUri `
             -Headers $authHeader `
             -Method Get
         
         # Parse credential (format: {"username":"DOMAIN\\user","password":"pwd"})
-        $credentialObject = $secretResponse.value | ConvertFrom-Json
+        $secretValue = $secretResponse.value
+        
+        # Sanitize JSON: Fix unescaped backslashes in "DOMAIN\user" format (e.g. \s in \svc)
+        if ($secretValue -match '\\(?![\\"/bfnrtu])') {
+            Write-Information "Sanitizing invalid JSON escape sequences in secret value"
+            $secretValue = $secretValue -replace '\\(?![\\"/bfnrtu])', '\\'
+        }
+
+        $credentialObject = $secretValue | ConvertFrom-Json
         $securePassword = ConvertTo-SecureString -String $credentialObject.password -AsPlainText -Force
         $global:ADServiceCredential = New-Object System.Management.Automation.PSCredential(
             $credentialObject.username,
@@ -51,7 +97,7 @@ if ($env:MSI_ENDPOINT -and $env:KEY_VAULT_URI) {
         
         # Retrieve LDAPS certificate (public key for trust)
         $certSecretName = 'LDAPS-Certificate-CER'
-        $certSecretUri = "$keyVaultUri/secrets/$certSecretName?api-version=7.4"
+        $certSecretUri = "$keyVaultUri/secrets/${certSecretName}?api-version=7.4"
         
         try {
             $certResponse = Invoke-RestMethod `

@@ -163,7 +163,6 @@ function Invoke-PasswordReset {
     
     $headers = @{
         'Authorization' = "Bearer $AccessToken"
-        'Content-Type'  = 'application/json'
     }
 
     if ($FunctionKey) {
@@ -171,16 +170,20 @@ function Invoke-PasswordReset {
         $headers['x-functions-key'] = $FunctionKey
     }
     
+    # Extract SamAccountName from UPN (assuming simple mapping for test)
+    $samAccountName = $UserPrincipalName.Split('@')[0]
+
     $body = @{
         userPrincipalName = $UserPrincipalName
+        samAccountName    = $samAccountName
         newPassword       = $NewPassword
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Depth 5 -Compress
     
     Write-StatusMessage "API URL: $apiUrl" -Type Info
-    Write-StatusMessage "User: $UserPrincipalName" -Type Info
+    Write-StatusMessage "User: $UserPrincipalName (SamAccountName: $samAccountName)" -Type Info
     
     try {
-        $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body
+        $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers $headers -Body $body -ContentType 'application/json'
         
         Write-StatusMessage "Password reset successful!" -Type Success
         Write-Host "`nResponse:" -ForegroundColor Cyan

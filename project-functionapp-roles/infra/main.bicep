@@ -588,6 +588,7 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2025-03-01' = {
         }
         validation: {
           allowedAudiences: [
+            clientId
             'api://${clientId}'
           ]
         }
