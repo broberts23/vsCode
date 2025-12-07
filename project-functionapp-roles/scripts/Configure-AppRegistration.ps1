@@ -130,6 +130,9 @@ function New-AppRegistration {
             SignInAudience         = 'AzureADMyOrg'
             AppRoles               = @($appRole)
             RequiredResourceAccess = @()
+            Api                    = @{
+                RequestedAccessTokenVersion = 2
+            }
             # Do not set IdentifierUris at creation; set after
         }
 
@@ -160,6 +163,7 @@ function New-AppRegistration {
 }
 
 function Update-ExistingAppRegistration {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [string]$AppId,
         [string]$DisplayName
@@ -177,33 +181,36 @@ function Update-ExistingAppRegistration {
     # Check if Role.PasswordReset already exists
     $existingRole = $app.AppRoles | Where-Object { $_.Value -eq 'Role.PasswordReset' }
     
+    $params = @{
+        Api = @{
+            RequestedAccessTokenVersion = 2
+        }
+    }
+
     if ($existingRole) {
         Write-StatusMessage "Role.PasswordReset already exists in App Registration" -Type Warning
-        return $app
+    }
+    else {
+        if ($PSCmdlet.ShouldProcess($app.DisplayName, 'Add Role.PasswordReset app role')) {
+            Write-StatusMessage "Adding Role.PasswordReset to existing App Registration..." -Type Info
+            
+            $newRole = New-AppRoleDefinition
+            $updatedRoles = $app.AppRoles + $newRole
+            $params.AppRoles = $updatedRoles
+        }
     }
     
-    if ($PSCmdlet.ShouldProcess($app.DisplayName, 'Add Role.PasswordReset app role')) {
-        Write-StatusMessage "Adding Role.PasswordReset to existing App Registration..." -Type Info
-        
-        $newRole = New-AppRoleDefinition
-        $updatedRoles = $app.AppRoles + $newRole
-        
-        $params = @{
-            AppRoles = $updatedRoles
-        }
-        
-        if ($DisplayName) {
-            $params.DisplayName = $DisplayName
-        }
-        
-        Update-MgApplication -ApplicationId $app.Id -BodyParameter $params -ErrorAction Stop
-        
-        Write-StatusMessage "App Registration updated successfully!" -Type Success
-        
-        # Refresh app object
-        $app = Get-MgApplication -ApplicationId $app.Id
-        return $app
+    if ($DisplayName) {
+        $params.DisplayName = $DisplayName
     }
+    
+    Update-MgApplication -ApplicationId $app.Id -BodyParameter $params -ErrorAction Stop
+    
+    Write-StatusMessage "App Registration updated successfully!" -Type Success
+    
+    # Refresh app object
+    $app = Get-MgApplication -ApplicationId $app.Id
+    return $app
 }
 
 function Show-AppRegistrationSummary {

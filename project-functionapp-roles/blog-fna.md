@@ -28,7 +28,7 @@ Before your PowerShell code even starts executing, Azure's App Service Authentic
 
 **Timing Checks**: The middleware validates `exp` (expiration) and `nbf` (not before) claims. Expired or not-yet-valid tokens are rejected immediately with a 401.
 
-**Issuer Verification**: The token's `iss` claim must match the configured issuer (`https://sts.windows.net/{tenant-id}/v2.0`). Tokens from other tenants or identity providers are rejected.
+**Issuer Verification**: The token's `iss` claim must match the configured issuer (`https://login.microsoftonline.com/{tenant-id}/v2.0`). Tokens from other tenants or identity providers are rejected.
 
 **Audience Validation**: The token's `aud` claim must match `api://{clientId}`. This prevents token reuse across different APIs.
 

@@ -583,7 +583,7 @@ resource functionAppAuth 'Microsoft.Web/sites/config@2025-03-01' = {
       azureActiveDirectory: {
         enabled: true
         registration: {
-          openIdIssuer: 'https://sts.windows.net/${tenantId}/v2.0'
+          openIdIssuer: '${az.environment().authentication.loginEndpoint}${tenantId}/v2.0'
           clientId: clientId
         }
         validation: {

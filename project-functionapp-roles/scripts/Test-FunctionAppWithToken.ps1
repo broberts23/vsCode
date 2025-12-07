@@ -223,8 +223,15 @@ function Show-TokenClaims {
     Write-Host $claims.aud -ForegroundColor White
     Write-Host "  Issuer (iss):    " -NoNewline -ForegroundColor Yellow
     Write-Host $claims.iss -ForegroundColor White
+
+    if ($claims.iss -notmatch "/v2\.0$") {
+        Write-StatusMessage "WARNING: Token issuer is not v2.0. Function App validation may fail." -Type Warning
+        Write-StatusMessage "Ensure the App Registration has 'accessTokenAcceptedVersion: 2' in its manifest." -Type Warning
+    }
+    
     Write-Host "  App ID (appid):  " -NoNewline -ForegroundColor Yellow
-    Write-Host $claims.appid -ForegroundColor White
+    $appId = if ($claims.PSObject.Properties.Match('appid').Count) { $claims.appid } elseif ($claims.PSObject.Properties.Match('azp').Count) { $claims.azp } else { "Unknown" }
+    Write-Host $appId -ForegroundColor White
     Write-Host "  Roles:           " -NoNewline -ForegroundColor Yellow
     Write-Host ($claims.roles -join ', ') -ForegroundColor White
     Write-Host "  Expires (exp):   " -NoNewline -ForegroundColor Yellow
