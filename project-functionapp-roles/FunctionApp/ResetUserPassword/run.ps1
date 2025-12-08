@@ -59,6 +59,9 @@ try {
     # Get configuration from environment variables
     $requiredRole = $env:REQUIRED_ROLE
     $domainControllerFqdn = $env:DOMAIN_CONTROLLER_FQDN
+    if ([string]::IsNullOrWhiteSpace($domainControllerFqdn)) {
+        $domainControllerFqdn = $env:DOMAIN_CONTROLLER
+    }
     $domainName = $env:DOMAIN_NAME
     
     if (-not $requiredRole) {

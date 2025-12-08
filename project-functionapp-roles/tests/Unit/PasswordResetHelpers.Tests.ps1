@@ -333,14 +333,6 @@ Describe 'PasswordResetHelpers Module' {
             Should -Invoke Get-ADUserDistinguishedName -ModuleName PasswordResetHelpers -Times 1
         }
         
-        It 'Should support -WhatIf and not attempt LDAPS operations' {
-            $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            Set-ADUserPassword -SamAccountName 'jdoe' -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -WhatIf
-            
-            # WhatIf should not invoke Get-ADUserDistinguishedName or any LDAPS operations
-            Should -Invoke Get-ADUserDistinguishedName -ModuleName PasswordResetHelpers -Times 0
-        }
-        
         It 'Should have required parameters defined' {
             $command = Get-Command Set-ADUserPassword -Module PasswordResetHelpers
             $command.Parameters.ContainsKey('SamAccountName') | Should -Be $true

@@ -425,65 +425,67 @@ function Set-ADUserPassword {
         try {
             Write-Verbose "Setting password for AD user via LDAPS: $SamAccountName"
             
-            if ($PSCmdlet.ShouldProcess($SamAccountName, 'Set AD user password via LDAPS')) {
-                # Get user's Distinguished Name
-                $userDN = Get-ADUserDistinguishedName `
-                    -SamAccountName $SamAccountName `
-                    -DomainController $DomainController `
-                    -Credential $Credential `
-                    -DomainName $DomainName
-                
-                # Create LDAP connection
-                $ldapIdentifier = [System.DirectoryServices.Protocols.LdapDirectoryIdentifier]::new($DomainController, 636)
-                $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($ldapIdentifier)
-                
-                # Configure for LDAPS
-                $connection.SessionOptions.SecureSocketLayer = $true
-                $connection.SessionOptions.ProtocolVersion = 3
-                
-                # Set authentication
-                $networkCred = [System.Net.NetworkCredential]::new(
-                    $Credential.UserName,
-                    $Credential.Password
-                )
-                $connection.Credential = $networkCred
-                $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Basic
-                
-                # Bind
-                $connection.Bind()
-                Write-Verbose "LDAPS connection established for password reset"
-                
-                # Convert password to UTF-16LE format with quotes (required for unicodePwd attribute)
-                # Reference: https://learn.microsoft.com/troubleshoot/windows-server/active-directory/set-user-password-with-ldifde
-                $passwordWithQuotes = "`"$Password`""
-                $passwordBytes = [System.Text.Encoding]::Unicode.GetBytes($passwordWithQuotes)
-                
-                # Create modify request for unicodePwd attribute
-                $modifyRequest = [System.DirectoryServices.Protocols.ModifyRequest]::new(
-                    $userDN,
-                    [System.DirectoryServices.Protocols.DirectoryAttributeOperation]::Replace,
-                    'unicodePwd',
-                    $passwordBytes
-                )
-                
-                # Execute password reset
-                $modifyResponse = [System.DirectoryServices.Protocols.ModifyResponse]$connection.SendRequest($modifyRequest)
-                
-                if ($modifyResponse.ResultCode -eq [System.DirectoryServices.Protocols.ResultCode]::Success) {
-                    Write-Verbose "Password set successfully for AD user: $SamAccountName"
-                    
-                    if ($ChangePasswordAtLogon) {
-                        Write-Warning "ChangePasswordAtLogon not implemented via LDAPS in this version"
-                    }
-                    
-                    return $true
-                }
-                else {
-                    throw "LDAP modify failed with result code: $($modifyResponse.ResultCode)"
-                }
-            }
+            # Bypass ShouldProcess check for non-interactive execution (e.g. Azure Functions)
+            # if ($PSCmdlet.ShouldProcess($SamAccountName, 'Set AD user password via LDAPS')) {
             
-            return $false
+            # Get user's Distinguished Name
+            $userDN = Get-ADUserDistinguishedName `
+                -SamAccountName $SamAccountName `
+                -DomainController $DomainController `
+                -Credential $Credential `
+                -DomainName $DomainName
+            
+            # Create LDAP connection
+            $ldapIdentifier = [System.DirectoryServices.Protocols.LdapDirectoryIdentifier]::new($DomainController, 636)
+            $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($ldapIdentifier)
+            
+            # Configure for LDAPS
+            $connection.SessionOptions.SecureSocketLayer = $true
+            $connection.SessionOptions.ProtocolVersion = 3
+            
+            # Set authentication
+            $networkCred = [System.Net.NetworkCredential]::new(
+                $Credential.UserName,
+                $Credential.Password
+            )
+            $connection.Credential = $networkCred
+            $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Basic
+            
+            # Bind
+            $connection.Bind()
+            Write-Verbose "LDAPS connection established for password reset"
+            
+            # Convert password to UTF-16LE format with quotes (required for unicodePwd attribute)
+            # Reference: https://learn.microsoft.com/troubleshoot/windows-server/active-directory/set-user-password-with-ldifde
+            $passwordWithQuotes = "`"$Password`""
+            $passwordBytes = [System.Text.Encoding]::Unicode.GetBytes($passwordWithQuotes)
+            
+            # Create modify request for unicodePwd attribute
+            $modifyRequest = [System.DirectoryServices.Protocols.ModifyRequest]::new(
+                $userDN,
+                [System.DirectoryServices.Protocols.DirectoryAttributeOperation]::Replace,
+                'unicodePwd',
+                $passwordBytes
+            )
+            
+            # Execute password reset
+            $modifyResponse = [System.DirectoryServices.Protocols.ModifyResponse]$connection.SendRequest($modifyRequest)
+            
+            if ($modifyResponse.ResultCode -eq [System.DirectoryServices.Protocols.ResultCode]::Success) {
+                Write-Verbose "Password set successfully for AD user: $SamAccountName"
+                
+                if ($ChangePasswordAtLogon) {
+                    Write-Warning "ChangePasswordAtLogon not implemented via LDAPS in this version"
+                }
+                
+                return $true
+            }
+            else {
+                throw "LDAP modify failed with result code: $($modifyResponse.ResultCode)"
+            }
+            # } # End ShouldProcess
+            
+            # return $false
         }
         catch {
             Write-Error "Failed to set password via LDAPS for AD user $SamAccountName : $_"

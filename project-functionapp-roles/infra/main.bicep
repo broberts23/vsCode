@@ -498,6 +498,9 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
     reserved: true
     httpsOnly: true
     clientAffinityEnabled: false
+    virtualNetworkSubnetId: deployDomainController
+      ? resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'FunctionAppSubnet')
+      : null
     siteConfig: {
       linuxFxVersion: 'PowerShell|7.4'
       powerShellVersion: '7.4'
@@ -558,8 +561,20 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
           value: keyVault.properties.vaultUri
         }
         {
-          name: 'DOMAIN_CONTROLLER'
-          value: domainController
+          name: 'DOMAIN_CONTROLLER_FQDN'
+          value: deployDomainController ? '${dcVmName}.${domainName}' : domainController
+        }
+        {
+          name: 'DOMAIN_NAME'
+          value: domainName
+        }
+        {
+          name: 'WEBSITE_DNS_SERVER'
+          value: deployDomainController ? '10.0.1.4' : ''
+        }
+        {
+          name: 'WEBSITE_VNET_ROUTE_ALL'
+          value: '1'
         }
       ]
     }
