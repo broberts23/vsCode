@@ -208,27 +208,47 @@ try {
             # Reference: https://learn.microsoft.com/troubleshoot/windows-server/active-directory/enable-ldap-over-ssl-3rd-certification-authority
             $cert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation 'Cert:\LocalMachine\My' -Password $pfxPasswordSecure
             Write-Log "LDAPS certificate imported: $($cert.Thumbprint)" -Level Information
+
+            # Basic validation: cert must have a private key and Server Authentication EKU
+            try {
+                $ekuExt = $cert.Extensions | Where-Object { $_.Oid.FriendlyName -eq 'Enhanced Key Usage' } | Select-Object -First 1
+                $ekuNames = if ($ekuExt) { ($ekuExt.EnhancedKeyUsages | ForEach-Object { $_.FriendlyName }) } else { @() }
+
+                if (-not $cert.HasPrivateKey) {
+                    Write-Log "LDAPS certificate does not have a private key. Schannel may log event 36886 and LDAPS will fail." -Level Warning
+                }
+                if ($ekuNames.Count -eq 0) {
+                    Write-Log "LDAPS certificate has no Enhanced Key Usage (EKU) extension. It should include 'Server Authentication'." -Level Warning
+                }
+                elseif ($ekuNames -notcontains 'Server Authentication') {
+                    Write-Log ("LDAPS certificate EKU does not include 'Server Authentication'. EKU: " + ($ekuNames -join ', ')) -Level Warning
+                }
+            }
+            catch {
+                Write-Log "Unable to validate LDAPS certificate EKU/private key details: $_" -Level Warning
+            }
+
+            # For a self-signed LDAPS cert, add it to LocalMachine Root so the chain is trusted on the DC itself
+            # (avoids certmgr warning and can help Schannel choose the credential)
+            try {
+                $rootStore = New-Object System.Security.Cryptography.X509Certificates.X509Store(
+                    [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                    [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+                )
+                $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                $existingRoot = $rootStore.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+                if (-not $existingRoot) {
+                    $rootStore.Add($cert)
+                    Write-Log "LDAPS certificate added to LocalMachine Trusted Root store: $($cert.Thumbprint)" -Level Information
+                }
+                $rootStore.Close()
+            }
+            catch {
+                Write-Log "Unable to add LDAPS certificate to LocalMachine Trusted Root store (non-fatal): $_" -Level Warning
+            }
             
             # Clean up temp file
             Remove-Item -Path $pfxPath -Force -ErrorAction SilentlyContinue
-            
-            # Configure Windows Firewall for LDAPS (port 636)
-            Write-Log "Configuring firewall for LDAPS (port 636)..."
-            $firewallRule = Get-NetFirewallRule -DisplayName 'LDAPS (TCP-In)' -ErrorAction SilentlyContinue
-            if (-not $firewallRule) {
-                New-NetFirewallRule `
-                    -DisplayName 'LDAPS (TCP-In)' `
-                    -Direction Inbound `
-                    -Protocol TCP `
-                    -LocalPort 636 `
-                    -Action Allow `
-                    -Profile Any `
-                    -Description 'Allow inbound LDAPS (LDAP over SSL) traffic on port 636'
-                Write-Log "Firewall rule created for LDAPS"
-            }
-            else {
-                Write-Log "Firewall rule for LDAPS already exists"
-            }
             
             # Test LDAPS listener (AD DS automatically enables LDAPS when valid cert is present)
             Write-Log "Waiting for LDAPS to become available..."

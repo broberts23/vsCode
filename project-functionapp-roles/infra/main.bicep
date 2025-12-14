@@ -516,7 +516,7 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
       scmMinTlsVersion: '1.2'
       http20Enabled: true
       functionAppScaleLimit: 200
-      minimumElasticInstanceCount: 0
+      minimumElasticInstanceCount: 1
       appSettings: [
         {
           name: 'FUNCTIONS_EXTENSION_VERSION'

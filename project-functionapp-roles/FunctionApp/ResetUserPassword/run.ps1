@@ -227,6 +227,7 @@ try {
     Write-Information "Generating secure password"
     
     $newPassword = New-SecurePassword -Length 16
+    $newPasswordSecure = ConvertTo-SecureString -String $newPassword -AsPlainText -Force
     
     Write-Information "Setting password for AD user: $samAccountName"
     
@@ -234,7 +235,7 @@ try {
         # Use LDAPS for password reset (no AD PowerShell module required)
         $setParams = @{
             SamAccountName        = $samAccountName
-            Password              = $newPassword
+            Password              = $newPasswordSecure
             Credential            = $global:ADServiceCredential
             DomainController      = $domainController ?? $domainControllerFqdn
             DomainName            = $domainName

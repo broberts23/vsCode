@@ -422,7 +422,7 @@ function Set-ADUserPassword {
     .PARAMETER SamAccountName
         The user's sAMAccountName
     .PARAMETER Password
-        The new password (plain text)
+        The new password (SecureString)
     .PARAMETER Credential
         Service account credential with permissions to reset passwords in AD
     .PARAMETER DomainController
@@ -434,7 +434,7 @@ function Set-ADUserPassword {
     .OUTPUTS
         System.Boolean
     .EXAMPLE
-        $success = Set-ADUserPassword -SamAccountName 'jdoe' -Password $newPassword -Credential $adCred -DomainController 'dc01.contoso.local' -DomainName 'contoso.local'
+        $success = Set-ADUserPassword -SamAccountName 'jdoe' -Password $newPasswordSecure -Credential $adCred -DomainController 'dc01.contoso.local' -DomainName 'contoso.local'
     .LINK
         https://learn.microsoft.com/dotnet/api/system.directoryservices.protocols.modifyrequest
     .LINK
@@ -448,8 +448,8 @@ function Set-ADUserPassword {
         [string]$SamAccountName,
         
         [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]$Password,
+        [ValidateNotNull()]
+        [securestring]$Password,
         
         [Parameter(Mandatory)]
         [ValidateNotNull()]
@@ -471,6 +471,11 @@ function Set-ADUserPassword {
         $connection = $null
         try {
             Write-Verbose "Setting password for AD user via LDAPS: $SamAccountName"
+
+            $passwordPlain = [System.Net.NetworkCredential]::new('', $Password).Password
+            if ([string]::IsNullOrWhiteSpace($passwordPlain)) {
+                throw "Password cannot be empty."
+            }
             
             # Bypass ShouldProcess check for non-interactive execution (e.g. Azure Functions)
             # if ($PSCmdlet.ShouldProcess($SamAccountName, 'Set AD user password via LDAPS')) {
@@ -504,7 +509,7 @@ function Set-ADUserPassword {
             
             # Convert password to UTF-16LE format with quotes (required for unicodePwd attribute)
             # Reference: https://learn.microsoft.com/troubleshoot/windows-server/active-directory/set-user-password-with-ldifde
-            $passwordWithQuotes = "`"$Password`""
+            $passwordWithQuotes = "`"$passwordPlain`""
             $passwordBytes = [System.Text.Encoding]::Unicode.GetBytes($passwordWithQuotes)
             
             # Create modify request for unicodePwd attribute

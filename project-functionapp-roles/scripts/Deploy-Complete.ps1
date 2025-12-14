@@ -254,6 +254,7 @@ prompt = no
 default_md = sha256
 distinguished_name = dn
 req_extensions = v3_req
+x509_extensions = v3_req
 
 [dn]
 CN = $DomainControllerFqdn
@@ -277,7 +278,8 @@ DNS.2 = *.$DomainName
             '-newkey', 'rsa:2048',
             '-keyout', $keyPath,
             '-out', $certPath,
-            '-config', $configPath
+            '-config', $configPath,
+            '-extensions', 'v3_req'
         )
         & $opensslGenCmd[0] $opensslGenCmd[1..($opensslGenCmd.Length - 1)] 2>&1 | Out-Null
         
@@ -295,10 +297,16 @@ DNS.2 = *.$DomainName
             throw "OpenSSL PFX conversion failed with exit code: $LASTEXITCODE"
         }
         
-        # Read certificate and extract thumbprint
-        $certContent = Get-Content -Path $certPath -Raw
-        $certBytes = [System.Text.Encoding]::UTF8.GetBytes($certContent)
-        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certBytes)
+        # Convert PEM to DER for easier parsing and for client trust installation
+        $derCertPath = Join-Path $tempDir 'ldaps.cer'
+        & openssl x509 -in $certPath -outform der -out $derCertPath 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "OpenSSL DER conversion failed with exit code: $LASTEXITCODE"
+        }
+
+        # Read DER certificate and extract thumbprint
+        $derBytes = [System.IO.File]::ReadAllBytes($derCertPath)
+        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($derBytes)
         $thumbprint = $cert.Thumbprint
         $subject = $cert.Subject
         $notAfter = $cert.NotAfter
@@ -309,9 +317,8 @@ DNS.2 = *.$DomainName
         $pfxBytes = [System.IO.File]::ReadAllBytes($pfxPath)
         $pfxBase64 = [Convert]::ToBase64String($pfxBytes)
         
-        # Read certificate file (PEM format) and encode to base64
-        $cerBytes = [System.IO.File]::ReadAllBytes($certPath)
-        $cerBase64 = [Convert]::ToBase64String($cerBytes)
+        # Read DER certificate and encode to base64
+        $cerBase64 = [Convert]::ToBase64String($derBytes)
         
         Write-Log "Certificate exported successfully" -Level Success
         
@@ -467,7 +474,7 @@ function Invoke-DomainControllerPromotion {
         $passwordBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($plainPassword))
 
         # Run command as background job since the VM will reboot and the command won't return normally
-        $job = Invoke-AzVMRunCommand `
+        $null = Invoke-AzVMRunCommand `
             -ResourceGroupName $ResourceGroupName `
             -VMName $VmName `
             -CommandId 'RunPowerShellScript' `
@@ -622,6 +629,87 @@ function Invoke-DomainControllerPostConfig {
 
         if ($result.Value[0].Message -like '*completed successfully*') {
             Write-Log "AD post-configuration completed successfully" -Level Success
+
+            # If we installed an LDAPS certificate, reboot so AD DS/LSASS re-evaluates the default server credential.
+            # This helps avoid Schannel 36886 persisting due to startup before cert install.
+            if ($LdapsCertificate) {
+                Write-Log "LDAPS certificate was provided; rebooting VM so LDAPS certificate is picked up..." -Level Warning
+
+                try {
+                    Restart-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -Force | Out-Null
+                }
+                catch {
+                    Write-Log "Failed to reboot VM after LDAPS certificate install: $($_.Exception.Message)" -Level Warning
+                    return
+                }
+
+                # Wait for VM and AD to come back
+                Write-Log "Waiting for VM reboot and AD readiness after LDAPS install..." -Level Information
+                $timeout2 = 1800
+                $elapsed2 = 0
+                $checkInterval2 = 60
+                $ready = $false
+
+                while ($elapsed2 -lt $timeout2) {
+                    try {
+                        $testScript = 'try { Import-Module ActiveDirectory -ErrorAction Stop; Get-ADDomain -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }'
+                        $testResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $testScript -ErrorAction SilentlyContinue
+                        if ($testResult -and $testResult.Value -and $testResult.Value[0].Message -notlike '*exit code*1*') {
+                            $ready = $true
+                            break
+                        }
+                    }
+                    catch {
+                        # Ignore transient errors during reboot
+                    }
+
+                    Start-Sleep -Seconds $checkInterval2
+                    $elapsed2 += $checkInterval2
+                }
+
+                if (-not $ready) {
+                    Write-Log "Timeout waiting for AD readiness after reboot; verify LDAPS manually." -Level Warning
+                    return
+                }
+
+                # Validate LDAPS with an actual TLS bind (not just TCP open)
+                $serviceAccountNameToUse = if ([string]::IsNullOrWhiteSpace($ServiceAccountName)) { 'svc-functionapp' } else { $ServiceAccountName }
+                $serviceAccountPasswordPlain = $password
+                $ldapsValidateScript = @"
+`$ErrorActionPreference = 'Stop'
+`$domainName = '$DomainName'
+`$vmName = '$VmName'
+`$dcFqdn = "`$vmName.`$domainName"
+
+`$user = "`$env:USERDOMAIN\\$serviceAccountNameToUse"
+`$sec = ConvertTo-SecureString -String '$serviceAccountPasswordPlain' -AsPlainText -Force
+`$cred = New-Object System.Management.Automation.PSCredential(`$user, `$sec)
+
+Add-Type -AssemblyName System.DirectoryServices.Protocols
+`$id = New-Object System.DirectoryServices.Protocols.LdapDirectoryIdentifier(`$dcFqdn, 636, `$false, `$false)
+`$conn = New-Object System.DirectoryServices.Protocols.LdapConnection(`$id)
+`$conn.SessionOptions.SecureSocketLayer = `$true
+`$conn.SessionOptions.ProtocolVersion = 3
+`$conn.AuthType = [System.DirectoryServices.Protocols.AuthType]::Basic
+`$conn.Credential = `$cred.GetNetworkCredential()
+`$conn.Bind()
+Write-Output "LDAPS TLS bind succeeded to `$dcFqdn:636 as `$user"
+"@
+
+                try {
+                    $ldapsResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $ldapsValidateScript -ErrorAction Stop
+                    if ($ldapsResult -and $ldapsResult.Value -and $ldapsResult.Value[0].Message) {
+                        Write-Log "LDAPS validation output: $($ldapsResult.Value[0].Message.Trim())" -Level Success
+                    }
+                    else {
+                        Write-Log "LDAPS validation completed but produced no output." -Level Warning
+                    }
+                }
+                catch {
+                    Write-Log "LDAPS validation failed after reboot: $($_.Exception.Message)" -Level Error
+                    throw
+                }
+            }
         }
         else {
             Write-Log "AD post-configuration may have issues; check VM logs" -Level Warning

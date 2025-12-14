@@ -72,7 +72,7 @@ Describe 'PasswordResetHelpers Module' {
             
             $json = $validPrincipal | ConvertTo-Json -Compress
             $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $validHeader = [System.Convert]::ToBase64String($bytes)
+            $script:validHeader = [System.Convert]::ToBase64String($bytes)
         }
         
         It 'Should throw on null header' {
@@ -88,14 +88,14 @@ Describe 'PasswordResetHelpers Module' {
         }
         
         It 'Should decode valid client principal header' {
-            $result = Get-ClientPrincipal -HeaderValue $validHeader
+            $result = Get-ClientPrincipal -HeaderValue $script:validHeader
             $result | Should -Not -BeNullOrEmpty
             $result.auth_typ | Should -Be 'aad'
             $result.claims | Should -Not -BeNullOrEmpty
         }
         
         It 'Should return principal with claims array' {
-            $result = Get-ClientPrincipal -HeaderValue $validHeader
+            $result = Get-ClientPrincipal -HeaderValue $script:validHeader
             $result.claims | Should -HaveCount 2
             $result.claims[0].typ | Should -Be 'roles'
             $result.claims[0].val | Should -Be 'Role.PasswordReset'
@@ -123,7 +123,7 @@ Describe 'PasswordResetHelpers Module' {
     Context 'Test-RoleClaim' {
         BeforeAll {
             # Create test client principal with roles
-            $principalWithRoles = [PSCustomObject]@{
+            $script:principalWithRoles = [PSCustomObject]@{
                 auth_typ = 'aad'
                 claims   = @(
                     @{ typ = 'roles'; val = 'Role.PasswordReset' }
@@ -132,7 +132,7 @@ Describe 'PasswordResetHelpers Module' {
             }
             
             # Principal without role claims
-            $principalWithoutRoles = [PSCustomObject]@{
+            $script:principalWithoutRoles = [PSCustomObject]@{
                 auth_typ = 'aad'
                 claims   = @(
                     @{ typ = 'name'; val = 'user@contoso.com' }
@@ -140,7 +140,7 @@ Describe 'PasswordResetHelpers Module' {
             }
             
             # Principal with no claims
-            $principalNoClaims = [PSCustomObject]@{
+            $script:principalNoClaims = [PSCustomObject]@{
                 auth_typ = 'aad'
             }
         }
@@ -150,22 +150,22 @@ Describe 'PasswordResetHelpers Module' {
         }
         
         It 'Should return true when required role exists' {
-            $result = Test-RoleClaim -Principal $principalWithRoles -RequiredRole 'Role.PasswordReset'
+            $result = Test-RoleClaim -Principal $script:principalWithRoles -RequiredRole 'Role.PasswordReset'
             $result | Should -Be $true
         }
         
         It 'Should return false when required role does not exist' {
-            $result = Test-RoleClaim -Principal $principalWithRoles -RequiredRole 'Role.NonExistent'
+            $result = Test-RoleClaim -Principal $script:principalWithRoles -RequiredRole 'Role.NonExistent'
             $result | Should -Be $false
         }
         
         It 'Should return false when no roles exist' {
-            $result = Test-RoleClaim -Principal $principalWithoutRoles -RequiredRole 'Role.PasswordReset'
+            $result = Test-RoleClaim -Principal $script:principalWithoutRoles -RequiredRole 'Role.PasswordReset'
             $result | Should -Be $false
         }
         
         It 'Should return false when no claims exist' {
-            $result = Test-RoleClaim -Principal $principalNoClaims -RequiredRole 'Role.PasswordReset'
+            $result = Test-RoleClaim -Principal $script:principalNoClaims -RequiredRole 'Role.PasswordReset'
             $result | Should -Be $false
         }
         
@@ -260,6 +260,65 @@ Describe 'PasswordResetHelpers Module' {
         It 'Should throw on invalid base64' {
             { Install-LdapsTrustedCertificate -CertificateBase64 'not-valid-base64!!!' } | Should -Throw
         }
+
+        It 'Should accept a valid DER certificate and return true' {
+            $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+            $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                'CN=unit-test-der',
+                $rsa,
+                [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+            )
+            $cert = $req.CreateSelfSigned([datetime]::UtcNow.AddMinutes(-1), [datetime]::UtcNow.AddDays(7))
+
+            $bytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+            $base64 = [Convert]::ToBase64String($bytes)
+
+            try {
+                (Install-LdapsTrustedCertificate -CertificateBase64 $base64 -ErrorAction Stop) | Should -BeTrue
+            }
+            finally {
+                # Cleanup: remove from CurrentUser Root if present
+                $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                    [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+                )
+                $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                $toRemove = $store.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+                foreach ($c in $toRemove) { $store.Remove($c) }
+                $store.Close()
+            }
+        }
+
+        It 'Should accept a valid PEM certificate and return true' {
+            $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+            $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                'CN=unit-test-pem',
+                $rsa,
+                [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+                [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+            )
+            $cert = $req.CreateSelfSigned([datetime]::UtcNow.AddMinutes(-1), [datetime]::UtcNow.AddDays(7))
+
+            $pem = $cert.ExportCertificatePem()
+            $pemBytes = [System.Text.Encoding]::UTF8.GetBytes($pem)
+            $base64 = [Convert]::ToBase64String($pemBytes)
+
+            try {
+                (Install-LdapsTrustedCertificate -CertificateBase64 $base64 -ErrorAction Stop) | Should -BeTrue
+            }
+            finally {
+                # Cleanup: remove from CurrentUser Root if present
+                $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                    [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+                )
+                $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+                $toRemove = $store.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+                foreach ($c in $toRemove) { $store.Remove($c) }
+                $store.Close()
+            }
+        }
     }
     
     Context 'Get-ADUserDistinguishedName' {
@@ -286,12 +345,14 @@ Describe 'PasswordResetHelpers Module' {
         
         It 'Should throw on null SamAccountName' {
             $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            { Set-ADUserPassword -SamAccountName $null -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
+            $pw = ConvertTo-SecureString 'SecurePass123!' -AsPlainText -Force
+            { Set-ADUserPassword -SamAccountName $null -Password $pw -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
         }
         
         It 'Should throw on empty SamAccountName' {
             $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            { Set-ADUserPassword -SamAccountName '' -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
+            $pw = ConvertTo-SecureString 'SecurePass123!' -AsPlainText -Force
+            { Set-ADUserPassword -SamAccountName '' -Password $pw -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
         }
         
         It 'Should throw on null Password' {
@@ -301,14 +362,16 @@ Describe 'PasswordResetHelpers Module' {
         
         It 'Should throw on empty Password' {
             $testCred = [PSCredential]::new('testuser', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
-            { Set-ADUserPassword -SamAccountName 'jdoe' -Password '' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
+            $pwEmpty = [System.Security.SecureString]::new()
+            { Set-ADUserPassword -SamAccountName 'jdoe' -Password $pwEmpty -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' } | Should -Throw
         }
         
         It 'Should attempt to get user DN when called with valid parameters' {
             $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
+            $pw = ConvertTo-SecureString 'SecurePass123!' -AsPlainText -Force
             
             # This will fail at Get-ADUserDistinguishedName (mocked to throw), which is expected for unit test
-            { Set-ADUserPassword -SamAccountName 'jdoe' -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Throw
+            { Set-ADUserPassword -SamAccountName 'jdoe' -Password $pw -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Throw
             
             Should -Invoke Get-ADUserDistinguishedName -ModuleName PasswordResetHelpers -Times 1 -ParameterFilter {
                 $SamAccountName -eq 'jdoe' -and
@@ -319,16 +382,18 @@ Describe 'PasswordResetHelpers Module' {
         
         It 'Should throw when user not found' {
             $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
+            $pw = ConvertTo-SecureString 'SecurePass123!' -AsPlainText -Force
             Mock Get-ADUserDistinguishedName { throw 'User not found' } -ModuleName PasswordResetHelpers
             
-            { Set-ADUserPassword -SamAccountName 'nonexistent' -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Throw '*User not found*'
+            { Set-ADUserPassword -SamAccountName 'nonexistent' -Password $pw -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Throw '*User not found*'
         }
         
         It 'Should accept pipeline input for SamAccountName' {
             $testCred = [PSCredential]::new('CONTOSO\\svc-test', (ConvertTo-SecureString 'testpass' -AsPlainText -Force))
+            $pw = ConvertTo-SecureString 'SecurePass123!' -AsPlainText -Force
             
             # This will fail at Get-ADUserDistinguishedName (mocked to throw), which is expected for unit test
-            { 'jdoe' | Set-ADUserPassword -Password 'SecurePass123!' -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Throw
+            { 'jdoe' | Set-ADUserPassword -Password $pw -Credential $testCred -DomainController 'dc.contoso.local' -DomainName 'contoso.local' -Confirm:$false } | Should -Throw
             
             Should -Invoke Get-ADUserDistinguishedName -ModuleName PasswordResetHelpers -Times 1
         }
