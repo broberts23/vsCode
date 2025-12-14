@@ -119,14 +119,15 @@ function Get-AccessToken {
         [string]$Scope
     )
     
-    Write-StatusMessage "Requesting access token from Azure AD (v1)..." -Type Info
-    
-    $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/token"
-    
+    Write-StatusMessage "Requesting access token from Entra (v2.0)..." -Type Info
+
+    # Use the v2.0 token endpoint so the token issuer matches authsettingsV2 (/v2.0)
+    $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+
     $body = @{
         client_id     = $ClientId
         client_secret = $ClientSecret
-        resource      = $Scope.Replace('/.default', '') # v1 uses resource, not scope
+        scope         = $Scope
         grant_type    = 'client_credentials'
     }
     
@@ -156,6 +157,12 @@ function Invoke-PasswordReset {
     
     Write-StatusMessage "Calling Password Reset Function App..." -Type Info
     
+    # Normalize URL (support callers passing just the hostname)
+    $FunctionAppUrl = $FunctionAppUrl.Trim()
+    if ($FunctionAppUrl -notmatch '^https?://') {
+        $FunctionAppUrl = "https://$FunctionAppUrl"
+    }
+
     # Remove trailing slash from URL
     $FunctionAppUrl = $FunctionAppUrl.TrimEnd('/')
     

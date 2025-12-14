@@ -96,6 +96,12 @@ var effectiveAdServiceAccountUsername = deployDomainController
   : adServiceAccountUsername
 var effectiveAdServiceAccountPassword = deployDomainController ? serviceAccountPassword : adServiceAccountPassword
 
+// Defensive: if a boolean leaks into vmAdminUsername, ARM will coerce it to a string like "True".
+// Fall back to the intended default username.
+var effectiveVmAdminUsername = (toLower(vmAdminUsername) == 'true' || toLower(vmAdminUsername) == 'false')
+  ? 'azureadmin'
+  : vmAdminUsername
+
 // ====================================
 // Resources
 // ====================================
@@ -206,7 +212,7 @@ resource vmAdminSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' = if (depl
   parent: keyVault
   name: 'DC-VM-ADMIN-CREDENTIAL'
   properties: {
-    value: '{"username":"${vmAdminUsername}","password":"${vmAdminPassword}"}'
+    value: '{"username":"${effectiveVmAdminUsername}","password":"${vmAdminPassword}"}'
     contentType: 'application/json'
     attributes: {
       enabled: true
@@ -405,7 +411,7 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = if (deployDomainC
     }
     osProfile: {
       computerName: take(dcVmName, 15)
-      adminUsername: vmAdminUsername
+      adminUsername: effectiveVmAdminUsername
       adminPassword: vmAdminPassword
       windowsConfiguration: {
         enableAutomaticUpdates: true
@@ -467,19 +473,20 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = if (deployDomainC
 // 3. Monitor for reboot and AD readiness
 // 4. Invoke Configure-ADPostPromotion.ps1 via Run Command
 
-// App Service Plan (Linux Consumption)
-// https://learn.microsoft.com/azure/app-service/overview-hosting-plans
+// App Service Plan (Elastic Premium - Windows)
+// VNet Integration isn't supported on Consumption (Y1).
+// https://learn.microsoft.com/azure/azure-functions/functions-networking-options
 resource appServicePlan 'Microsoft.Web/serverfarms@2025-03-01' = {
   name: appServicePlanName
   location: location
   tags: tags
   sku: {
-    name: 'Y1'
-    tier: 'Dynamic'
+    name: 'EP1'
+    tier: 'ElasticPremium'
   }
   kind: 'functionapp'
   properties: {
-    reserved: true // Linux
+    reserved: false
   }
 }
 
@@ -489,20 +496,19 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
   name: functionAppName
   location: location
   tags: tags
-  kind: 'functionapp,linux'
+  kind: 'functionapp'
   identity: {
     type: 'SystemAssigned'
   }
   properties: {
     serverFarmId: appServicePlan.id
-    reserved: true
+    reserved: false
     httpsOnly: true
     clientAffinityEnabled: false
     virtualNetworkSubnetId: deployDomainController
       ? resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'FunctionAppSubnet')
       : null
     siteConfig: {
-      linuxFxVersion: 'PowerShell|7.4'
       powerShellVersion: '7.4'
       use32BitWorkerProcess: false
       ftpsState: 'Disabled'

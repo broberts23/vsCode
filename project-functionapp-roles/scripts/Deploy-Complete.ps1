@@ -100,6 +100,7 @@ function Write-Log {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
         [string]$Message,
 
         [Parameter(Mandatory = $false)]
@@ -114,7 +115,11 @@ function Write-Log {
         'Error' { 'Red' }
         'Success' { 'Green' }
     }
-    
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        $Message = '(no message)'
+    }
+
     Write-Host "[$timestamp] [$Level] $Message" -ForegroundColor $color
 }
 
@@ -434,7 +439,7 @@ function Invoke-DomainControllerPromotion {
         Write-Log "Waiting for VM to be ready for promotion..." -Level Information
         
         # Wait for VM to be in running state
-        $timeout = 300
+        $timeout = 360
         $elapsed = 0
         $checkInterval = 15
         
@@ -637,6 +642,7 @@ try {
     if ($null -eq $context) {
         Write-Log "Not authenticated to Azure; connecting..." -Level Warning
         Connect-AzAccount
+        $context = Get-AzContext -ErrorAction Stop
     }
     else {
         Write-Log "Authenticated as: $($context.Account.Id)" -Level Information
@@ -649,16 +655,42 @@ try {
     $additionalParams = @{}
     $ldapsCertificate = $null
 
+    # Load parameter file once; use it to validate/correct key identity parameters.
+    $parametersFromFile = Get-Content $parametersFile | ConvertFrom-Json
+
+    # tenantId is required for Easy Auth OIDC discovery. If it's left as a placeholder, Easy Auth will fail with:
+    # "Unable to download OpenID Connect Configuration."
+    $tenantIdFromFile = $null
+    if ($null -ne $parametersFromFile.parameters -and $parametersFromFile.parameters.PSObject.Properties.Name -contains 'tenantId') {
+        $tenantIdFromFile = $parametersFromFile.parameters.tenantId.value
+    }
+
+    $tenantGuid = [guid]::Empty
+    $tenantIdToUse = $null
+    if ($tenantIdFromFile -and [guid]::TryParse([string]$tenantIdFromFile, [ref]$tenantGuid)) {
+        $tenantIdToUse = [string]$tenantGuid
+    }
+    elseif ($null -ne $context -and $null -ne $context.Tenant -and [guid]::TryParse([string]$context.Tenant.Id, [ref]$tenantGuid)) {
+        $tenantIdToUse = [string]$tenantGuid
+        Write-Log "parameters.$Environment.json tenantId isn't a valid GUID; using Az context tenantId: $tenantIdToUse" -Level Warning
+    }
+    else {
+        throw "Unable to determine a valid tenantId. Set parameters.$Environment.json -> parameters.tenantId.value to your tenant GUID."
+    }
+
+    $additionalParams['tenantId'] = $tenantIdToUse
+    Write-Log "Using tenantId for deployment: $tenantIdToUse" -Level Information
+
     if ($DeployDomainController) {
         $additionalParams['deployDomainController'] = $true
         
         # Generate LDAPS certificate before deployment
-        $parameters = Get-Content $parametersFile | ConvertFrom-Json
+        $parameters = $parametersFromFile
         $domainName = $parameters.parameters.domainName.value
         $baseName = $parameters.parameters.baseName.value
         $dcVmName = "$baseName-dc-$Environment"
         $dcFqdn = "$dcVmName.$domainName"
-        
+       
         Write-Log "Generating LDAPS certificate for domain controller..."
         $ldapsCertificate = New-LdapsCertificate -DomainControllerFqdn $dcFqdn -DomainName $domainName
         
@@ -667,10 +699,49 @@ try {
         $additionalParams['ldapsCertificatePfxPassword'] = (ConvertTo-SecureString -String $ldapsCertificate.PfxPassword -AsPlainText -Force)
         $additionalParams['ldapsCertificateCerBase64'] = (ConvertTo-SecureString -String $ldapsCertificate.CerBase64 -AsPlainText -Force)
 
-        # VM admin username/password: allow overrides, else default username in Bicep and auto-generated password here
-        if ($PSBoundParameters.ContainsKey('VmAdminUsername') -and [string]::IsNullOrWhiteSpace($VmAdminUsername) -eq $false) {
-            $additionalParams['vmAdminUsername'] = $VmAdminUsername
+        $vmAdminUsernameFromFile = $null
+        if ($null -ne $parameters.parameters -and $parameters.parameters.PSObject.Properties.Name -contains 'vmAdminUsername') {
+            $vmAdminUsernameFromFile = $parameters.parameters.vmAdminUsername.value
         }
+
+        # VM admin username/password: allow overrides; otherwise explicitly pass the value from parameters file (or a safe default).
+        # Be tolerant if the caller accidentally passes a boolean-like value ("True"/"False"); ignore it and fall back.
+        $vmAdminUsernameToUse = $null
+
+        if ($PSBoundParameters.ContainsKey('VmAdminUsername') -and [string]::IsNullOrWhiteSpace($VmAdminUsername) -eq $false) {
+            if ($VmAdminUsername -match '^(?i:true|false)$') {
+                Write-Log "VmAdminUsername was set to '$VmAdminUsername' (looks like a boolean). Ignoring override and using parameters.$Environment.json (or default)." -Level Warning
+            }
+            else {
+                $vmAdminUsernameToUse = $VmAdminUsername
+            }
+        }
+
+        if ($null -eq $vmAdminUsernameToUse -and $null -ne $vmAdminUsernameFromFile) {
+            if ($vmAdminUsernameFromFile -is [bool]) {
+                Write-Log "parameters.$Environment.json sets vmAdminUsername to a boolean ($vmAdminUsernameFromFile). Using default 'azureadmin'." -Level Warning
+            }
+            else {
+                $vmAdminUsernameString = [string]$vmAdminUsernameFromFile
+                if ([string]::IsNullOrWhiteSpace($vmAdminUsernameString)) {
+                    $vmAdminUsernameString = 'azureadmin'
+                }
+
+                if ($vmAdminUsernameString -match '^(?i:true|false)$') {
+                    Write-Log "parameters.$Environment.json sets vmAdminUsername to '$vmAdminUsernameString' (looks like a boolean). Using default 'azureadmin'." -Level Warning
+                }
+                else {
+                    $vmAdminUsernameToUse = $vmAdminUsernameString
+                }
+            }
+        }
+
+        if ($null -eq $vmAdminUsernameToUse) {
+            $vmAdminUsernameToUse = 'azureadmin'
+        }
+
+        $additionalParams['vmAdminUsername'] = $vmAdminUsernameToUse
+        Write-Log "Using vmAdminUsername for deployment: $vmAdminUsernameToUse" -Level Information
 
         if ($null -eq $VmAdminPassword) {
             Write-Log "VmAdminPassword not provided; generating a strong random password" -Level Warning
@@ -701,16 +772,35 @@ try {
 
         Write-Log "Creating/Updating Entra ID App Registration and capturing clientId..." -Level Information
 
-        # Create a new app registration with environment-specific display name
-        $appRegistration = & $configureScript -CreateNew -DisplayName "Password Reset API ($Environment)"
+        # Create a new app registration with environment-specific display name.
+        # Some versions of Graph cmdlets/scripts can emit additional pipeline objects; pick the first object that actually has an AppId.
+        $appRegistrationOutput = & $configureScript -CreateNew -DisplayName "Password Reset API ($Environment)"
 
-        if (-not $appRegistration -or -not $appRegistration.AppId) {
-            throw "App registration creation failed or did not return an AppId"
+        $candidates = @($appRegistrationOutput)
+        $appObject = $candidates | Where-Object {
+            $null -ne $_ -and $_.PSObject -and $_.PSObject.Properties.Name -contains 'AppId'
+        } | Select-Object -First 1
+
+        $apiAppId = $null
+        if ($null -ne $appObject) {
+            $apiAppId = $appObject.AppId
+        }
+        elseif ($candidates.Count -gt 0) {
+            $appHashtable = $candidates | Where-Object { $_ -is [hashtable] -and $_.ContainsKey('AppId') } | Select-Object -First 1
+            if ($null -ne $appHashtable) {
+                $apiAppId = $appHashtable['AppId']
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace([string]$apiAppId)) {
+            $types = @($candidates | Where-Object { $null -ne $_ } | ForEach-Object { $_.GetType().FullName } | Select-Object -Unique)
+            $typeSummary = if ($types.Count -gt 0) { $types -join ', ' } else { '(no output objects)' }
+            throw "App registration creation did not return an AppId. Output types: $typeSummary"
         }
 
         # Pass clientId to Bicep deployment
-        $additionalParams['clientId'] = $appRegistration.AppId
-        Write-Log "Using clientId from App Registration: $($appRegistration.AppId)" -Level Success
+        $additionalParams['clientId'] = [string]$apiAppId
+        Write-Log "Using clientId from App Registration: $apiAppId" -Level Success
     }
 
     # Deploy infrastructure
@@ -736,7 +826,7 @@ try {
 
     # Domain controller configuration
     if ($DeployDomainController) {
-        $parameters = Get-Content $parametersFile | ConvertFrom-Json
+        $parameters = $parametersFromFile
         $domainName = $parameters.parameters.domainName.value
         $domainNetBiosName = $parameters.parameters.domainNetBiosName.value
         $baseName = $parameters.parameters.baseName.value

@@ -208,7 +208,7 @@ function Install-LdapsTrustedCertificate {
         Retrieves the LDAPS certificate from Key Vault and installs it in the
         current user's Trusted Root Certification Authorities store
     .PARAMETER CertificateBase64
-        Base64-encoded certificate (DER format)
+        Base64-encoded certificate. Supports DER bytes, or PEM file bytes.
     .OUTPUTS
         System.Boolean
     .LINK
@@ -227,9 +227,36 @@ function Install-LdapsTrustedCertificate {
         
         # Decode certificate from base64
         $certBytes = [Convert]::FromBase64String($CertificateBase64)
-        
+
         # Create X509Certificate2 object
-        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certBytes)
+        # Some generators store a PEM file (ASCII text) rather than DER bytes.
+        # In that case, .NET's byte-based constructor will fail; fall back to CreateFromPem.
+        $cert = $null
+        try {
+            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certBytes)
+        }
+        catch {
+            $pemText = [System.Text.Encoding]::UTF8.GetString($certBytes)
+
+            if ($pemText -match '-----BEGIN CERTIFICATE-----') {
+                $createFromPem = [System.Security.Cryptography.X509Certificates.X509Certificate2].GetMethod(
+                    'CreateFromPem',
+                    [System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static,
+                    $null,
+                    [Type[]]@([string]),
+                    $null
+                )
+
+                if ($null -eq $createFromPem) {
+                    throw "Certificate appears to be PEM, but X509Certificate2.CreateFromPem(string) is not available in this runtime."
+                }
+
+                $cert = $createFromPem.Invoke($null, @($pemText))
+            }
+            else {
+                throw
+            }
+        }
         
         # Open the Trusted Root store for the current user
         # Reference: https://learn.microsoft.com/dotnet/api/system.security.cryptography.x509certificates.x509store
@@ -252,6 +279,26 @@ function Install-LdapsTrustedCertificate {
         }
         
         $store.Close()
+
+        # Best-effort: also try to add to LocalMachine Root (may be blocked in App Service sandbox)
+        try {
+            $machineStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+                [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+                [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+            )
+            $machineStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+
+            $existingMachine = $machineStore.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+            if (-not $existingMachine) {
+                $machineStore.Add($cert)
+                Write-Verbose "Certificate installed in LocalMachine Root: $($cert.Thumbprint)"
+            }
+
+            $machineStore.Close()
+        }
+        catch {
+            Write-Verbose "Unable to add certificate to LocalMachine Root (non-fatal): $($_.Exception.Message)"
+        }
         
         return $true
     }

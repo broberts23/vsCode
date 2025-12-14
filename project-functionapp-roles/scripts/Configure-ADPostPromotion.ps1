@@ -55,7 +55,13 @@ param(
     
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$LdapsCertificatePfxPassword
+    [string]$LdapsCertificatePfxPassword,
+
+    # DNS forwarders used by the DC's DNS server to resolve public names (required for Entra/OpenID discovery).
+    # Default is Azure-provided DNS forwarder IP for workloads running in Azure VNets.
+    # https://learn.microsoft.com/azure/virtual-network/what-is-ip-address-168-63-129-16
+    [Parameter(Mandatory = $false)]
+    [string[]]$DnsForwarders = @('168.63.129.16')
 )
 
 Set-StrictMode -Version Latest
@@ -120,6 +126,69 @@ try {
 
     if ($elapsed -ge $timeout) {
         throw "Timed out waiting for AD Web Services"
+    }
+
+    # Configure DNS forwarders so the domain DNS can resolve public endpoints.
+    # This prevents downstream failures like "Unable to download OpenID Connect Configuration" when apps
+    # use the DC as their DNS server.
+    if ($DnsForwarders -and $DnsForwarders.Count -gt 0) {
+        Write-Log ("Configuring DNS forwarders: " + ($DnsForwarders -join ', '))
+
+        try {
+            Import-Module DnsServer -ErrorAction Stop
+
+            $validForwarders = @()
+            foreach ($forwarder in $DnsForwarders) {
+                if ([string]::IsNullOrWhiteSpace($forwarder)) {
+                    continue
+                }
+
+                $trimmed = $forwarder.Trim()
+                try {
+                    [void][System.Net.IPAddress]::Parse($trimmed)
+                    $validForwarders += $trimmed
+                }
+                catch {
+                    Write-Log "Skipping invalid DNS forwarder IP: '$trimmed'" -Level Warning
+                }
+            }
+
+            if ($validForwarders.Count -gt 0) {
+                $current = @()
+                try {
+                    $current = @(Get-DnsServerForwarder -ErrorAction Stop | ForEach-Object { $_.IPAddress.ToString() })
+                }
+                catch {
+                    # If there are no forwarders configured, Get-DnsServerForwarder can throw.
+                    $current = @()
+                }
+
+                $desiredSorted = @($validForwarders | Sort-Object)
+                $currentSorted = @($current | Sort-Object)
+
+                $needsUpdate = ($desiredSorted -join ',') -ne ($currentSorted -join ',')
+
+                if ($needsUpdate) {
+                    Write-Log ("Current DNS forwarders: " + ($(if ($currentSorted.Count -gt 0) { $currentSorted -join ', ' } else { '(none)' }))) -Level Warning
+                    if ($PSCmdlet.ShouldProcess('DNS Server', 'Set DNS forwarders')) {
+                        Set-DnsServerForwarder -IPAddress $desiredSorted -PassThru | Out-Null
+                        Write-Log ("DNS forwarders set to: " + ($desiredSorted -join ', '))
+                    }
+                }
+                else {
+                    Write-Log "DNS forwarders already match desired configuration" -Level Information
+                }
+            }
+            else {
+                Write-Log "No valid DNS forwarder IPs provided; skipping DNS forwarder configuration" -Level Warning
+            }
+        }
+        catch {
+            Write-Log "Failed to configure DNS forwarders: $_" -Level Warning
+        }
+    }
+    else {
+        Write-Log "DnsForwarders is empty; skipping DNS forwarder configuration" -Level Warning
     }
 
     # Install LDAPS certificate if provided

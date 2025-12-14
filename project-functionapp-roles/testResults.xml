@@ -1,0 +1,99 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="46" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2025-12-14" time="15:02:02">
+  <environment nunit-version="2.5.8.0" cwd="/home/ben/vsCode/project-functionapp-roles" user-domain="" clr-version="9.0.10" user="ben" platform="Linux" machine-name="rig" os-version="6.17.9-arch1-1" />
+  <culture-info current-culture="en-GB" current-uiculture="en-GB" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="1.0604" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="/home/ben/vsCode/project-functionapp-roles/tests/Unit/PasswordResetHelpers.Tests.ps1" executed="True" result="Success" success="True" time="1.0604" asserts="0" description="/home/ben/vsCode/project-functionapp-roles/tests/Unit/PasswordResetHelpers.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="PasswordResetHelpers Module" executed="True" result="Success" success="True" time="0.7214" asserts="0" description="PasswordResetHelpers Module">
+            <results>
+              <test-suite type="TestFixture" name="PasswordResetHelpers Module.Module Load" executed="True" result="Success" success="True" time="0.1294" asserts="0" description="PasswordResetHelpers Module.Module Load">
+                <results>
+                  <test-case description="Should load the module successfully" name="PasswordResetHelpers Module.Module Load.Should load the module successfully" time="0.059" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should export Get-ClientPrincipal function" name="PasswordResetHelpers Module.Module Load.Should export Get-ClientPrincipal function" time="0.0102" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should export Test-RoleClaim function" name="PasswordResetHelpers Module.Module Load.Should export Test-RoleClaim function" time="0.008" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should export New-SecurePassword function" name="PasswordResetHelpers Module.Module Load.Should export New-SecurePassword function" time="0.0083" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should export Set-ADUserPassword function" name="PasswordResetHelpers Module.Module Load.Should export Set-ADUserPassword function" time="0.0082" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should export Install-LdapsTrustedCertificate function" name="PasswordResetHelpers Module.Module Load.Should export Install-LdapsTrustedCertificate function" time="0.0088" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should export Get-ADUserDistinguishedName function" name="PasswordResetHelpers Module.Module Load.Should export Get-ADUserDistinguishedName function" time="0.0089" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="PasswordResetHelpers Module.Get-ClientPrincipal" executed="True" result="Success" success="True" time="0.2493" asserts="0" description="PasswordResetHelpers Module.Get-ClientPrincipal">
+                <results>
+                  <test-case description="Should throw on null header" name="PasswordResetHelpers Module.Get-ClientPrincipal.Should throw on null header" time="0.0238" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw on empty header" name="PasswordResetHelpers Module.Get-ClientPrincipal.Should throw on empty header" time="0.004" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw on invalid base64" name="PasswordResetHelpers Module.Get-ClientPrincipal.Should throw on invalid base64" time="0.0264" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should decode valid client principal header" name="PasswordResetHelpers Module.Get-ClientPrincipal.Should decode valid client principal header" time="0.0235" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should return principal with claims array" name="PasswordResetHelpers Module.Get-ClientPrincipal.Should return principal with claims array" time="0.0095" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should handle principal with multiple claims" name="PasswordResetHelpers Module.Get-ClientPrincipal.Should handle principal with multiple claims" time="0.0037" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="PasswordResetHelpers Module.Test-RoleClaim" executed="True" result="Success" success="True" time="0.3011" asserts="0" description="PasswordResetHelpers Module.Test-RoleClaim">
+                <results>
+                  <test-case description="Should throw on null principal" name="PasswordResetHelpers Module.Test-RoleClaim.Should throw on null principal" time="0.0246" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should return true when required role exists" name="PasswordResetHelpers Module.Test-RoleClaim.Should return true when required role exists" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should return false when required role does not exist" name="PasswordResetHelpers Module.Test-RoleClaim.Should return false when required role does not exist" time="0.0031" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should return false when no roles exist" name="PasswordResetHelpers Module.Test-RoleClaim.Should return false when no roles exist" time="0.0035" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should return false when no claims exist" name="PasswordResetHelpers Module.Test-RoleClaim.Should return false when no claims exist" time="0.0028" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should be case-sensitive for role matching" name="PasswordResetHelpers Module.Test-RoleClaim.Should be case-sensitive for role matching" time="0.0027" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should handle role claim type" name="PasswordResetHelpers Module.Test-RoleClaim.Should handle role claim type" time="0.0028" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="PasswordResetHelpers Module.New-SecurePassword" executed="True" result="Success" success="True" time="0.4018" asserts="0" description="PasswordResetHelpers Module.New-SecurePassword">
+                <results>
+                  <test-case description="Should generate a password of default length" name="PasswordResetHelpers Module.New-SecurePassword.Should generate a password of default length" time="0.0186" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should generate a password of specified length" name="PasswordResetHelpers Module.New-SecurePassword.Should generate a password of specified length" time="0.0045" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should generate password with minimum length" name="PasswordResetHelpers Module.New-SecurePassword.Should generate password with minimum length" time="0.0033" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw for length below minimum" name="PasswordResetHelpers Module.New-SecurePassword.Should throw for length below minimum" time="0.0033" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw for length above maximum" name="PasswordResetHelpers Module.New-SecurePassword.Should throw for length above maximum" time="0.0071" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should contain at least one lowercase character" name="PasswordResetHelpers Module.New-SecurePassword.Should contain at least one lowercase character" time="0.0048" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should contain at least one uppercase character" name="PasswordResetHelpers Module.New-SecurePassword.Should contain at least one uppercase character" time="0.003" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should contain at least one number" name="PasswordResetHelpers Module.New-SecurePassword.Should contain at least one number" time="0.003" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should contain at least one special character" name="PasswordResetHelpers Module.New-SecurePassword.Should contain at least one special character" time="0.0031" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should generate unique passwords" name="PasswordResetHelpers Module.New-SecurePassword.Should generate unique passwords" time="0.0046" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should generate passwords consistently meeting complexity requirements" name="PasswordResetHelpers Module.New-SecurePassword.Should generate passwords consistently meeting complexity requirements" time="0.0424" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="PasswordResetHelpers Module.Install-LdapsTrustedCertificate" executed="True" result="Success" success="True" time="0.4295" asserts="0" description="PasswordResetHelpers Module.Install-LdapsTrustedCertificate">
+                <results>
+                  <test-case description="Should throw on null certificate" name="PasswordResetHelpers Module.Install-LdapsTrustedCertificate.Should throw on null certificate" time="0.0077" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw on empty certificate" name="PasswordResetHelpers Module.Install-LdapsTrustedCertificate.Should throw on empty certificate" time="0.0039" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw on invalid base64" name="PasswordResetHelpers Module.Install-LdapsTrustedCertificate.Should throw on invalid base64" time="0.0139" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="PasswordResetHelpers Module.Get-ADUserDistinguishedName" executed="True" result="Success" success="True" time="0.4547" asserts="0" description="PasswordResetHelpers Module.Get-ADUserDistinguishedName">
+                <results>
+                  <test-case description="Should throw on null SamAccountName" name="PasswordResetHelpers Module.Get-ADUserDistinguishedName.Should throw on null SamAccountName" time="0.0195" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw on empty SamAccountName" name="PasswordResetHelpers Module.Get-ADUserDistinguishedName.Should throw on empty SamAccountName" time="0.0035" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+              <test-suite type="TestFixture" name="PasswordResetHelpers Module.Set-ADUserPassword" executed="True" result="Success" success="True" time="0.7135" asserts="0" description="PasswordResetHelpers Module.Set-ADUserPassword">
+                <results>
+                  <test-case description="Should throw on null SamAccountName" name="PasswordResetHelpers Module.Set-ADUserPassword.Should throw on null SamAccountName" time="0.0103" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw on empty SamAccountName" name="PasswordResetHelpers Module.Set-ADUserPassword.Should throw on empty SamAccountName" time="0.0146" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw on null Password" name="PasswordResetHelpers Module.Set-ADUserPassword.Should throw on null Password" time="0.0033" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw on empty Password" name="PasswordResetHelpers Module.Set-ADUserPassword.Should throw on empty Password" time="0.0029" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should attempt to get user DN when called with valid parameters" name="PasswordResetHelpers Module.Set-ADUserPassword.Should attempt to get user DN when called with valid parameters" time="0.0884" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should throw when user not found" name="PasswordResetHelpers Module.Set-ADUserPassword.Should throw when user not found" time="0.0233" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should accept pipeline input for SamAccountName" name="PasswordResetHelpers Module.Set-ADUserPassword.Should accept pipeline input for SamAccountName" time="0.0093" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should have required parameters defined" name="PasswordResetHelpers Module.Set-ADUserPassword.Should have required parameters defined" time="0.0125" asserts="0" success="True" result="Success" executed="True" />
+                  <test-case description="Should support ShouldProcess (WhatIf/Confirm)" name="PasswordResetHelpers Module.Set-ADUserPassword.Should support ShouldProcess (WhatIf/Confirm)" time="0.0087" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+          <test-suite type="TestFixture" name="PasswordResetHelpers Module Integration Tests" executed="True" result="Success" success="True" time="0.7328" asserts="0" description="PasswordResetHelpers Module Integration Tests">
+            <results>
+              <test-suite type="TestFixture" name="PasswordResetHelpers Module Integration Tests.End-to-End Password Generation and Validation" executed="True" result="Success" success="True" time="0.0086" asserts="0" description="PasswordResetHelpers Module Integration Tests.End-to-End Password Generation and Validation">
+                <results>
+                  <test-case description="Should generate password that meets all requirements" name="PasswordResetHelpers Module Integration Tests.End-to-End Password Generation and Validation.Should generate password that meets all requirements" time="0.0065" asserts="0" success="True" result="Success" executed="True" />
+                </results>
+              </test-suite>
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>
