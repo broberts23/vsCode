@@ -48,8 +48,8 @@ Describe 'PasswordResetHelpers Module' {
             Get-Command Set-ADUserPassword -Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
         }
         
-        It 'Should export Install-LdapsTrustedCertificate function' {
-            Get-Command Install-LdapsTrustedCertificate -Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
+        It 'Should export ConvertFrom-LdapsCertificateBase64 function' {
+            Get-Command ConvertFrom-LdapsCertificateBase64 -Module PasswordResetHelpers | Should -Not -BeNullOrEmpty
         }
         
         It 'Should export Get-ADUserDistinguishedName function' {
@@ -248,20 +248,20 @@ Describe 'PasswordResetHelpers Module' {
         }
     }
     
-    Context 'Install-LdapsTrustedCertificate' {
+    Context 'ConvertFrom-LdapsCertificateBase64' {
         It 'Should throw on null certificate' {
-            { Install-LdapsTrustedCertificate -CertificateBase64 $null } | Should -Throw
-        }
-        
-        It 'Should throw on empty certificate' {
-            { Install-LdapsTrustedCertificate -CertificateBase64 '' } | Should -Throw
-        }
-        
-        It 'Should throw on invalid base64' {
-            { Install-LdapsTrustedCertificate -CertificateBase64 'not-valid-base64!!!' } | Should -Throw
+            { ConvertFrom-LdapsCertificateBase64 -CertificateBase64 $null } | Should -Throw
         }
 
-        It 'Should accept a valid DER certificate and return true' {
+        It 'Should throw on empty certificate' {
+            { ConvertFrom-LdapsCertificateBase64 -CertificateBase64 '' } | Should -Throw
+        }
+
+        It 'Should throw on invalid base64' {
+            { ConvertFrom-LdapsCertificateBase64 -CertificateBase64 'not-valid-base64!!!' } | Should -Throw
+        }
+
+        It 'Should parse a valid DER certificate' {
             $rsa = [System.Security.Cryptography.RSA]::Create(2048)
             $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
                 'CN=unit-test-der',
@@ -274,23 +274,12 @@ Describe 'PasswordResetHelpers Module' {
             $bytes = $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
             $base64 = [Convert]::ToBase64String($bytes)
 
-            try {
-                (Install-LdapsTrustedCertificate -CertificateBase64 $base64 -ErrorAction Stop) | Should -BeTrue
-            }
-            finally {
-                # Cleanup: remove from CurrentUser Root if present
-                $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-                    [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-                    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-                )
-                $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                $toRemove = $store.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
-                foreach ($c in $toRemove) { $store.Remove($c) }
-                $store.Close()
-            }
+            $parsed = ConvertFrom-LdapsCertificateBase64 -CertificateBase64 $base64
+            $parsed | Should -Not -BeNullOrEmpty
+            $parsed.Thumbprint | Should -Be $cert.Thumbprint
         }
 
-        It 'Should accept a valid PEM certificate and return true' {
+        It 'Should parse a valid PEM certificate' {
             $rsa = [System.Security.Cryptography.RSA]::Create(2048)
             $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
                 'CN=unit-test-pem',
@@ -304,20 +293,9 @@ Describe 'PasswordResetHelpers Module' {
             $pemBytes = [System.Text.Encoding]::UTF8.GetBytes($pem)
             $base64 = [Convert]::ToBase64String($pemBytes)
 
-            try {
-                (Install-LdapsTrustedCertificate -CertificateBase64 $base64 -ErrorAction Stop) | Should -BeTrue
-            }
-            finally {
-                # Cleanup: remove from CurrentUser Root if present
-                $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-                    [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-                    [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-                )
-                $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-                $toRemove = $store.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
-                foreach ($c in $toRemove) { $store.Remove($c) }
-                $store.Close()
-            }
+            $parsed = ConvertFrom-LdapsCertificateBase64 -CertificateBase64 $base64
+            $parsed | Should -Not -BeNullOrEmpty
+            $parsed.Thumbprint | Should -Be $cert.Thumbprint
         }
     }
     

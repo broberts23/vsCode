@@ -15,7 +15,6 @@ $ErrorActionPreference = 'Stop'
 # Module-scoped caches (per runspace)
 $script:CachedAdServiceCredential = $null
 $script:CachedLdapsCertificateBase64 = $null
-$script:CachedLdapsCertificateInstalled = $false
 
 #region Public Functions
 
@@ -198,35 +197,6 @@ function Get-FunctionLdapsCertificateBase64 {
         Write-Verbose "Failed to retrieve LDAPS certificate secret: $($_.Exception.Message)"
         return $null
     }
-}
-
-function Get-LdapsTrustedCertificate {
-    <#
-    .SYNOPSIS
-        Ensures the LDAPS certificate is installed in the local trust store.
-    .OUTPUTS
-        System.Boolean
-    #>
-    [CmdletBinding()]
-    [OutputType([bool])]
-    param()
-
-    if ($script:CachedLdapsCertificateInstalled) {
-        return $true
-    }
-
-    $certificateBase64 = Get-FunctionLdapsCertificateBase64
-    if ([string]::IsNullOrWhiteSpace($certificateBase64)) {
-        return $false
-    }
-
-    Install-LdapsTrustedCertificate -CertificateBase64 $certificateBase64 -ErrorAction Stop | Out-Null
-    $script:CachedLdapsCertificateInstalled = $true
-
-    # Back-compat for older code paths
-    Set-Variable -Scope Global -Name LdapsCertificateInstalled -Value $true
-
-    return $true
 }
 
 function Get-ClientPrincipal {
@@ -412,114 +382,6 @@ function New-SecurePassword {
             Write-Error "Password generation failed: $_"
             throw
         }
-    }
-}
-
-function Install-LdapsTrustedCertificate {
-    <#
-    .SYNOPSIS
-        Installs a trusted root certificate for LDAPS connections
-    .DESCRIPTION
-        Retrieves the LDAPS certificate from Key Vault and installs it in the
-        current user's Trusted Root Certification Authorities store
-    .PARAMETER CertificateBase64
-        Base64-encoded certificate. Supports DER bytes, or PEM file bytes.
-    .OUTPUTS
-        System.Boolean
-    .LINK
-        https://learn.microsoft.com/dotnet/api/system.security.cryptography.x509certificates.x509certificate2
-    #>
-    [CmdletBinding()]
-    [OutputType([bool])]
-    param(
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]$CertificateBase64
-    )
-    
-    try {
-        Write-Verbose "Installing LDAPS trusted certificate..."
-        
-        # Decode certificate from base64
-        $certBytes = [Convert]::FromBase64String($CertificateBase64)
-
-        # Create X509Certificate2 object
-        # Some generators store a PEM file (ASCII text) rather than DER bytes.
-        # In that case, .NET's byte-based constructor will fail; fall back to CreateFromPem.
-        $cert = $null
-        try {
-            $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certBytes)
-        }
-        catch {
-            $pemText = [System.Text.Encoding]::UTF8.GetString($certBytes)
-
-            if ($pemText -match '-----BEGIN CERTIFICATE-----') {
-                $createFromPem = [System.Security.Cryptography.X509Certificates.X509Certificate2].GetMethod(
-                    'CreateFromPem',
-                    [System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static,
-                    $null,
-                    [Type[]]@([string]),
-                    $null
-                )
-
-                if ($null -eq $createFromPem) {
-                    throw "Certificate appears to be PEM, but X509Certificate2.CreateFromPem(string) is not available in this runtime."
-                }
-
-                $cert = $createFromPem.Invoke($null, @($pemText))
-            }
-            else {
-                throw
-            }
-        }
-        
-        # Open the Trusted Root store for the current user
-        # Reference: https://learn.microsoft.com/dotnet/api/system.security.cryptography.x509certificates.x509store
-        $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-        )
-        
-        $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-        
-        # Check if certificate already exists
-        $existingCert = $store.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
-        
-        if (-not $existingCert) {
-            $store.Add($cert)
-            Write-Verbose "Certificate installed: $($cert.Thumbprint)"
-        }
-        else {
-            Write-Verbose "Certificate already exists: $($cert.Thumbprint)"
-        }
-        
-        $store.Close()
-
-        # Best-effort: also try to add to LocalMachine Root (may be blocked in App Service sandbox)
-        try {
-            $machineStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-                [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-                [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
-            )
-            $machineStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-
-            $existingMachine = $machineStore.Certificates | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
-            if (-not $existingMachine) {
-                $machineStore.Add($cert)
-                Write-Verbose "Certificate installed in LocalMachine Root: $($cert.Thumbprint)"
-            }
-
-            $machineStore.Close()
-        }
-        catch {
-            Write-Verbose "Unable to add certificate to LocalMachine Root (non-fatal): $($_.Exception.Message)"
-        }
-        
-        return $true
-    }
-    catch {
-        Write-Error "Failed to install LDAPS certificate: $_"
-        throw
     }
 }
 
@@ -709,51 +571,46 @@ function New-LdapsConnection {
     $connection.SessionOptions.SecureSocketLayer = $true
     $connection.SessionOptions.ProtocolVersion = 3
 
-    # Strict server certificate validation.
-    # If we have the expected server certificate (self-signed in this project), pin to that cert AND validate hostname.
-    $expectedCertBase64 = $null
-    try {
-        $expectedCertBase64 = Get-FunctionLdapsCertificateBase64
-    }
-    catch {
-        $expectedCertBase64 = $null
+    # Strict server certificate validation (pinning + hostname verification).
+    # We require the expected certificate to be provided (e.g. via Key Vault secret LDAPS-Certificate-CER).
+    $expectedCertBase64 = Get-FunctionLdapsCertificateBase64
+    if ([string]::IsNullOrWhiteSpace($expectedCertBase64)) {
+        throw "LDAPS certificate pinning material is not available. Ensure Key Vault secret 'LDAPS-Certificate-CER' exists and KEY_VAULT_URI is set."
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($expectedCertBase64)) {
-        $expectedCert = ConvertFrom-LdapsCertificateBase64 -CertificateBase64 $expectedCertBase64
-        $expectedThumbprintLocal = $expectedCert.Thumbprint
-        $domainControllerLocal = $DomainController
+    $expectedCert = ConvertFrom-LdapsCertificateBase64 -CertificateBase64 $expectedCertBase64
+    $expectedThumbprintLocal = $expectedCert.Thumbprint
+    $domainControllerLocal = $DomainController
 
-        $verifyCallback = {
-            param(
-                [System.DirectoryServices.Protocols.LdapConnection]$conn,
-                [System.Security.Cryptography.X509Certificates.X509Certificate]$cert
-            )
+    $verifyCallback = {
+        param(
+            [System.DirectoryServices.Protocols.LdapConnection]$conn,
+            [System.Security.Cryptography.X509Certificates.X509Certificate]$cert
+        )
 
-            try {
-                $presented = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert)
+        try {
+            $presented = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert)
 
-                if ($presented.Thumbprint -ne $expectedThumbprintLocal) {
-                    Write-Warning "LDAPS certificate thumbprint mismatch. Presented '$($presented.Thumbprint)', expected '$expectedThumbprintLocal'."
-                    return $false
-                }
-
-                if (-not (Test-CertificateMatchesHostName -HostName $domainControllerLocal -Certificate $presented)) {
-                    $names = (Get-CertificateDnsNames -Certificate $presented) -join ', '
-                    Write-Warning "LDAPS certificate does not match host '$domainControllerLocal'. Names in cert: $names"
-                    return $false
-                }
-
-                return $true
-            }
-            catch {
-                Write-Warning "LDAPS server certificate validation threw: $($_.Exception.Message)"
+            if ($presented.Thumbprint -ne $expectedThumbprintLocal) {
+                Write-Warning "LDAPS certificate thumbprint mismatch. Presented '$($presented.Thumbprint)', expected '$expectedThumbprintLocal'."
                 return $false
             }
-        }.GetNewClosure()
 
-        $connection.SessionOptions.VerifyServerCertificate = $verifyCallback
-    }
+            if (-not (Test-CertificateMatchesHostName -HostName $domainControllerLocal -Certificate $presented)) {
+                $names = (Get-CertificateDnsNames -Certificate $presented) -join ', '
+                Write-Warning "LDAPS certificate does not match host '$domainControllerLocal'. Names in cert: $names"
+                return $false
+            }
+
+            return $true
+        }
+        catch {
+            Write-Warning "LDAPS server certificate validation threw: $($_.Exception.Message)"
+            return $false
+        }
+    }.GetNewClosure()
+
+    $connection.SessionOptions.VerifyServerCertificate = $verifyCallback
 
     $networkCred = [System.Net.NetworkCredential]::new(
         $Credential.UserName,
@@ -990,7 +847,6 @@ Export-ModuleMember -Function @(
     'Get-KeyVaultSecretValue'
     'Get-FunctionAdServiceCredential'
     'Get-FunctionLdapsCertificateBase64'
-    'Get-LdapsTrustedCertificate'
     'Test-LdapsTcpConnectivity'
     'ConvertFrom-LdapsCertificateBase64'
     'Get-CertificateDnsNames'
@@ -999,11 +855,6 @@ Export-ModuleMember -Function @(
     'Get-ADUserDistinguishedName'
     'Set-ADUserPassword'
     'New-SecurePassword'
-    'Install-LdapsTrustedCertificate'
     'Get-ClientPrincipal'
     'Test-RoleClaim'
-    'New-SecurePassword'
-    'Install-LdapsTrustedCertificate'
-    'Get-ADUserDistinguishedName'
-    'Set-ADUserPassword'
 )

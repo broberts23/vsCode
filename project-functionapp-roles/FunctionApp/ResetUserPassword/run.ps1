@@ -205,18 +205,24 @@ try {
         return
     }
 
-    # Install LDAPS certificate (best-effort; non-fatal if already trusted)
+    # Ensure LDAPS certificate pinning material is available (required)
     try {
-        $installed = Get-LdapsTrustedCertificate
-        if ($installed) {
-            Write-Information "LDAPS certificate trust ensured"
-        }
-        else {
-            Write-Warning "LDAPS certificate not available for installation; relying on existing trust"
+        $ldapsCertificateBase64 = Get-FunctionLdapsCertificateBase64 -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($ldapsCertificateBase64)) {
+            throw "LDAPS certificate secret is empty"
         }
     }
     catch {
-        Write-Warning "Failed to install LDAPS certificate: $($_.Exception.Message)"
+        Write-Error "LDAPS certificate pinning material not available: $($_.Exception.Message)"
+        Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
+                StatusCode = [HttpStatusCode]::InternalServerError
+                Headers    = @{ 'Content-Type' = 'application/json' }
+                Body       = @{
+                    error   = 'Configuration Error'
+                    message = 'LDAPS certificate pinning is not configured'
+                } | ConvertTo-Json
+            })
+        return
     }
     
     #endregion
