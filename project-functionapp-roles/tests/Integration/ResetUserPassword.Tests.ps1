@@ -108,11 +108,13 @@ Describe 'ResetUserPassword Function' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
+            Mock Ensure-LdapsTrustedCertificateInstalled { $true } -ModuleName PasswordResetHelpers
+            Mock Get-FunctionAdServiceCredential {
+                [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
+            } -ModuleName PasswordResetHelpers
             Mock Get-ADUserDistinguishedName { 'CN=Test,DC=contoso,DC=local' } -ModuleName PasswordResetHelpers
             
-            # Set global variables for LDAPS
-            $global:LdapsCertificateCer = 'base64cert'
-            $global:LdapsCertificateInstalled = $true
+            # No global variables required; run.ps1 uses module-backed caching
             
             # Simulate function execution
             $script:response = $null
@@ -166,11 +168,13 @@ Describe 'ResetUserPassword Function' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
+            Mock Ensure-LdapsTrustedCertificateInstalled { $true } -ModuleName PasswordResetHelpers
+            Mock Get-FunctionAdServiceCredential {
+                [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
+            } -ModuleName PasswordResetHelpers
             Mock Get-ADUserDistinguishedName { 'CN=Test,DC=contoso,DC=local' } -ModuleName PasswordResetHelpers
             
-            # Set global variables for LDAPS
-            $global:LdapsCertificateCer = 'base64cert'
-            $global:LdapsCertificateInstalled = $true
+            # No global variables required; run.ps1 uses module-backed caching
             
             $script:response = $null
             
@@ -205,10 +209,13 @@ Describe 'ResetUserPassword Function' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
+            Mock Ensure-LdapsTrustedCertificateInstalled { $true } -ModuleName PasswordResetHelpers
+            Mock Get-FunctionAdServiceCredential {
+                [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
+            } -ModuleName PasswordResetHelpers
             Mock Get-ADUserDistinguishedName { 'CN=Test,DC=contoso,DC=local' } -ModuleName PasswordResetHelpers
             
-            $global:LdapsCertificateCer = 'base64cert'
-            $global:LdapsCertificateInstalled = $true
+            # No global variables required; run.ps1 uses module-backed caching
             
             $script:response = $null
             
@@ -235,8 +242,7 @@ Describe 'ResetUserPassword Function' {
         
         It 'Should accept requests with required role' {
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
-            
-            $global:ADServiceCredential = [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
+
             $clientPrincipalHeader = New-ClientPrincipalHeader -Roles @('Role.PasswordReset')
             $Request = @{
                 Headers = @{ 'X-MS-CLIENT-PRINCIPAL' = $clientPrincipalHeader }
@@ -260,13 +266,15 @@ Describe 'ResetUserPassword Function' {
             } -ModuleName PasswordResetHelpers
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
             Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
+            Mock Ensure-LdapsTrustedCertificateInstalled { $true } -ModuleName PasswordResetHelpers
+            Mock Get-FunctionAdServiceCredential {
+                [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
+            } -ModuleName PasswordResetHelpers
             Mock Get-ADUserDistinguishedName { 'CN=Test,DC=contoso,DC=local' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers -ParameterFilter { $true }
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
-            
-            $global:ADServiceCredential = [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
-            $global:LdapsCertificateCer = 'base64cert'
-            $global:LdapsCertificateInstalled = $true
+
+            # No global variables required; run.ps1 uses module-backed caching
             
             $script:response = $null
             

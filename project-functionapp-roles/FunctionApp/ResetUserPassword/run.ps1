@@ -186,10 +186,14 @@ try {
             })
         return
     }
-    
-    # Get AD service account credential from global cache (loaded in profile.ps1)
-    if (-not $global:ADServiceCredential) {
-        Write-Error "AD service account credential not available"
+
+    # Retrieve AD service credential (Key Vault / Managed Identity, cached per runspace)
+    $adServiceCredential = $null
+    try {
+        $adServiceCredential = Get-FunctionAdServiceCredential -ErrorAction Stop
+    }
+    catch {
+        Write-Error "AD service account credential not available: $($_.Exception.Message)"
         Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
                 StatusCode = [HttpStatusCode]::InternalServerError
                 Headers    = @{ 'Content-Type' = 'application/json' }
@@ -200,24 +204,19 @@ try {
             })
         return
     }
-    
-    # Install LDAPS certificate (if not already installed)
-    if (-not $global:LdapsCertificateInstalled) {
-        Write-Information "Installing LDAPS trusted certificate..."
-        try {
-            if ($global:LdapsCertificateCer) {
-                Install-LdapsTrustedCertificate -CertificateBase64 $global:LdapsCertificateCer
-                $global:LdapsCertificateInstalled = $true
-                Write-Information "LDAPS certificate installed successfully"
-            }
-            else {
-                Write-Warning "LDAPS certificate not available in global cache"
-            }
+
+    # Install LDAPS certificate (best-effort; non-fatal if already trusted)
+    try {
+        $installed = Ensure-LdapsTrustedCertificateInstalled
+        if ($installed) {
+            Write-Information "LDAPS certificate trust ensured"
         }
-        catch {
-            Write-Warning "Failed to install LDAPS certificate: $_"
-            # Continue anyway - connection may still work if cert is already trusted
+        else {
+            Write-Warning "LDAPS certificate not available for installation; relying on existing trust"
         }
+    }
+    catch {
+        Write-Warning "Failed to install LDAPS certificate: $($_.Exception.Message)"
     }
     
     #endregion
@@ -236,7 +235,7 @@ try {
         $setParams = @{
             SamAccountName        = $samAccountName
             Password              = $newPasswordSecure
-            Credential            = $global:ADServiceCredential
+            Credential            = $adServiceCredential
             DomainController      = $domainController ?? $domainControllerFqdn
             DomainName            = $domainName
             ChangePasswordAtLogon = $false

@@ -12,7 +12,222 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Module-scoped caches (per runspace)
+$script:CachedAdServiceCredential = $null
+$script:CachedLdapsCertificateBase64 = $null
+$script:CachedLdapsCertificateInstalled = $false
+
 #region Public Functions
+
+function Get-ManagedIdentityAccessToken {
+    <#
+    .SYNOPSIS
+        Retrieves an access token using the Azure Functions/App Service Managed Identity endpoint.
+    .PARAMETER Resource
+        Resource URI for the token (e.g. https://vault.azure.net)
+    .OUTPUTS
+        System.String
+    .LINK
+        https://learn.microsoft.com/azure/app-service/overview-managed-identity
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Resource
+    )
+
+    $identityEndpoint = $env:IDENTITY_ENDPOINT
+    $identityHeader = $env:IDENTITY_HEADER
+    $headerName = 'X-IDENTITY-HEADER'
+    $apiVersion = '2019-08-01'
+
+    if ([string]::IsNullOrWhiteSpace($identityEndpoint) -and -not [string]::IsNullOrWhiteSpace($env:MSI_ENDPOINT)) {
+        $identityEndpoint = $env:MSI_ENDPOINT
+        $identityHeader = $env:MSI_SECRET
+        $headerName = 'Secret'
+        $apiVersion = '2017-09-01'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($identityEndpoint) -or [string]::IsNullOrWhiteSpace($identityHeader)) {
+        throw "Managed Identity endpoint is not available in this environment."
+    }
+
+    $identityEndpoint = $identityEndpoint.Trim().Trim('"').Trim("'").TrimEnd('/')
+    if (-not ($identityEndpoint -as [System.Uri]) -or -not ([System.Uri]$identityEndpoint).IsAbsoluteUri) {
+        throw "Managed Identity Endpoint is not a valid absolute URI: '$identityEndpoint'"
+    }
+
+    $uriBuilder = [System.UriBuilder]::new($identityEndpoint)
+    $uriBuilder.Query = "resource=$([System.Uri]::EscapeDataString($Resource))&api-version=$apiVersion"
+    $tokenUri = $uriBuilder.Uri.AbsoluteUri
+
+    $tokenResponse = Invoke-RestMethod -Uri $tokenUri -Headers @{ $headerName = $identityHeader } -Method Get
+    if (-not $tokenResponse -or [string]::IsNullOrWhiteSpace($tokenResponse.access_token)) {
+        throw "Managed Identity token response did not contain an access_token."
+    }
+
+    return [string]$tokenResponse.access_token
+}
+
+function Get-KeyVaultSecretValue {
+    <#
+    .SYNOPSIS
+        Retrieves a Key Vault secret value using Managed Identity.
+    .PARAMETER KeyVaultUri
+        Base URI of the vault (e.g. https://myvault.vault.azure.net)
+    .PARAMETER SecretName
+        Name of the secret
+    .OUTPUTS
+        System.String
+    .LINK
+        https://learn.microsoft.com/azure/key-vault/secrets/quick-create-powershell
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$KeyVaultUri,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SecretName
+    )
+
+    $keyVaultUriClean = $KeyVaultUri.Trim().Trim('"').Trim("'").TrimEnd('/')
+    if (-not ($keyVaultUriClean -as [System.Uri]) -or -not ([System.Uri]$keyVaultUriClean).IsAbsoluteUri) {
+        throw "Key Vault URI is not a valid absolute URI: '$keyVaultUriClean'"
+    }
+
+    $token = Get-ManagedIdentityAccessToken -Resource 'https://vault.azure.net' -ErrorAction Stop
+    $headers = @{ Authorization = "Bearer $token" }
+
+    $escapedSecretName = [System.Uri]::EscapeDataString($SecretName)
+    $secretUri = "$keyVaultUriClean/secrets/${escapedSecretName}?api-version=7.4"
+    $secretResponse = Invoke-RestMethod -Uri $secretUri -Headers $headers -Method Get
+
+    if (-not $secretResponse -or $null -eq $secretResponse.value) {
+        throw "Key Vault secret '$SecretName' did not return a value."
+    }
+
+    return [string]$secretResponse.value
+}
+
+function Get-FunctionAdServiceCredential {
+    <#
+    .SYNOPSIS
+        Retrieves (and caches) the AD service account credential for password reset.
+    .DESCRIPTION
+        Prefers local environment variables, otherwise loads from Key Vault using Managed Identity.
+    .OUTPUTS
+        System.Management.Automation.PSCredential
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Management.Automation.PSCredential])]
+    param()
+
+    if ($script:CachedAdServiceCredential) {
+        return $script:CachedAdServiceCredential
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:AD_SERVICE_USERNAME) -and -not [string]::IsNullOrWhiteSpace($env:AD_SERVICE_PASSWORD)) {
+        $securePassword = ConvertTo-SecureString -String $env:AD_SERVICE_PASSWORD -AsPlainText -Force
+        $script:CachedAdServiceCredential = [PSCredential]::new($env:AD_SERVICE_USERNAME, $securePassword)
+
+        # Back-compat for older code paths
+        Set-Variable -Scope Global -Name ADServiceCredential -Value $script:CachedAdServiceCredential
+
+        return $script:CachedAdServiceCredential
+    }
+
+    if ([string]::IsNullOrWhiteSpace($env:KEY_VAULT_URI)) {
+        throw "AD service credentials not configured (missing AD_SERVICE_USERNAME/AD_SERVICE_PASSWORD and KEY_VAULT_URI)."
+    }
+
+    $secretValue = Get-KeyVaultSecretValue -KeyVaultUri $env:KEY_VAULT_URI -SecretName 'ENTRA-PWDRESET-RW' -ErrorAction Stop
+
+    # Secret format: {"username":"DOMAIN\\svc","password":"pwd"}
+    if ($secretValue -match '\\(?![\\"/bfnrtu])') {
+        $secretValue = $secretValue -replace '\\(?![\\"/bfnrtu])', '\\'
+    }
+
+    $credentialObject = $secretValue | ConvertFrom-Json -ErrorAction Stop
+    if (-not $credentialObject.username -or $null -eq $credentialObject.password) {
+        throw "ENTRA-PWDRESET-RW secret must contain 'username' and 'password' fields."
+    }
+
+    $securePassword = ConvertTo-SecureString -String $credentialObject.password -AsPlainText -Force
+    $script:CachedAdServiceCredential = [PSCredential]::new([string]$credentialObject.username, $securePassword)
+
+    # Back-compat for older code paths
+    Set-Variable -Scope Global -Name ADServiceCredential -Value $script:CachedAdServiceCredential
+
+    return $script:CachedAdServiceCredential
+}
+
+function Get-FunctionLdapsCertificateBase64 {
+    <#
+    .SYNOPSIS
+        Retrieves (and caches) the LDAPS public certificate (base64) from Key Vault.
+    .OUTPUTS
+        System.String
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    if ($script:CachedLdapsCertificateBase64) {
+        return $script:CachedLdapsCertificateBase64
+    }
+
+    if ([string]::IsNullOrWhiteSpace($env:KEY_VAULT_URI)) {
+        return $null
+    }
+
+    try {
+        $script:CachedLdapsCertificateBase64 = Get-KeyVaultSecretValue -KeyVaultUri $env:KEY_VAULT_URI -SecretName 'LDAPS-Certificate-CER' -ErrorAction Stop
+
+        # Back-compat for older code paths
+        Set-Variable -Scope Global -Name LdapsCertificateCer -Value $script:CachedLdapsCertificateBase64
+
+        return $script:CachedLdapsCertificateBase64
+    }
+    catch {
+        Write-Verbose "Failed to retrieve LDAPS certificate secret: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Ensure-LdapsTrustedCertificateInstalled {
+    <#
+    .SYNOPSIS
+        Ensures the LDAPS certificate is installed in the local trust store.
+    .OUTPUTS
+        System.Boolean
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    if ($script:CachedLdapsCertificateInstalled) {
+        return $true
+    }
+
+    $certificateBase64 = Get-FunctionLdapsCertificateBase64
+    if ([string]::IsNullOrWhiteSpace($certificateBase64)) {
+        return $false
+    }
+
+    Install-LdapsTrustedCertificate -CertificateBase64 $certificateBase64 -ErrorAction Stop | Out-Null
+    $script:CachedLdapsCertificateInstalled = $true
+
+    # Back-compat for older code paths
+    Set-Variable -Scope Global -Name LdapsCertificateInstalled -Value $true
+
+    return $true
+}
 
 function Get-ClientPrincipal {
     <#
@@ -308,6 +523,245 @@ function Install-LdapsTrustedCertificate {
     }
 }
 
+function Test-LdapsTcpConnectivity {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$HostName,
+
+        [Parameter()]
+        [ValidateRange(1, 65535)]
+        [int]$Port = 636,
+
+        [Parameter()]
+        [ValidateRange(1, 60)]
+        [int]$TimeoutSeconds = 5
+    )
+
+    $client = $null
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $async = $client.BeginConnect($HostName, $Port, $null, $null)
+        if (-not $async.AsyncWaitHandle.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))) {
+            try { $client.Close() } catch {}
+            return $false
+        }
+        $client.EndConnect($async)
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        if ($client) {
+            try { $client.Dispose() } catch {}
+        }
+    }
+}
+
+function ConvertFrom-LdapsCertificateBase64 {
+    [CmdletBinding()]
+    [OutputType([System.Security.Cryptography.X509Certificates.X509Certificate2])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$CertificateBase64
+    )
+
+    $certBytes = [Convert]::FromBase64String($CertificateBase64)
+
+    try {
+        return [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certBytes)
+    }
+    catch {
+        $pemText = [System.Text.Encoding]::UTF8.GetString($certBytes)
+        if ($pemText -notmatch '-----BEGIN CERTIFICATE-----') {
+            throw
+        }
+
+        $createFromPem = [System.Security.Cryptography.X509Certificates.X509Certificate2].GetMethod(
+            'CreateFromPem',
+            [System.Reflection.BindingFlags]::Public -bor [System.Reflection.BindingFlags]::Static,
+            $null,
+            [Type[]]@([string]),
+            $null
+        )
+
+        if ($null -eq $createFromPem) {
+            throw "Certificate appears to be PEM, but X509Certificate2.CreateFromPem(string) is not available in this runtime."
+        }
+
+        return [System.Security.Cryptography.X509Certificates.X509Certificate2]$createFromPem.Invoke($null, @($pemText))
+    }
+}
+
+function Get-CertificateDnsNames {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+    )
+
+    $names = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    try {
+        $primary = $Certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::DnsName, $false)
+        if (-not [string]::IsNullOrWhiteSpace($primary)) {
+            [void]$names.Add($primary)
+        }
+    }
+    catch {
+        # ignore
+    }
+
+    try {
+        $sanExt = $Certificate.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.17' } | Select-Object -First 1
+        if ($sanExt) {
+            $formatted = ([System.Security.Cryptography.AsnEncodedData]::new($sanExt.Oid, $sanExt.RawData)).Format($true)
+            foreach ($line in ($formatted -split "`r?`n")) {
+                $trimmed = $line.Trim()
+                if ($trimmed -match '^DNS Name\s*=\s*(.+)$') {
+                    [void]$names.Add($Matches[1].Trim())
+                }
+            }
+        }
+    }
+    catch {
+        # ignore
+    }
+
+    try {
+        $cn = $Certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+        if (-not [string]::IsNullOrWhiteSpace($cn)) {
+            [void]$names.Add($cn)
+        }
+    }
+    catch {
+        # ignore
+    }
+
+    return @($names)
+}
+
+function Test-CertificateMatchesHostName {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$HostName,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
+    )
+
+    # Require a DNS name (strict hostname validation). IP addresses cannot be validated against SAN DNS entries.
+    $parsedIp = $null
+    if ([System.Net.IPAddress]::TryParse($HostName, [ref]$parsedIp)) {
+        return $false
+    }
+
+    $dnsNames = Get-CertificateDnsNames -Certificate $Certificate
+    if ($dnsNames -contains $HostName) {
+        return $true
+    }
+
+    # Wildcard support
+    foreach ($name in $dnsNames) {
+        if ($name -like '*.*' -and $name.StartsWith('*.')) {
+            $suffix = $name.Substring(1) # remove leading '*'
+            if ($HostName.EndsWith($suffix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function New-LdapsConnection {
+    [CmdletBinding()]
+    [OutputType([System.DirectoryServices.Protocols.LdapConnection])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$DomainController,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [System.Management.Automation.PSCredential]$Credential
+    )
+
+    # Quick network preflight so we can distinguish firewall/routing from TLS failures.
+    $tcpOk = Test-LdapsTcpConnectivity -HostName $DomainController -Port 636 -TimeoutSeconds 5
+    if (-not $tcpOk) {
+        throw "Unable to reach $DomainController on TCP/636. Check NSG and Windows Firewall on the domain controller."
+    }
+
+    $ldapIdentifier = [System.DirectoryServices.Protocols.LdapDirectoryIdentifier]::new($DomainController, 636)
+    $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($ldapIdentifier)
+
+    $connection.SessionOptions.SecureSocketLayer = $true
+    $connection.SessionOptions.ProtocolVersion = 3
+
+    # Strict server certificate validation.
+    # If we have the expected server certificate (self-signed in this project), pin to that cert AND validate hostname.
+    $expectedCertBase64 = $null
+    try {
+        $expectedCertBase64 = Get-FunctionLdapsCertificateBase64
+    }
+    catch {
+        $expectedCertBase64 = $null
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($expectedCertBase64)) {
+        $expectedCert = ConvertFrom-LdapsCertificateBase64 -CertificateBase64 $expectedCertBase64
+        $expectedThumbprint = $expectedCert.Thumbprint
+
+        $connection.SessionOptions.VerifyServerCertificate = {
+            param(
+                [System.DirectoryServices.Protocols.LdapConnection]$conn,
+                [System.Security.Cryptography.X509Certificates.X509Certificate]$cert
+            )
+
+            try {
+                $presented = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert)
+
+                if ($presented.Thumbprint -ne $expectedThumbprint) {
+                    Write-Warning "LDAPS certificate thumbprint mismatch. Presented '$($presented.Thumbprint)', expected '$expectedThumbprint'."
+                    return $false
+                }
+
+                if (-not (Test-CertificateMatchesHostName -HostName $DomainController -Certificate $presented)) {
+                    $names = (Get-CertificateDnsNames -Certificate $presented) -join ', '
+                    Write-Warning "LDAPS certificate does not match host '$DomainController'. Names in cert: $names"
+                    return $false
+                }
+
+                return $true
+            }
+            catch {
+                Write-Warning "LDAPS server certificate validation threw: $($_.Exception.Message)"
+                return $false
+            }
+        }
+    }
+
+    $networkCred = [System.Net.NetworkCredential]::new(
+        $Credential.UserName,
+        $Credential.Password
+    )
+    $connection.Credential = $networkCred
+    $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Basic
+
+    return $connection
+}
+
 function Get-ADUserDistinguishedName {
     <#
     .SYNOPSIS
@@ -350,22 +804,9 @@ function Get-ADUserDistinguishedName {
     try {
         Write-Verbose "Searching for user DN: $SamAccountName"
         
-        # Create LDAP connection
+        # Create LDAP connection (LDAPS)
         # Reference: https://learn.microsoft.com/dotnet/api/system.directoryservices.protocols
-        $ldapIdentifier = [System.DirectoryServices.Protocols.LdapDirectoryIdentifier]::new($DomainController, 636)
-        $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($ldapIdentifier)
-        
-        # Configure for LDAPS (SSL/TLS)
-        $connection.SessionOptions.SecureSocketLayer = $true
-        $connection.SessionOptions.ProtocolVersion = 3
-        
-        # Set authentication credentials
-        $networkCred = [System.Net.NetworkCredential]::new(
-            $Credential.UserName,
-            $Credential.Password
-        )
-        $connection.Credential = $networkCred
-        $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Basic
+        $connection = New-LdapsConnection -DomainController $DomainController -Credential $Credential -ErrorAction Stop
         
         # Bind to verify connection
         $connection.Bind()
@@ -487,21 +928,8 @@ function Set-ADUserPassword {
                 -Credential $Credential `
                 -DomainName $DomainName
             
-            # Create LDAP connection
-            $ldapIdentifier = [System.DirectoryServices.Protocols.LdapDirectoryIdentifier]::new($DomainController, 636)
-            $connection = [System.DirectoryServices.Protocols.LdapConnection]::new($ldapIdentifier)
-            
-            # Configure for LDAPS
-            $connection.SessionOptions.SecureSocketLayer = $true
-            $connection.SessionOptions.ProtocolVersion = 3
-            
-            # Set authentication
-            $networkCred = [System.Net.NetworkCredential]::new(
-                $Credential.UserName,
-                $Credential.Password
-            )
-            $connection.Credential = $networkCred
-            $connection.AuthType = [System.DirectoryServices.Protocols.AuthType]::Basic
+            # Create LDAP connection (LDAPS)
+            $connection = New-LdapsConnection -DomainController $DomainController -Credential $Credential -ErrorAction Stop
             
             # Bind
             $connection.Bind()
@@ -555,6 +983,20 @@ function Set-ADUserPassword {
 
 # Export module members
 Export-ModuleMember -Function @(
+    'Get-ManagedIdentityAccessToken'
+    'Get-KeyVaultSecretValue'
+    'Get-FunctionAdServiceCredential'
+    'Get-FunctionLdapsCertificateBase64'
+    'Ensure-LdapsTrustedCertificateInstalled'
+    'Test-LdapsTcpConnectivity'
+    'ConvertFrom-LdapsCertificateBase64'
+    'Get-CertificateDnsNames'
+    'Test-CertificateMatchesHostName'
+    'New-LdapsConnection'
+    'Get-ADUserDistinguishedName'
+    'Set-ADUserPassword'
+    'New-SecurePassword'
+    'Install-LdapsTrustedCertificate'
     'Get-ClientPrincipal'
     'Test-RoleClaim'
     'New-SecurePassword'
