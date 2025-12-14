@@ -207,7 +207,7 @@ try {
 
     # Install LDAPS certificate (best-effort; non-fatal if already trusted)
     try {
-        $installed = Ensure-LdapsTrustedCertificateInstalled
+        $installed = Get-LdapsTrustedCertificate
         if ($installed) {
             Write-Information "LDAPS certificate trust ensured"
         }

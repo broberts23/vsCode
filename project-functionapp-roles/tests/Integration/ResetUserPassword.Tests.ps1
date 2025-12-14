@@ -108,7 +108,7 @@ Describe 'ResetUserPassword Function' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
-            Mock Ensure-LdapsTrustedCertificateInstalled { $true } -ModuleName PasswordResetHelpers
+            Mock Get-LdapsTrustedCertificate { $true } -ModuleName PasswordResetHelpers
             Mock Get-FunctionAdServiceCredential {
                 [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
             } -ModuleName PasswordResetHelpers
@@ -168,7 +168,7 @@ Describe 'ResetUserPassword Function' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
-            Mock Ensure-LdapsTrustedCertificateInstalled { $true } -ModuleName PasswordResetHelpers
+            Mock Get-LdapsTrustedCertificate { $true } -ModuleName PasswordResetHelpers
             Mock Get-FunctionAdServiceCredential {
                 [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
             } -ModuleName PasswordResetHelpers
@@ -209,7 +209,7 @@ Describe 'ResetUserPassword Function' {
             Mock New-SecurePassword { 'TestPassword123!' } -ModuleName PasswordResetHelpers
             Mock Set-ADUserPassword { $true } -ModuleName PasswordResetHelpers
             Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
-            Mock Ensure-LdapsTrustedCertificateInstalled { $true } -ModuleName PasswordResetHelpers
+            Mock Get-LdapsTrustedCertificate { $true } -ModuleName PasswordResetHelpers
             Mock Get-FunctionAdServiceCredential {
                 [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
             } -ModuleName PasswordResetHelpers
@@ -266,7 +266,7 @@ Describe 'ResetUserPassword Function' {
             } -ModuleName PasswordResetHelpers
             Mock Test-RoleClaim { $true } -ModuleName PasswordResetHelpers
             Mock Install-LdapsTrustedCertificate { } -ModuleName PasswordResetHelpers
-            Mock Ensure-LdapsTrustedCertificateInstalled { $true } -ModuleName PasswordResetHelpers
+            Mock Get-LdapsTrustedCertificate { $true } -ModuleName PasswordResetHelpers
             Mock Get-FunctionAdServiceCredential {
                 [PSCredential]::new('CONTOSO\svc-test', (ConvertTo-SecureString 'test' -AsPlainText -Force))
             } -ModuleName PasswordResetHelpers

@@ -200,7 +200,7 @@ function Get-FunctionLdapsCertificateBase64 {
     }
 }
 
-function Ensure-LdapsTrustedCertificateInstalled {
+function Get-LdapsTrustedCertificate {
     <#
     .SYNOPSIS
         Ensures the LDAPS certificate is installed in the local trust store.
@@ -721,9 +721,10 @@ function New-LdapsConnection {
 
     if (-not [string]::IsNullOrWhiteSpace($expectedCertBase64)) {
         $expectedCert = ConvertFrom-LdapsCertificateBase64 -CertificateBase64 $expectedCertBase64
-        $expectedThumbprint = $expectedCert.Thumbprint
+        $expectedThumbprintLocal = $expectedCert.Thumbprint
+        $domainControllerLocal = $DomainController
 
-        $connection.SessionOptions.VerifyServerCertificate = {
+        $verifyCallback = {
             param(
                 [System.DirectoryServices.Protocols.LdapConnection]$conn,
                 [System.Security.Cryptography.X509Certificates.X509Certificate]$cert
@@ -732,14 +733,14 @@ function New-LdapsConnection {
             try {
                 $presented = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cert)
 
-                if ($presented.Thumbprint -ne $expectedThumbprint) {
-                    Write-Warning "LDAPS certificate thumbprint mismatch. Presented '$($presented.Thumbprint)', expected '$expectedThumbprint'."
+                if ($presented.Thumbprint -ne $expectedThumbprintLocal) {
+                    Write-Warning "LDAPS certificate thumbprint mismatch. Presented '$($presented.Thumbprint)', expected '$expectedThumbprintLocal'."
                     return $false
                 }
 
-                if (-not (Test-CertificateMatchesHostName -HostName $DomainController -Certificate $presented)) {
+                if (-not (Test-CertificateMatchesHostName -HostName $domainControllerLocal -Certificate $presented)) {
                     $names = (Get-CertificateDnsNames -Certificate $presented) -join ', '
-                    Write-Warning "LDAPS certificate does not match host '$DomainController'. Names in cert: $names"
+                    Write-Warning "LDAPS certificate does not match host '$domainControllerLocal'. Names in cert: $names"
                     return $false
                 }
 
@@ -749,7 +750,9 @@ function New-LdapsConnection {
                 Write-Warning "LDAPS server certificate validation threw: $($_.Exception.Message)"
                 return $false
             }
-        }
+        }.GetNewClosure()
+
+        $connection.SessionOptions.VerifyServerCertificate = $verifyCallback
     }
 
     $networkCred = [System.Net.NetworkCredential]::new(
@@ -987,7 +990,7 @@ Export-ModuleMember -Function @(
     'Get-KeyVaultSecretValue'
     'Get-FunctionAdServiceCredential'
     'Get-FunctionLdapsCertificateBase64'
-    'Ensure-LdapsTrustedCertificateInstalled'
+    'Get-LdapsTrustedCertificate'
     'Test-LdapsTcpConnectivity'
     'ConvertFrom-LdapsCertificateBase64'
     'Get-CertificateDnsNames'
