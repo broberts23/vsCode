@@ -1,241 +1,286 @@
-# Building a Secure Password Reset API with Azure Functions and JWT Authentication
+# Building a Secure Password Reset API with Azure Functions, Easy Auth, and LDAPS
 
-## The Challenge
+## Introduction
 
-Picture this: you're managing an on-premises Active Directory environment, and you need to expose password reset capabilities to external systems or web applications. The password needs to be reset in AD, but you want to do it securely, with proper authentication and authorization. You also need it to handle dozens of requests per second without breaking a sweat.
+In the infrastructure post, we built a disposable Active Directory lab: a domain controller in its own subnet, a function app in another, Key Vault for secrets, and just enough networking glue to make it feel like a real hybrid environment.
 
-This is exactly what we're building today - a production-ready Azure Function App that bridges the gap between modern cloud authentication and traditional on-premises Active Directory.
+This post is the other half of the story: the **PowerShell 7.4 Azure Function** that accepts authenticated requests, authorizes them with role claims, and resets passwords in on-prem AD over **LDAPS**.
 
-## The Architecture: PowerShell Meets Modern Auth
+The goal is intentionally boring: one HTTP POST, a strong password comes back, and the AD change happens safely and repeatably.
 
-At its core, this is an Azure Function running PowerShell 7.4, but what makes it interesting is how it handles authentication. We're not relying on Azure's built-in authentication features. Instead, we've implemented full JWT Bearer token validation right in the code, giving us complete control over who can reset passwords and when.
+## Architecture at a Glance
 
-The function exposes a simple HTTP POST endpoint, but don't let that simplicity fool you. Behind the scenes, every request goes through a rigorous authentication and authorization pipeline before a single character of a password is changed.
+Here’s the moving parts that matter for the function app itself:
 
-## The Authentication Story
+```mermaid
+flowchart TB
+      subgraph Azure["Azure Resource Group"]
+            FA["Function App (Windows)
+PowerShell 7.4"]
+            KV["Key Vault
+Secrets"]
+            LA["App Insights / Log Analytics"]
+      end
 
-Let's walk through what happens when a request comes in. Imagine you're an external application that needs to reset a user's password. You've already obtained a JWT token from your identity provider (Entra ID), and you're ready to make the call.
+      subgraph VNet["VNet"]
+            DC["Domain Controller
+LDAPS :636"]
+      end
 
-### Step 1: The Bearer Token
+      Caller["Calling App
+(Entra client credentials)"] -->|Bearer token| FA
+      FA -->|Managed Identity| KV
+      FA -->|LDAPS (pinned cert + hostname validation)| DC
+      FA --> LA
+```
 
-Your application sends an HTTP POST request with an Authorization header: `Bearer eyJhbGciOiJSUzI1Ni...` (one of those incredibly long JWT tokens). But here's the key difference from traditional implementations: **your function code never sees this raw token**.
+Two design choices shape almost everything:
 
-### Step 2: Platform Authentication—Delegation at Work
+1. **Authentication is delegated to the platform** (App Service Authentication / “Easy Auth”).
+2. **Directory operations are done via LDAPS** using .NET LDAP APIs, with strict TLS validation.
 
-Before your PowerShell code even starts executing, Azure's App Service Authentication middleware (also known as "Easy Auth") intercepts the request. This is where all the heavy lifting happens:
+## Prerequisites
 
-**Signature Validation**: The platform fetches the issuer's signing keys from the OpenID Connect metadata endpoint and validates the token's cryptographic signature. No manual key management, no custom JWKS caching—it's all handled automatically.
+To follow along end-to-end you’ll need:
 
-**Timing Checks**: The middleware validates `exp` (expiration) and `nbf` (not before) claims. Expired or not-yet-valid tokens are rejected immediately with a 401.
+- An Entra ID app registration for the API, with role assignments for callers.
+- App Service Authentication enabled for the Function App (configured in IaC).
+- A domain controller reachable from the Function App via VNet integration.
+- Two Key Vault secrets: - `ENTRA-PWDRESET-RW` (JSON containing username/password)
+  - `LDAPS-Certificate-CER` (the domain controller’s public cert, base64)
 
-**Issuer Verification**: The token's `iss` claim must match the configured issuer (`https://login.microsoftonline.com/{tenant-id}/v2.0`). Tokens from other tenants or identity providers are rejected.
+## The Request Walkthrough
 
-**Audience Validation**: The token's `aud` claim must match `api://{clientId}`. This prevents token reuse across different APIs.
+Let’s walk the request the same way the runtime sees it.
 
-If any of these checks fail, the request never reaches your function. The middleware returns a 401 Unauthorized, and you see it in Application Insights as a failed authentication attempt—no function execution, no billing for that request.
+### Step 1: The request arrives (but your code doesn’t validate the JWT)
 
-### Step 3: Principal Injection
+The caller sends `Authorization: Bearer ...`.
 
-When authentication succeeds, something elegant happens: the middleware injects an `X-MS-CLIENT-PRINCIPAL` header into the request. This header contains a base64-encoded JSON object with all the user's claims, pre-validated and ready to use.
+Before PowerShell starts, **Easy Auth** validates the token:
 
-Your function's first task is simple: decode this header. The `Get-ClientPrincipal` function handles this:
+- Signature + issuer via OIDC metadata (`.../{tenantId}/v2.0`).
+- `exp` / `nbf` timing.
+- Audience (`aud`). In this project the allowed audiences include both:
+  - the plain client id, and
+  - `api://{clientId}`
+
+If validation fails, Easy Auth returns **401** and the function never runs.
+
+### Step 2: Easy Auth injects the principal
+
+On success, Easy Auth injects `X-MS-CLIENT-PRINCIPAL` (base64 JSON). The function decodes it with:
 
 ```powershell
 $principal = Get-ClientPrincipal -HeaderValue $Request.Headers['X-MS-CLIENT-PRINCIPAL']
 ```
 
-You get a clean PowerShell object with properties like `auth_typ` (authentication type), `name_typ` (name claim type), and most importantly, a `claims` array containing every claim from the original token.
+That gives us a consistent claim set without having to do token cryptography in PowerShell.
 
-### Step 4: Role-Based Authorization
+### Step 3: Authorization is a role claim check
 
-Now comes the business logic: is this authenticated caller actually allowed to reset passwords?
-
-This is where role-based access control (RBAC) comes in. We look for a specific claim—`Role.PasswordReset`—in the decoded principal. This claim can appear in either the `roles` claim type (for application tokens) or the `role` claim type (for user tokens). The `Test-RoleClaim` function handles both cases:
+The function enforces a single rule: the caller must have the required role (from `REQUIRED_ROLE`).
 
 ```powershell
-$hasRole = Test-RoleClaim -Principal $principal -RequiredRole 'Role.PasswordReset'
+$hasRole = Test-RoleClaim -Principal $principal -RequiredRole $env:REQUIRED_ROLE
 ```
 
-If the claim isn't present, the caller gets a 403 Forbidden response. You might have a valid token (you made it past the middleware), but if you don't have the right role, you're not resetting any passwords today.
+No role claim → **403**.
 
-### Why Delegation Matters
+### Step 4: Parse the body and choose the target user
 
-By delegating authentication to the platform, we gain several advantages:
+The request body is intentionally small:
 
-1. **Security**: Microsoft's authentication team maintains the validation logic. When new threats emerge or signing algorithms change, updates happen at the platform level—no code changes needed.
+```json
+{ "samAccountName": "jdoe" }
+```
 
-2. **Key Rotation**: When Azure AD rotates signing keys, the middleware automatically fetches updated keys from the OpenID Connect metadata endpoint. Zero downtime, zero configuration drift.
+If `samAccountName` is missing → **400**.
 
-3. **Simplicity**: Our function code has no dependencies on cryptography libraries. No `System.IdentityModel.Tokens.Jwt`, no manual signature verification, no clock skew handling.
+### Step 5: Fetch secrets with Managed Identity
 
-4. **Performance**: The middleware is optimized at the platform level. Validation happens in native code before the PowerShell runspace even initializes, shaving milliseconds off cold starts.
+At this point we have an authorized request, but we still need two things:
 
-5. **Consistency**: The same authentication pattern works across all App Service and Azure Functions apps. Learn it once, use it everywhere.
+- **AD service account credential** (from Key Vault)
+- **LDAPS certificate pinning material** (from Key Vault)
 
-### OAuth 2.0 and Zero Trust Architecture
+The function app uses its **system-assigned managed identity** to call Key Vault. Secrets are cached per runspace inside the helper module, so normal traffic doesn’t hammer Key Vault.
 
-This function app is a textbook implementation of modern security principles, specifically OAuth 2.0 resource server patterns and Zero Trust architecture.
+If the LDAPS certificate secret is missing or empty, the function fails fast with **500** (that’s a misconfiguration we don’t want to “best-effort” our way through).
 
-**OAuth 2.0 Resource Server**: Our function acts as an OAuth 2.0 protected resource. It doesn't issue tokens or handle user login flows—that's the authorization server's job (Entra ID). Instead, it validates access tokens and enforces authorization policies. This clean separation of concerns is fundamental to OAuth 2.0:
+## The LDAPS Story (Strict, No Hostname Bypass)
 
-- **Authorization Server** (Entra ID): Issues access tokens after authenticating users and obtaining consent
-- **Resource Server** (our function): Validates tokens and protects the password reset resource
-- **Client** (calling application): Obtains tokens from the authorization server and presents them to our API
+Resetting passwords over LDAP is the part that tends to get hand-waved with “just trust the cert.” This project goes the other direction.
 
-This design means we never see user credentials, never handle authentication UI, and never manage token issuance—all high-risk activities handled by Microsoft's hardened identity platform.
+The function resets passwords over **LDAPS** using `System.DirectoryServices.Protocols.LdapConnection`, and validates the server certificate in two ways:
 
-**Zero Trust Principles**: The function embodies the core tenets of Zero Trust security:
+1. **Certificate pinning**: the presented server cert thumbprint must match the pinned cert retrieved from Key Vault.
+2. **Hostname validation**: the cert must match the domain controller hostname (SAN/CN checks).
 
-1. **Verify Explicitly**: Every request is authenticated via cryptographic proof (JWT signature). No implicit trust based on network location or IP address. Even if a request comes from inside Azure's network, it still requires a valid, signed token.
+This keeps TLS strict without requiring the Function App sandbox to write to any certificate store. (On Windows-hosted Functions, opening cert stores for write is commonly blocked.)
 
-2. **Use Least Privilege Access**: The function checks not just _who_ you are (authentication), but _what you're allowed to do_ (authorization). The `Role.PasswordReset` claim represents fine-grained, just-enough permission. The AD service account follows the same principle—delegated permissions for password resets only, nothing more.
+Before attempting the TLS handshake, the code also performs a quick TCP preflight to port 636. That makes “network unreachable” failures look different from “TLS validation failed” failures, which is invaluable when debugging.
 
-3. **Assume Breach**: Security is layered. Even if an attacker compromises one layer (say, they steal a valid token), they're limited by:
-   - Token expiration (time-bound access)
-   - Audience restriction (token works only for this API)
-   - Role requirements (token must have the specific role claim)
-   - AD delegation limits (service account can't elevate privileges or modify admins)
-   - Network segmentation (VNet integration limits lateral movement)
+## Generating and Returning the Password
 
-**Defense in Depth**: Notice how security isn't a single gate—it's a series of checkpoints:
+The function generates a password with `New-SecurePassword` (length default 16, with required character classes), converts it to `SecureString` for the directory operation, and returns the plain text password in the response body.
 
-- TLS ensures confidentiality in transit
-- App Service Authentication validates token integrity
-- Role claims enforce authorization
-- Key Vault protects secrets at rest
-- Managed Identity eliminates credential sprawl
-- Audit logs track every action in Application Insights
+The important operational rule is: **no password is written to logs**. The only place the generated password exists is in memory during that request and in the HTTPS response to an authorized caller.
 
-If any single control fails or is bypassed, others remain in place. This is defense in depth, and it's why Zero Trust architectures are resilient against sophisticated attacks.
+## Hosting and Scaling Notes
 
-**Token Scoping and Least Privilege**: The OAuth 2.0 model shines here. Tokens are scoped to specific resources (via the `aud` claim) and carry only the permissions needed (via role claims). A token valid for our password reset API can't be reused against other APIs, even within the same tenant. This containment is critical in preventing token replay attacks and limiting blast radius during incidents.
+This function app runs on **Elastic Premium (EP1) on Windows**, because VNet integration is a core requirement for reaching the domain controller.
 
-## The Password Reset Flow
+Concurrency is tuned with:
 
-Once we've verified that the caller is authenticated and authorized, we move into the actual business logic. The request body contains a simple JSON payload with the `samAccountName` of the user whose password needs to be reset.
+- `FUNCTIONS_WORKER_PROCESS_COUNT=2`
+- `PSWorkerInProcConcurrencyUpperBound=10`
 
-### Generating a Secure Password
+Those settings let a single app instance handle multiple requests in parallel while keeping directory operations responsive.
 
-We don't let callers specify the new password. Instead, we generate one using `New-SecurePassword`. This function uses .NET's `RNGCryptoServiceProvider` to create cryptographically secure random passwords. Each password is 12 characters by default (configurable up to 256) and includes uppercase letters, lowercase letters, digits, and special characters.
+## Where the Logic Lives
 
-The implementation uses a Fisher-Yates shuffle algorithm to ensure truly random distribution of character types. This isn't your grandfather's `Get-Random`—this is production-grade password generation.
+The entrypoint is intentionally small: it validates the request shape, checks role claims, and orchestrates calls into a helper module.
 
-### Connecting to Active Directory
+The heavy lifting lives in `PasswordResetHelpers`:
 
-Here's where cloud meets on-premises. The function uses the ActiveDirectory PowerShell module's `Set-ADAccountPassword` cmdlet to actually reset the password in your domain. But how do we authenticate to AD from a cloud function?
+- `Get-ClientPrincipal` and `Test-RoleClaim` (authorization)
+- `Get-FunctionAdServiceCredential` (Key Vault + MI)
+- `Get-FunctionLdapsCertificateBase64` (pinned cert from Key Vault)
+- `Set-ADUserPassword` (LDAPS user lookup + unicodePwd modify)
 
-During initialization (in `profile.ps1`), the function retrieves AD service account credentials from Azure Key Vault using its Managed Identity. These credentials are cached in memory for the lifetime of the function app, so we're not hitting Key Vault on every request.
+Keeping the LDAPS plumbing in one place made it much easier to iterate on TLS validation without turning `run.ps1` into a wall of LDAP code.
 
-The beauty of this approach is that the AD service account can be delegated minimal permissions—just enough to reset passwords and nothing more. We're following the principle of least privilege all the way down.
+## How the Pieces Fit Together in the Repo
 
-### The Response
+The function app is intentionally small: one HTTP-triggered endpoint, one helper module, and a profile script for worker initialization.
 
-If everything succeeds, the caller gets back a JSON response containing:
+Here’s the layout under `project-functionapp-roles/FunctionApp`:
 
-- The `samAccountName` they requested
-- The newly generated `password`
-- A `resetTime` timestamp
-- A `status` message
+```text
+FunctionApp/
+      host.json
+      local.settings.json               # local-only settings (not deployed)
+      profile.ps1                       # runs once per worker instance
+      requirements.psd1                 # managed dependencies
+      ResetUserPassword/
+            function.json                   # httpTrigger + http output binding
+            run.ps1                         # endpoint handler
+            PasswordResetHelpers.psm1       # core logic (auth parsing, Key Vault, LDAPS)
+            PasswordResetHelpers.psd1       # module manifest
+```
 
-The password is returned in the response body (over HTTPS, of course), and it's up to the caller to deliver it to the end user through their preferred channel—email, SMS, a web portal, whatever makes sense for their use case.
+One detail that’s easy to miss: `function.json` uses `"authLevel": "anonymous"` because authentication is handled by Easy Auth _before_ PowerShell runs.
 
-## Security: Defense in Depth and Zero Trust in Practice
+## The Startup Hook: profile.ps1
 
-Security wasn't an afterthought here—it's baked into every layer, implementing Zero Trust principles throughout the architecture.
+Azure Functions loads `profile.ps1` **once per PowerShell worker instance** (think “once per worker process,” not once per request). In this project it does three things:
 
-**Identity-Centric Security**: Unlike traditional perimeter-based security models that trust everything inside a network boundary, this function treats every request as potentially hostile until proven otherwise. Authentication and authorization happen at the application layer, not just at the network edge. This aligns with the Zero Trust mandate: "never trust, always verify."
+1. Sets strict error behavior (`Set-StrictMode -Version Latest`, `$ErrorActionPreference = 'Stop'`).
+2. Detects the Managed Identity endpoint variables (`IDENTITY_ENDPOINT/IDENTITY_HEADER`, with fallback to legacy `MSI_*`).
+3. Optionally “warms” secrets by retrieving:
+   - the AD service account secret (currently `ENTRA-PWDRESET-RW`), and
+   - the LDAPS public cert (`LDAPS-Certificate-CER`).
 
-**Security Headers**: Every response includes strict security headers. `Cache-Control: no-store` ensures no caching of sensitive data. `X-Content-Type-Options: nosniff` prevents MIME-sniffing attacks. And `Strict-Transport-Security` enforces HTTPS for an entire year, preventing protocol downgrade attacks.
+The request path in `run.ps1` **does not depend** on these global variables; it retrieves secrets on-demand through the helper module and caches per runspace. You can think of `profile.ps1` as a worker-initialization script and (optionally) an early warning system if Managed Identity / Key Vault access is broken.
 
-**Secrets Management**: That AD service account credential? It lives in Azure Key Vault, not in environment variables or configuration files. The function accesses it using a Managed Identity, so there are no credentials to rotate or leak. This eliminates an entire class of vulnerabilities around credential storage and management—no secrets in source control, no environment variables to exfiltrate, no configuration files to mishandle.
+## The Helper Module: PasswordResetHelpers.psm1
 
-**Managed Identity and Credential-less Authentication**: The function's Managed Identity represents another Zero Trust win. Traditional approaches would require storing credentials to access Key Vault, creating a chicken-and-egg problem. Managed Identity uses Azure AD's token service to authenticate the function app itself, establishing trust based on cryptographically verifiable identity rather than shared secrets. It's passwordless authentication at the infrastructure level.
+`PasswordResetHelpers.psm1` is where the “real work” lives. Each function is small on purpose, so you can test and reason about the behavior in isolation.
 
-**No Logging of Passwords**: The generated passwords never touch Application Insights or any logging system. We've been careful to ensure that sensitive data stays out of telemetry. This is data protection by design—sensitive information has minimal exposure time (exists only in memory for the duration of the request) and minimal exposure scope (returned only to the authenticated caller over TLS).
+- `Get-ManagedIdentityAccessToken` - Calls the App Service / Functions Managed Identity endpoint (new `IDENTITY_*` or legacy `MSI_*`) and returns an access token for a given resource.
 
-**Continuous Verification**: In a Zero Trust model, trust is never permanent—it's continuously evaluated. While our JWT tokens have expiration times that enforce re-verification, the principle extends throughout the stack. Managed Identity tokens are short-lived. Key Vault access requires valid identity tokens. Every layer independently verifies identity and authorization, refusing to simply trust upstream assertions.
+- `Get-KeyVaultSecretValue` - Uses Managed Identity to fetch a secret value from Key Vault via the REST API.
 
-## Performance: Built for Scale
+- `Get-FunctionAdServiceCredential` - Builds a `PSCredential` either from local env vars (`AD_SERVICE_USERNAME`/`AD_SERVICE_PASSWORD`) or from Key Vault (`ENTRA-PWDRESET-RW`). It also fixes the common JSON-backslash issue (`DOMAIN\svc`) before parsing.
 
-This function is designed to handle real workload—we're talking tens of requests per second without breaking a sweat. How?
+- `Get-FunctionLdapsCertificateBase64` - Retrieves and caches `LDAPS-Certificate-CER` (base64). This is the pinning material used to validate the DC’s LDAPS certificate.
 
-**Concurrency**: PowerShell 7.4 introduces in-process concurrency with runspaces. We've configured the function to handle up to 10 concurrent requests per worker process (`PSWorkerInProcConcurrencyUpperBound=10`).
+- `Get-ClientPrincipal` - Decodes the `X-MS-CLIENT-PRINCIPAL` header (base64 JSON) injected by Easy Auth, returning a PowerShell object with the caller’s claims.
 
-**Multiple Workers**: The function app can spin up multiple worker processes (`FUNCTIONS_WORKER_PROCESS_COUNT=2`), giving us even more parallelism.
+- `Test-RoleClaim` - Scans the decoded principal for the required role (handles both `roles` and `role` claim types).
 
-**Scale-Out**: Being on the Consumption plan, the function can automatically scale out to 200 instances if traffic demands it. With 10 concurrent requests per worker and 2 workers per instance, that's up to 4,000 concurrent password resets if needed.
+- `New-SecurePassword` - Generates a random password (default length 16) with required character classes.
 
-**Optimized Cold Starts**: We're using managed dependencies and keeping module imports minimal to ensure fast cold starts when new instances spin up.
+- `Test-LdapsTcpConnectivity` - Performs a quick TCP connect check to `host:636` so network problems are easier to distinguish from TLS/cert validation problems.
 
-## The Module: PasswordResetHelpers
+- `ConvertFrom-LdapsCertificateBase64` - Parses the pinned certificate from base64, accepting either DER bytes or PEM text.
 
-All of this functionality lives in a reusable PowerShell module called `PasswordResetHelpers`. It exports four functions, each with a specific responsibility:
+- `Get-CertificateDnsNames` - Extracts DNS names from the certificate (SANs first, with CN as fallback).
 
-`Get-ClientPrincipal` decodes the `X-MS-CLIENT-PRINCIPAL` header injected by App Service Authentication. Give it the base64-encoded header value, and it returns a clean PowerShell object with all the authenticated user's claims.
+- `Test-CertificateMatchesHostName` - Validates that the certificate names match the domain controller hostname, including wildcard handling.
 
-`Test-RoleClaim` checks for the presence of a specific role in the decoded principal's claims array. It's flexible enough to handle both `roles` and `role` claim types.
+- `New-LdapsConnection` - Creates an LDAPS `LdapConnection`, enables SSL, and attaches a strict `VerifyServerCertificate` callback that enforces: 1) thumbprint pinning to the Key Vault cert, and 2) hostname validation.
 
-`New-SecurePassword` generates cryptographically secure passwords with configurable length and guaranteed complexity.
+- `Get-ADUserDistinguishedName` - Searches AD over LDAPS to find the user DN by `sAMAccountName`.
 
-`Set-ADUserPassword` wraps the AD cmdlets with proper error handling and even supports `-WhatIf` for testing.
+- `Set-ADUserPassword` - Uses LDAPS to modify `unicodePwd` for the target user (via `ModifyRequest`). This is the core “reset” operation.
 
-The module follows PowerShell best practices religiously—`[CmdletBinding()]` on every function, proper parameter validation, comprehensive error handling with `$ErrorActionPreference = 'Stop'`, and Microsoft Learn references in comments for every cmdlet used.
+## The Endpoint: run.ps1
 
-## The Result
+`run.ps1` is intentionally written as a single guided flow (not a pile of helper functions). Conceptually, it’s a pipeline:
 
-What we've built is a function that's both simple and sophisticated. Simple in its API (HTTP POST with a JWT and a username), but sophisticated in how it handles authentication, authorization, password generation, and on-premises integration.
+1. **Validate request envelope**
 
-It's production-ready out of the box, with comprehensive test coverage (95.1% of the core module code), thorough error handling, and security best practices throughout. Whether you're integrating it into a custom web portal, exposing it to third-party systems, or building automation around it, this function provides a secure, scalable, and reliable way to reset Active Directory passwords from the cloud.
+   - Requires `X-MS-CLIENT-PRINCIPAL` and checks required env vars (`REQUIRED_ROLE`, `DOMAIN_CONTROLLER_FQDN`, `DOMAIN_NAME`).
 
-## Technical Reference
+2. **Decode principal + authorize**
 
-For those who want the quick facts, here's what makes up this solution:
+   - `Get-ClientPrincipal` → `Test-RoleClaim` → return `401/403` early if needed.
 
-**Core Technologies:**
+3. **Parse and validate request body**
 
-- PowerShell 7.4 on Azure Functions v4
-- App Service Authentication (Easy Auth) for JWT validation
-- ActiveDirectory PowerShell module for AD integration
-- Azure Key Vault for secrets management with Managed Identity
-- Application Insights for monitoring
+   - Handles both string JSON and already-deserialized bodies, then requires `samAccountName`.
 
-**The Request Pipeline:**
+4. **Load secrets needed for the operation**
 
-1. Platform authentication → JWT validation (signature, timing, issuer, audience)
-2. Principal injection → X-MS-CLIENT-PRINCIPAL header with decoded claims
-3. Principal decoding → Get-ClientPrincipal extracts claims
-4. Role authorization → Test-RoleClaim verifies Role.PasswordReset
-5. Password generation → Cryptographically secure, 12+ characters
-6. AD password reset → Set-ADAccountPassword with service account
-7. Response → JSON with new password and metadata
+   - `Get-FunctionAdServiceCredential` for the bind credential.
+   - `Get-FunctionLdapsCertificateBase64` for the pinned cert (required).
 
-**HTTP Status Codes:**
+5. **Generate a password and apply it over LDAPS**
 
-- 200: Password reset successful
-- 400: Missing or invalid request body
-- 401: Invalid, expired, or missing JWT (rejected by platform)
-- 403: Valid token but missing required role
-- 404: User not found in Active Directory
-- 500: AD connection or permission errors
+   - `New-SecurePassword` generates the value returned to the caller.
+   - `Set-ADUserPassword` performs the reset over LDAPS.
 
-**Performance Configuration:**
+6. **Return the response (with security headers)**
+   - Responds `200` with `{ samAccountName, password, resetTime, message }` and `Cache-Control: no-store` to reduce accidental caching.
 
-- 10 concurrent runspaces per worker process
-- 2 worker processes per instance
-- Up to 200 instances on Consumption plan
-- Theoretical maximum: 4,000 concurrent requests
+## The Test Driver: Test-FunctionAppWithToken.ps1
 
-**Testing:**
+The `scripts/Test-FunctionAppWithToken.ps1` script is designed to **simulate a real calling application**. It uses the same client credentials flow your automation, portal, or service would use in production.
 
-- 40 unit tests with Pester 5.x
-- 92.9% code coverage on PasswordResetHelpers module
-- All external dependencies properly mocked
-- Test reports in NUnit XML, JaCoCo, and HTML formats
+What it does:
 
-The complete source code includes infrastructure as code (Bicep), deployment scripts, comprehensive documentation, and everything needed to run this in production. Check out the README and QUICKSTART guides in the repository for deployment instructions.
+1. Requests an access token from the Entra v2 token endpoint:
+   - `https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token`
+2. Uses the `.default` scope for your API:
+   - `scope=api://{ApiAppId}/.default`
+3. Calls the function endpoint with `Authorization: Bearer {token}`.
+4. Sends a JSON body that includes `samAccountName` (derived from `UserPrincipalName`). The current function only requires `samAccountName`; extra fields in the test payload are ignored.
+
+Example usage:
+
+```powershell
+./scripts/Test-FunctionAppWithToken.ps1 \
+      -ClientId "<client-app-id>" \
+      -ClientSecret "<client-secret>" \
+      -TenantId "<tenant-id>" \
+      -ApiAppId "<api-app-id>" \
+      -FunctionAppUrl "https://<functionapp>.azurewebsites.net" \
+      -UserPrincipalName "testuser1@contoso.com" \
+      -NewPassword "IgnoredByCurrentAPI123!"
+```
+
+It also prints key token claims (`aud`, `iss`, roles) so when auth breaks you can quickly see whether you’re dealing with an audience mismatch, issuer mismatch, or missing role assignment.
+
+## Quick Reference
+
+- Endpoint: `POST /api/ResetUserPassword`
+- Auth: Easy Auth (Entra ID v2 issuer) + role claim check
+- Required request body: `{ "samAccountName": "..." }`
+- Key Vault secrets: `ENTRA-PWDRESET-RW`, `LDAPS-Certificate-CER`
+- Directory transport: LDAPS on `:636` with certificate pinning + hostname validation
 
 ---
 
-**Built with**: PowerShell 7.4 • Azure Functions • Platform Authentication • Active Directory  
-**Test Coverage**: 92.9% • 40 passing tests  
-**Ready for**: Production deployment in hybrid cloud environments
+**Built with**: PowerShell 7.4 • Azure Functions • Easy Auth • Key Vault (Managed Identity) • LDAPS

@@ -40,6 +40,10 @@ flowchart TB
 
 The domain controller sits in its own subnet, the function app in another. Key Vault holds the service account credentials, and everything feeds telemetry into Log Analytics. Simple, but it took some iteration to get the automation right.
 
+One of those iterations was networking. The Function App isn’t automatically “in your VNet,” and for this scenario that matters: the API needs a private path to the DC (LDAPS on 636) and it needs to resolve the DC’s internal name reliably.
+
+So the infrastructure doesn’t just deploy a VNet—it makes the Function App a first-class citizen inside it: a delegated subnet for VNet integration, routing that keeps traffic on the private path, and DNS that intentionally points the function at the domain controller.
+
 ## Prerequisites
 
 Before you can deploy this lab, make sure you have:
@@ -99,6 +103,12 @@ Around that VM, the Bicep file provisions:
 - A Network Security Group that allows the handful of ports AD really needs
 - A Key Vault with a JSON secret that stores the service account credentials
 - A Log Analytics workspace and Application Insights for observability
+
+And because the function app needs to reach the DC over the VNet, the template also bakes in a couple of important network choices:
+
+- The Function App runs on **Elastic Premium (EP1)** (Consumption can’t do VNet integration)
+- The Function App is integrated with the `FunctionAppSubnet` and configured to route outbound traffic via the VNet
+- DNS for the Function App is pointed at the domain controller, so `dcname.contoso.local` resolves the same way it would from a domain-joined machine
 
 Every parameter—domain name, NetBIOS name, admin credentials—can be set at deploy time. If you want to change the environment from dev to prod, it’s just a flag. The Bicep file is our single source of truth, and it’s versioned right alongside the rest of the repo.
 
@@ -241,6 +251,8 @@ With the domain up, I run another script, `scripts/Configure-ADPostPromotion.ps1
 
 The script waits for AD Web Services to be available, then creates an **Organizational Unit** and a **service account** that will later be used by a function app. It also creates a handful of test users so you can validate the end‑to‑end reset flow.
 
+And because the whole point of this lab is “real-world enough to be interesting,” it also wires up **LDAPS** on the domain controller. That ended up being one of the most important (and most finicky) pieces of the entire build.
+
 The heart of the service account creation looks like this:
 
 ```powershell
@@ -269,6 +281,45 @@ Set-ADAccountPassword -Identity $ServiceAccountName -NewPassword $serviceAccount
 
 Finally, it grants the service account **reset password rights** at the domain level by editing the ACL and adding an access rule for the “Reset Password” extended right. This lines up perfectly with the least‑privilege expectations of the function app.
 
+### Networking: Getting the Function App to “See” the DC
+
+Once the pieces were in place, the actual connectivity requirement was simple: the Function App must be able to reach the DC’s private IP on the right ports, and it must be able to resolve internal AD DNS names.
+
+The part that surprised me was how much of that comes down to DNS behavior.
+
+In `infra/main.bicep`, the Function App is integrated into the VNet subnet and configured with a couple of app settings that make it behave like a VNet-attached workload:
+
+- `WEBSITE_VNET_ROUTE_ALL = 1` routes outbound traffic through the VNet (so LDAPS to the DC stays on the private path).
+- `WEBSITE_DNS_SERVER = 10.0.1.4` points the Function App at the DC for DNS, so it can resolve the AD domain and the DC’s FQDN.
+
+But if the Function App uses the DC for DNS, the DC now has to resolve public names too—especially during authentication flows where it may need to reach Entra ID endpoints.
+
+That’s why `Configure-ADPostPromotion.ps1` configures DNS forwarders on the DC. The default is Azure’s VNet DNS forwarder `168.63.129.16`, which keeps internal resolution authoritative while still allowing lookups for everything else.
+
+### LDAPS: Giving the DC a Real TLS Identity
+
+LDAP over SSL (port 636) isn’t something you “turn on” with a checkbox. On Windows Server, AD DS will only present LDAPS if the DC has a usable certificate in the **Local Machine Personal** store.
+
+Here’s the pattern that ended up being reliable and repeatable:
+
+1. **Generate a self-signed LDAPS certificate during deployment**
+	- `Deploy-Complete.ps1` generates a cert using OpenSSL with the right constraints:
+	  - `extendedKeyUsage = serverAuth`
+	  - SANs for the DC FQDN (and a wildcard for the domain)
+	- It exports two forms:
+	  - a **PFX** (private key included) for the domain controller
+	  - a **DER `.cer`** (public key only) that’s easy for clients to parse
+
+2. **Install the PFX on the domain controller**
+	- `Configure-ADPostPromotion.ps1` imports the PFX into `Cert:\LocalMachine\My`.
+	- It performs basic sanity checks (private key present + “Server Authentication” EKU) and then does a quick `Test-NetConnection localhost -Port 636` to see if LDAPS is listening.
+
+3. **Publish the public cert for the client to pin**
+	- The public `.cer` is stored in Key Vault as `LDAPS-Certificate-CER`.
+	- The Function App retrieves this value at runtime and uses it for **strict certificate pinning + hostname validation**.
+
+That last step is the key architectural shift: rather than trying to “teach” the Function App host to trust a private PKI (which is often blocked in sandboxed hosting), the function validates the server cert directly during the LDAPS handshake. No hostname bypass, no trust-store hacks—just strict TLS with a pinned identity.
+
 If you want to see the building blocks behind these cmdlets, the official docs are a great reference:
 
 - `New-ADUser`: https://learn.microsoft.com/powershell/module/activedirectory/new-aduser
@@ -294,6 +345,12 @@ I wasted hours watching the VM's `PowerState` flip to `running` and assuming AD 
 ### Log Everything to Disk
 
 This sounds obvious, but it saved me more than once. Every script writes progress and errors to `C:\temp`. When something breaks, I can RDP in, open the logs, and see exactly where the process stopped. Transcripts, timestamps, and descriptive messages—don't skip them.
+
+### LDAPS Certificates Are Picky (and Schannel Will Tell You)
+
+The fastest way to lose an afternoon is to generate a certificate that looks “fine” but isn’t usable by Schannel. If the certificate doesn’t have a private key, doesn’t include the right EKU, or doesn’t match the hostname the client is connecting to, LDAPS can fail with confusing symptoms.
+
+The fix was to treat the certificate like a real production TLS credential: SANs, proper EKU, and a private key that actually imports correctly. Once that’s in place, LDAPS becomes boring—in the best way.
 
 ## The End Result: Automated, Auditable, and Secure
 
