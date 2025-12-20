@@ -636,7 +636,7 @@ function Invoke-DomainControllerPostConfig {
                 Write-Log "LDAPS certificate was provided; rebooting VM so LDAPS certificate is picked up..." -Level Warning
 
                 try {
-                    Restart-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName -Force | Out-Null
+                    Restart-AzVM -ResourceGroupName $ResourceGroupName -Name $VmName | Out-Null
                 }
                 catch {
                     Write-Log "Failed to reboot VM after LDAPS certificate install: $($_.Exception.Message)" -Level Warning

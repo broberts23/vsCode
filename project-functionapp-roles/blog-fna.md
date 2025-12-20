@@ -8,6 +8,28 @@ This post is the other half of the story: the **PowerShell 7.4 Azure Function** 
 
 The goal is intentionally boring: one HTTP POST, a strong password comes back, and the AD change happens safely and repeatably.
 
+## Where This Pattern Fits
+
+This “thin API + strong platform auth + pinned LDAPS” pattern is useful anywhere you want a controlled bridge between cloud automation and a directory that still lives behind private networking.
+
+Here are a few practical scenarios:
+
+1. **ITSM-driven onboarding (e.g., ServiceNow)**
+
+   - A user onboarding workflow runs in an ITSM tool and, at the right step, calls `POST /api/ResetUserPassword` using client credentials.
+   - The ITSM app registration gets a tightly scoped role (for example, only the password reset role), and the function enforces that role claim.
+   - The generated password can be handed off to the next step (securely) or used to set an initial password before the user is prompted to change it at first sign-in.
+
+2. **Scheduled service account password rotation**
+
+   - A rotation service (another API, a runbook, or a GitHub Actions workflow) calls the endpoint on a schedule for a known set of accounts.
+   - Because the function pulls its bind credential and LDAPS pinning material from Key Vault, you can rotate the function’s own dependencies independently.
+   - The caller can store the new password in the system that actually consumes it (Key Vault secret, configuration store, etc.) and trigger downstream restarts.
+
+3. **Internal admin portal / delegated operations**
+   - A small internal portal can call the function on behalf of authorized operators.
+   - The portal becomes the UX layer, while the function remains the audited, least-privileged “knife switch” that performs the directory operation.
+
 ## Architecture at a Glance
 
 Here’s the moving parts that matter for the function app itself:
@@ -30,7 +52,7 @@ LDAPS :636"]
       Caller["Calling App
 (Entra client credentials)"] -->|Bearer token| FA
       FA -->|Managed Identity| KV
-      FA -->|LDAPS (pinned cert + hostname validation)| DC
+      FA -->|LDAPS <br>pinned cert + hostname validation | DC
       FA --> LA
 ```
 
@@ -274,6 +296,8 @@ Example usage:
 It also prints key token claims (`aud`, `iss`, roles) so when auth breaks you can quickly see whether you’re dealing with an audience mismatch, issuer mismatch, or missing role assignment.
 
 To generate a app registration and secret for the calling app the `scripts/Create-ClientAppRegistration.ps1` script can help.
+
+Don't forget to grant admin consent for the API permissions after creating the app registration!
 
 ## Conclusion
 
