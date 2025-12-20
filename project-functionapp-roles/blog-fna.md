@@ -2,7 +2,7 @@
 
 ## Introduction
 
-In the infrastructure post, we built a disposable Active Directory lab: a domain controller in its own subnet, a function app in another, Key Vault for secrets, and just enough networking glue to make it feel like a real hybrid environment.
+In my previous infrastructure blog, we built a disposable Active Directory lab: a domain controller in its own subnet, a function app in another, Key Vault for secrets, and just enough networking glue to make it feel like a real hybrid environment.
 
 This post is the other half of the story: the **PowerShell 7.4 Azure Function** that accepts authenticated requests, authorizes them with role claims, and resets passwords in on-prem AD over **LDAPS**.
 
@@ -36,7 +36,7 @@ LDAPS :636"]
 
 Two design choices shape almost everything:
 
-1. **Authentication is delegated to the platform** (App Service Authentication / “Easy Auth”).
+1. **Authentication is delegated to the platform** (App Service Authentication aka “Easy Auth”).
 2. **Directory operations are done via LDAPS** using .NET LDAP APIs, with strict TLS validation.
 
 ## Prerequisites
@@ -272,6 +272,19 @@ Example usage:
 ```
 
 It also prints key token claims (`aud`, `iss`, roles) so when auth breaks you can quickly see whether you’re dealing with an audience mismatch, issuer mismatch, or missing role assignment.
+
+To generate a app registration and secret for the calling app the `scripts/Create-ClientAppRegistration.ps1` script can help.
+
+## Conclusion
+
+This project looks small on the surface—one endpoint that resets a password—but it only stays “boring” because the hard parts are handled deliberately.
+
+- **Easy Auth** takes care of token validation so the function can focus on business logic.
+- **Authorization** is reduced to a single, auditable decision: “does the caller have the role?”
+- **Key Vault + Managed Identity** keeps credentials and pinning material out of code and out of deployment scripts.
+- **LDAPS with strict certificate pinning and hostname validation** makes the directory operation secure without relying on fragile trust-store customization.
+
+The result is an API you can demo, redeploy, and troubleshoot confidently: when it fails, it fails for reasons you can explain—and when it succeeds, it does exactly one thing, safely.
 
 ## Quick Reference
 
