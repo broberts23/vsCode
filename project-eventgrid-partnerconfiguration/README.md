@@ -16,11 +16,11 @@ The core idea: **treat identity changes as events**, apply policy in code, and a
 
 The Function processes Entra-originated events (via Event Grid) such as:
 
+- **Joiner signals**
+  - user created delta
 - **Leaver/termination-like signals**
   - User disabled
   - User deleted
-- **Joiner signals**
-  - user created delta
 - **Entitlement changes**
   - Group membership changes
 
@@ -66,17 +66,17 @@ When conditions match policy, the Function can automatically:
 
 This project can receive **Microsoft Graph** change notifications (for example, `users`) through **Azure Event Grid partner topics**.
 
-- Create the Graph subscription using [project-eventgrid-partnerconfiguration/scripts/New-GraphUsersSubscriptionToEventGrid.ps1](project-eventgrid-partnerconfiguration/scripts/New-GraphUsersSubscriptionToEventGrid.ps1).
+- Create the Graph subscription using [scripts/New-GraphUsersSubscriptionToEventGrid.ps1](scripts/New-GraphUsersSubscriptionToEventGrid.ps1).
 - This creates (or reuses) an Event Grid **partner topic** in your resource group.
-- Activate the partner topic (required before events flow) using [project-eventgrid-partnerconfiguration/scripts/Activate-EventGridPartnerTopic.ps1](project-eventgrid-partnerconfiguration/scripts/Activate-EventGridPartnerTopic.ps1), then deploy an Event Grid event subscription to route events to the Function.
+- Activate the partner topic (required before events flow) using [scripts/Activate-EventGridPartnerTopic.ps1](scripts/Activate-EventGridPartnerTopic.ps1), then deploy an Event Grid event subscription to route events to the Function.
 
 Lifecycle notifications (for example, `microsoft.graph.subscriptionReauthorizationRequired`) are sent to the same partner topic via `lifecycleNotificationUrl` and are handled by the Function.
 
 4. **Microsoft Graph (Entra ID OAuth)**
 
-- Function uses **Entra ID OAuth (client credentials)** to:
-  - read user/principal details for policy decisions
-  - apply remediation actions (remove memberships/assignments, revoke sessions) where supported
+- Function uses a **system-assigned managed identity** to acquire Microsoft Graph tokens for:
+  - reading user/principal details for policy decisions
+  - applying remediation actions (remove memberships/assignments, revoke sessions) where supported
 
 5. **Observability**
 
@@ -109,17 +109,22 @@ Keep policies explicit, versionable, and safe:
 
 Event delivery is at-least-once.
 
-- Compute a stable `dedupeKey` from event metadata (e.g., event `id` + `eventType` + `subject`).
-- Store processed keys for a short TTL (e.g., storage table/redis) to avoid duplicates.
+- Compute a stable `dedupeKey` from event metadata (event `id` + `eventType` + `subject`).
+- Store processed keys in **Azure Table Storage** (table name defaults to `DedupeKeys`) using the `AzureWebJobsStorage` connection string.
 - Ensure remediation operations are safe to repeat (e.g., removing a user from a group should be treated as success even if already removed).
+
+Runtime settings:
+
+- `DEDUPE_ENABLED` (default: true)
+- `DEDUPE_TABLE_NAME` (default: `DedupeKeys`)
 
 ## Security posture
 
 ### Authentication
 
-- **Graph access**: Entra ID OAuth (client credentials)
-  - App Registration or Managed Identity (preferred if supported for your chosen Graph flows)
-  - Secrets/certs stored in Key Vault
+- **Graph access**: Entra ID OAuth (managed identity)
+  - System-assigned managed identity on the Function App
+  - Grant least-privilege Microsoft Graph application permissions to the managed identity (admin consent required)
 
 ### Authorization
 

@@ -45,6 +45,223 @@ function Get-DedupeKey {
     return "$eventType|$subject|$id"
 }
 
+function ConvertTo-Sha256Hex {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+
+    $builder = [System.Text.StringBuilder]::new()
+    foreach ($b in $hashBytes) {
+        [void]$builder.AppendFormat('{0:x2}', $b)
+    }
+    return $builder.ToString()
+}
+
+function Get-AzureStorageTableContextFromConnectionString {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ConnectionString
+    )
+
+    if ($ConnectionString -match '^UseDevelopmentStorage=true') {
+        throw 'Azure Table dedupe is not supported with UseDevelopmentStorage=true in this scaffold. Configure AzureWebJobsStorage with a real storage account connection string.'
+    }
+
+    $parts = @{}
+    foreach ($segment in ($ConnectionString -split ';')) {
+        if ([string]::IsNullOrWhiteSpace($segment)) { continue }
+        $kv = $segment -split '=', 2
+        if ($kv.Count -ne 2) { continue }
+        $parts[$kv[0]] = $kv[1]
+    }
+
+    $accountName = $parts['AccountName']
+    $accountKey = $parts['AccountKey']
+
+    if ([string]::IsNullOrWhiteSpace($accountName) -or [string]::IsNullOrWhiteSpace($accountKey)) {
+        throw 'AzureWebJobsStorage connection string is missing AccountName and/or AccountKey.'
+    }
+
+    $tableEndpoint = $parts['TableEndpoint']
+    if ([string]::IsNullOrWhiteSpace($tableEndpoint)) {
+        $protocol = $parts['DefaultEndpointsProtocol']
+        if ([string]::IsNullOrWhiteSpace($protocol)) { $protocol = 'https' }
+
+        $endpointSuffix = $parts['EndpointSuffix']
+        if ([string]::IsNullOrWhiteSpace($endpointSuffix)) { $endpointSuffix = 'core.windows.net' }
+
+        $tableEndpoint = "$protocol://$accountName.table.$endpointSuffix"
+    }
+
+    return [pscustomobject]@{
+        AccountName   = $accountName
+        AccountKey    = $accountKey
+        TableEndpoint = $tableEndpoint.TrimEnd('/')
+    }
+}
+
+function New-AzureStorageTableSharedKeyLiteAuthorizationHeader {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$AccountName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$AccountKey,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Date,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$CanonicalizedResource
+    )
+
+    # SharedKeyLite for Table service:
+    # StringToSign = Date + "\n" + CanonicalizedResource
+    # See: https://learn.microsoft.com/en-us/rest/api/storageservices/authorize-with-shared-key
+    $stringToSign = "$Date`n$CanonicalizedResource"
+
+    $keyBytes = [Convert]::FromBase64String($AccountKey)
+    $hmac = [System.Security.Cryptography.HMACSHA256]::new($keyBytes)
+    try {
+        $sigBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($stringToSign))
+        $signature = [Convert]::ToBase64String($sigBytes)
+    }
+    finally {
+        $hmac.Dispose()
+    }
+
+    return "SharedKeyLite $AccountName:$signature"
+}
+
+function Invoke-AzureStorageTableRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('GET', 'POST', 'PUT', 'MERGE', 'DELETE')]
+        [string]$Method,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ConnectionString,
+
+        [Parameter(Mandatory = $false)]
+        [object]$Body,
+
+        [Parameter(Mandatory = $false)]
+        [int[]]$AllowStatusCodes = @()
+    )
+
+    $ctx = Get-AzureStorageTableContextFromConnectionString -ConnectionString $ConnectionString
+    $date = (Get-Date).ToUniversalTime().ToString('R')
+
+    $canonicalizedResource = "/$($ctx.AccountName)/$Path"
+    $auth = New-AzureStorageTableSharedKeyLiteAuthorizationHeader -AccountName $ctx.AccountName -AccountKey $ctx.AccountKey -Date $date -CanonicalizedResource $canonicalizedResource
+
+    $headers = @{
+        'Authorization'         = $auth
+        'Date'                  = $date
+        'x-ms-version'          = '2020-04-08'
+        'DataServiceVersion'    = '3.0;NetFx'
+        'MaxDataServiceVersion' = '3.0;NetFx'
+        'Accept'                = 'application/json;odata=nometadata'
+    }
+
+    $uri = "$($ctx.TableEndpoint)/$Path"
+
+    try {
+        if ($null -eq $Body) {
+            return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers
+        }
+
+        $jsonBody = $Body | ConvertTo-Json -Depth 16
+        return Invoke-RestMethod -Method $Method -Uri $uri -Headers $headers -ContentType 'application/json' -Body $jsonBody
+    }
+    catch {
+        $response = $_.Exception.Response
+        if ($null -ne $response) {
+            $statusCode = [int]$response.StatusCode
+            if ($AllowStatusCodes -contains $statusCode) {
+                return [pscustomobject]@{
+                    StatusCode = $statusCode
+                    Ignored    = $true
+                }
+            }
+        }
+
+        throw
+    }
+}
+
+function Ensure-DedupeTable {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ConnectionString,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$TableName
+    )
+
+    [void](Invoke-AzureStorageTableRequest -Method 'POST' -Path 'Tables' -ConnectionString $ConnectionString -Body @{ TableName = $TableName } -AllowStatusCodes @(409))
+}
+
+function Test-AndSet-Dedupe {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$DedupeKey,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ConnectionString,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$TableName
+    )
+
+    $hash = ConvertTo-Sha256Hex -Value $DedupeKey
+    $partitionKey = $hash.Substring(0, 2)
+    $rowKey = $hash
+
+    Ensure-DedupeTable -ConnectionString $ConnectionString -TableName $TableName
+
+    $entity = @{
+        PartitionKey = $partitionKey
+        RowKey       = $rowKey
+        DedupedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    }
+
+    $result = Invoke-AzureStorageTableRequest -Method 'POST' -Path $TableName -ConnectionString $ConnectionString -Body $entity -AllowStatusCodes @(409)
+
+    # 409 == entity already exists => duplicate delivery/replay
+    if ($null -ne $result -and $result.PSObject.Properties.Name -contains 'StatusCode' -and $result.StatusCode -eq 409) {
+        return $true
+    }
+
+    return $false
+}
+
 function Test-IsBreakGlass {
     [CmdletBinding()]
     param(
@@ -276,6 +493,29 @@ $policy = Get-Policy -PolicyPath $policyPath
 
 $dedupeKey = Get-DedupeKey -Event $EventGridEvent
 
+$dedupeEnabled = $true
+if (-not [string]::IsNullOrWhiteSpace($env:DEDUPE_ENABLED)) {
+    $parsed = $false
+    if ([bool]::TryParse($env:DEDUPE_ENABLED, [ref]$parsed)) {
+        $dedupeEnabled = $parsed
+    }
+}
+
+$dedupeTableName = $env:DEDUPE_TABLE_NAME
+if ([string]::IsNullOrWhiteSpace($dedupeTableName)) {
+    $dedupeTableName = 'DedupeKeys'
+}
+
+$isDuplicate = $false
+if ($dedupeEnabled) {
+    $storageConnectionString = $env:AzureWebJobsStorage
+    if ([string]::IsNullOrWhiteSpace($storageConnectionString)) {
+        throw 'AzureWebJobsStorage is not configured; cannot perform dedupe.'
+    }
+
+    $isDuplicate = Test-AndSet-Dedupe -DedupeKey $dedupeKey -ConnectionString $storageConnectionString -TableName $dedupeTableName
+}
+
 # Minimal event introspection (shape depends on publisher + schema)
 $eventId = $EventGridEvent.id
 $eventType = $EventGridEvent.eventType
@@ -286,6 +526,7 @@ Write-Information -MessageData (
     [pscustomobject]@{
         message   = 'Received Event Grid event'
         dedupeKey = $dedupeKey
+        duplicate = $isDuplicate
         eventId   = $eventId
         eventType = $eventType
         subject   = $subject
@@ -293,6 +534,18 @@ Write-Information -MessageData (
         mode      = $mode
     }
 )
+
+if ($isDuplicate) {
+    Write-Information -MessageData (
+        [pscustomobject]@{
+            message   = 'Duplicate event detected; skipping processing'
+            dedupeKey = $dedupeKey
+            eventId   = $eventId
+            eventType = $eventType
+        }
+    )
+    return
+}
 
 # Handle Microsoft Graph subscription lifecycle notifications delivered via Event Grid.
 $lifecycleEvent = Get-GraphLifecycleEventName -Event $EventGridEvent
