@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "mode": "detect",
+  "breakGlass": {
+    "userPrincipalNames": [
+      "breakglass1@contoso.com",
+      "breakglass2@contoso.com"
+    ],
+    "objectIds": []
+  },
+  "allowLists": {
+    "groupObjectIds": [],
+    "appObjectIds": [],
+    "roleDefinitionIds": []
+  },
+  "rules": [
+    {
+      "name": "Leaver-UserDisabled-RevokeSessions",
+      "criteria": {
+        "eventTypeStartsWith": "Microsoft.Entra",
+        "subjectContains": "users/",
+        "condition": "UserDisabled"
+      },
+      "action": {
+        "type": "remediate",
+        "steps": [
+          "RevokeSessions",
+          "RemoveFromHighRiskGroups"
+        ]
+      }
+    }
+  ]
+}
