@@ -7,5 +7,7 @@ PowerShell 7.4 helper scripts for deploying and operating the sample.
 
 Planned scripts in this scaffold:
 - `Deploy-Infrastructure.ps1` — deploy Bicep
+- `New-GraphUsersSubscriptionToEventGrid.ps1` — create a Microsoft Graph subscription that delivers to an Event Grid partner topic
+- `Activate-EventGridPartnerTopic.ps1` — activate the partner topic (required before events flow)
 - `Set-Policy.ps1` — validate/publish policy configuration
 - `SmokeTest-GraphAuth.ps1` — verify Graph auth from your workstation

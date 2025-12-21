@@ -62,6 +62,15 @@ When conditions match policy, the Function can automatically:
 - Looks up additional context from Microsoft Graph if needed
 - Applies policy and performs remediation
 - 
+## Microsoft Graph change notifications via Event Grid (bootstrap)
+
+This project can receive **Microsoft Graph** change notifications (for example, `users`) through **Azure Event Grid partner topics**.
+
+- Create the Graph subscription using [project-eventgrid-partnerconfiguration/scripts/New-GraphUsersSubscriptionToEventGrid.ps1](project-eventgrid-partnerconfiguration/scripts/New-GraphUsersSubscriptionToEventGrid.ps1).
+- This creates (or reuses) an Event Grid **partner topic** in your resource group.
+- Activate the partner topic (required before events flow) using [project-eventgrid-partnerconfiguration/scripts/Activate-EventGridPartnerTopic.ps1](project-eventgrid-partnerconfiguration/scripts/Activate-EventGridPartnerTopic.ps1), then deploy an Event Grid event subscription to route events to the Function.
+
+Lifecycle notifications (for example, `microsoft.graph.subscriptionReauthorizationRequired`) are sent to the same partner topic via `lifecycleNotificationUrl` and are handled by the Function.
 
 4. **Microsoft Graph (Entra ID OAuth)**
 

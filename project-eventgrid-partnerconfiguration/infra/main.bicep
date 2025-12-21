@@ -21,28 +21,107 @@ param partnerTopicEventSubscriptionName string = 'to-governance-function'
 @description('Optional: resourceId of the Azure Function to invoke (only used if `partnerTopicName` is set). Example: /subscriptions/.../resourceGroups/.../providers/Microsoft.Web/sites/<app>/functions/<functionName>')
 param functionResourceId string = ''
 
+@description('Name of the Windows Function App (Microsoft.Web/sites).')
+param functionAppName string = 'func-eg-governance-${uniqueString(resourceGroup().id)}'
+
+@description('Name of the Consumption plan (Microsoft.Web/serverfarms).')
+param appServicePlanName string = 'plan-eg-governance-${uniqueString(resourceGroup().id)}'
+
+@description('Name of the Storage Account used by the Function App. Must be globally unique and 3-24 lowercase alphanumeric.')
+param storageAccountName string = toLower('st${uniqueString(resourceGroup().id)}')
+
+@description('Name of the Azure Function within the Function App that Event Grid should invoke.')
+param functionName string = 'GovernanceEventHandler'
+
 type PartnerAuthorizationEntry = {
   partnerRegistrationImmutableId: string
   partnerName: string
 }
 
 var shouldAuthorizePartner = !empty(authorizedPartnerRegistrationImmutableId)
-var shouldCreatePartnerTopicSubscription = !empty(partnerTopicName) && !empty(functionResourceId)
+
+resource functionStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: storageAccountName
+  location: location
+  kind: 'StorageV2'
+  sku: {
+    name: 'Standard_LRS'
+  }
+  properties: {
+    supportsHttpsTrafficOnly: true
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+  }
+}
+
+resource functionPlan 'Microsoft.Web/serverfarms@2023-12-01' = {
+  name: appServicePlanName
+  location: location
+  sku: {
+    name: 'Y1'
+    tier: 'Dynamic'
+  }
+  properties: {}
+}
+
+resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
+  name: functionAppName
+  location: location
+  kind: 'functionapp'
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    httpsOnly: true
+    serverFarmId: functionPlan.id
+    siteConfig: {
+      appSettings: [
+        {
+          name: 'AzureWebJobsStorage'
+          value: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+        }
+        {
+          name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING'
+          value: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+        }
+        {
+          name: 'WEBSITE_CONTENTSHARE'
+          value: toLower('${functionAppName}-content')
+        }
+        {
+          name: 'FUNCTIONS_EXTENSION_VERSION'
+          value: '~4'
+        }
+        {
+          name: 'FUNCTIONS_WORKER_RUNTIME'
+          value: 'powershell'
+        }
+      ]
+    }
+  }
+}
+
+var deployedFunctionResourceId = '${functionApp.id}/functions/${functionName}'
+var effectiveFunctionResourceId = !empty(functionResourceId) ? functionResourceId : deployedFunctionResourceId
+
+var shouldCreatePartnerTopicSubscription = !empty(partnerTopicName) && !empty(effectiveFunctionResourceId)
 
 resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02-15' = {
   name: partnerConfigurationName
   location: location
-  properties: shouldAuthorizePartner ? {
-    partnerAuthorization: {
-      defaultMaximumExpirationTimeInDays: 7
-      authorizedPartnersList: [
-        {
-          partnerRegistrationImmutableId: authorizedPartnerRegistrationImmutableId
-          partnerName: authorizedPartnerName
+  properties: shouldAuthorizePartner
+    ? {
+        partnerAuthorization: {
+          defaultMaximumExpirationTimeInDays: 7
+          authorizedPartnersList: [
+            {
+              partnerRegistrationImmutableId: authorizedPartnerRegistrationImmutableId
+              partnerName: authorizedPartnerName
+            }
+          ]
         }
-      ]
-    }
-  } : {}
+      }
+    : {}
 }
 
 resource partnerTopic 'Microsoft.EventGrid/partnerTopics@2025-02-15' existing = if (shouldCreatePartnerTopicSubscription) {
@@ -56,7 +135,7 @@ resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventS
     destination: {
       endpointType: 'AzureFunction'
       properties: {
-        resourceId: functionResourceId
+        resourceId: effectiveFunctionResourceId
       }
     }
     eventDeliverySchema: 'EventGridSchema'
@@ -64,4 +143,8 @@ resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventS
 }
 
 output partnerConfigurationId string = partnerConfiguration.id
-output partnerTopicEventSubscriptionId string = shouldCreatePartnerTopicSubscription ? partnerTopicEventSubscription.id : ''
+output functionAppId string = functionApp.id
+output functionResourceIdOut string = effectiveFunctionResourceId
+output partnerTopicEventSubscriptionId string = shouldCreatePartnerTopicSubscription
+  ? partnerTopicEventSubscription.id
+  : ''
