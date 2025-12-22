@@ -69,11 +69,16 @@ try {
 
     Compress-Archive -Path (Join-Path -Path $stagingDir -ChildPath '*') -DestinationPath $zipPath -Force
 
-    $raw = & az functionapp deployment source config-zip \
-    --resource-group $ResourceGroupName \
-    --name $FunctionAppName \
-    --src $zipPath \
-    --only-show-errors -o json 2>&1
+    $args = @(
+        'functionapp', 'deployment', 'source', 'config-zip',
+        '--resource-group', $ResourceGroupName,
+        '--name', $FunctionAppName,
+        '--src', $zipPath,
+        '--only-show-errors',
+        '-o', 'json'
+    )
+
+    $raw = & az @args 2>&1
 
     if ($LASTEXITCODE -ne 0) {
         throw "Zip deploy failed: $raw"

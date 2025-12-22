@@ -88,13 +88,18 @@ if (-not (Test-Path -Path $templateFile -PathType Leaf)) {
 $deploymentName = "eg-partnercfg-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 Write-Verbose "Starting deployment: $deploymentName"
 
-$raw = & az deployment group create \
---name $deploymentName \
---resource-group $ResourceGroupName \
---template-file $templateFile \
---parameters $ParametersFile \
---only-show-errors \
---query properties.outputs -o json 2>&1
+$args = @(
+    'deployment', 'group', 'create',
+    '--name', $deploymentName,
+    '--resource-group', $ResourceGroupName,
+    '--template-file', $templateFile,
+    '--parameters', $ParametersFile,
+    '--only-show-errors',
+    '--query', 'properties.outputs',
+    '-o', 'json'
+)
+
+$raw = & az @args 2>&1
 
 if ($LASTEXITCODE -ne 0) {
     throw "Deployment failed: $raw"
