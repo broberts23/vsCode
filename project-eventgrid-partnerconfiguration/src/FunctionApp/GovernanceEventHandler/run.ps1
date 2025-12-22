@@ -63,87 +63,34 @@ function ConvertTo-Sha256Hex {
     return $builder.ToString()
 }
 
-function Get-AzureStorageTableContextFromConnectionString {
+function Get-AzureStorageTableContextFromEnvironment {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]$ConnectionString
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory = $false)]
+        [string]$EndpointSuffix,
+
+        [Parameter(Mandatory = $false)]
+        [string]$TableEndpoint
     )
 
-    if ($ConnectionString -match '^UseDevelopmentStorage=true') {
-        throw 'Azure Table dedupe is not supported with UseDevelopmentStorage=true in this scaffold. Configure AzureWebJobsStorage with a real storage account connection string.'
+    $resolvedEndpointSuffix = $EndpointSuffix
+    if ([string]::IsNullOrWhiteSpace($resolvedEndpointSuffix)) {
+        $resolvedEndpointSuffix = 'core.windows.net'
     }
 
-    $parts = @{}
-    foreach ($segment in ($ConnectionString -split ';')) {
-        if ([string]::IsNullOrWhiteSpace($segment)) { continue }
-        $kv = $segment -split '=', 2
-        if ($kv.Count -ne 2) { continue }
-        $parts[$kv[0]] = $kv[1]
-    }
-
-    $accountName = $parts['AccountName']
-    $accountKey = $parts['AccountKey']
-
-    if ([string]::IsNullOrWhiteSpace($accountName) -or [string]::IsNullOrWhiteSpace($accountKey)) {
-        throw 'AzureWebJobsStorage connection string is missing AccountName and/or AccountKey.'
-    }
-
-    $tableEndpoint = $parts['TableEndpoint']
-    if ([string]::IsNullOrWhiteSpace($tableEndpoint)) {
-        $protocol = $parts['DefaultEndpointsProtocol']
-        if ([string]::IsNullOrWhiteSpace($protocol)) { $protocol = 'https' }
-
-        $endpointSuffix = $parts['EndpointSuffix']
-        if ([string]::IsNullOrWhiteSpace($endpointSuffix)) { $endpointSuffix = 'core.windows.net' }
-
-        $tableEndpoint = "$protocol://$accountName.table.$endpointSuffix"
+    $resolvedTableEndpoint = $TableEndpoint
+    if ([string]::IsNullOrWhiteSpace($resolvedTableEndpoint)) {
+        $resolvedTableEndpoint = "https://$StorageAccountName.table.$resolvedEndpointSuffix"
     }
 
     return [pscustomobject]@{
-        AccountName   = $accountName
-        AccountKey    = $accountKey
-        TableEndpoint = $tableEndpoint.TrimEnd('/')
+        AccountName   = $StorageAccountName
+        TableEndpoint = $resolvedTableEndpoint.TrimEnd('/')
     }
-}
-
-function New-AzureStorageTableSharedKeyLiteAuthorizationHeader {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$AccountName,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$AccountKey,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$Date,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$CanonicalizedResource
-    )
-
-    # SharedKeyLite for Table service:
-    # StringToSign = Date + "\n" + CanonicalizedResource
-    # See: https://learn.microsoft.com/en-us/rest/api/storageservices/authorize-with-shared-key
-    $stringToSign = "$Date`n$CanonicalizedResource"
-
-    $keyBytes = [Convert]::FromBase64String($AccountKey)
-    $hmac = [System.Security.Cryptography.HMACSHA256]::new($keyBytes)
-    try {
-        $sigBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($stringToSign))
-        $signature = [Convert]::ToBase64String($sigBytes)
-    }
-    finally {
-        $hmac.Dispose()
-    }
-
-    return "SharedKeyLite $AccountName:$signature"
 }
 
 function Invoke-AzureStorageTableRequest {
@@ -159,7 +106,13 @@ function Invoke-AzureStorageTableRequest {
 
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]$ConnectionString,
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory = $false)]
+        [string]$EndpointSuffix,
+
+        [Parameter(Mandatory = $false)]
+        [string]$TableEndpoint,
 
         [Parameter(Mandatory = $false)]
         [object]$Body,
@@ -168,16 +121,14 @@ function Invoke-AzureStorageTableRequest {
         [int[]]$AllowStatusCodes = @()
     )
 
-    $ctx = Get-AzureStorageTableContextFromConnectionString -ConnectionString $ConnectionString
+    $ctx = Get-AzureStorageTableContextFromEnvironment -StorageAccountName $StorageAccountName -EndpointSuffix $EndpointSuffix -TableEndpoint $TableEndpoint
+    $accessToken = Get-ManagedIdentityAccessToken -Resource 'https://storage.azure.com/'
     $date = (Get-Date).ToUniversalTime().ToString('R')
 
-    $canonicalizedResource = "/$($ctx.AccountName)/$Path"
-    $auth = New-AzureStorageTableSharedKeyLiteAuthorizationHeader -AccountName $ctx.AccountName -AccountKey $ctx.AccountKey -Date $date -CanonicalizedResource $canonicalizedResource
-
     $headers = @{
-        'Authorization'         = $auth
-        'Date'                  = $date
-        'x-ms-version'          = '2020-04-08'
+        'Authorization'         = "Bearer $accessToken"
+        'x-ms-date'             = $date
+        'x-ms-version'          = '2020-12-06'
         'DataServiceVersion'    = '3.0;NetFx'
         'MaxDataServiceVersion' = '3.0;NetFx'
         'Accept'                = 'application/json;odata=nometadata'
@@ -209,21 +160,6 @@ function Invoke-AzureStorageTableRequest {
     }
 }
 
-function Ensure-DedupeTable {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$ConnectionString,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$TableName
-    )
-
-    [void](Invoke-AzureStorageTableRequest -Method 'POST' -Path 'Tables' -ConnectionString $ConnectionString -Body @{ TableName = $TableName } -AllowStatusCodes @(409))
-}
-
 function Test-AndSet-Dedupe {
     [CmdletBinding()]
     param(
@@ -233,7 +169,13 @@ function Test-AndSet-Dedupe {
 
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]$ConnectionString,
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory = $false)]
+        [string]$EndpointSuffix,
+
+        [Parameter(Mandatory = $false)]
+        [string]$TableEndpoint,
 
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -244,15 +186,13 @@ function Test-AndSet-Dedupe {
     $partitionKey = $hash.Substring(0, 2)
     $rowKey = $hash
 
-    Ensure-DedupeTable -ConnectionString $ConnectionString -TableName $TableName
-
     $entity = @{
         PartitionKey = $partitionKey
         RowKey       = $rowKey
         DedupedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
     }
 
-    $result = Invoke-AzureStorageTableRequest -Method 'POST' -Path $TableName -ConnectionString $ConnectionString -Body $entity -AllowStatusCodes @(409)
+    $result = Invoke-AzureStorageTableRequest -Method 'POST' -Path $TableName -StorageAccountName $StorageAccountName -EndpointSuffix $EndpointSuffix -TableEndpoint $TableEndpoint -Body $entity -AllowStatusCodes @(409)
 
     # 409 == entity already exists => duplicate delivery/replay
     if ($null -ne $result -and $result.PSObject.Properties.Name -contains 'StatusCode' -and $result.StatusCode -eq 409) {
@@ -508,12 +448,15 @@ if ([string]::IsNullOrWhiteSpace($dedupeTableName)) {
 
 $isDuplicate = $false
 if ($dedupeEnabled) {
-    $storageConnectionString = $env:AzureWebJobsStorage
-    if ([string]::IsNullOrWhiteSpace($storageConnectionString)) {
-        throw 'AzureWebJobsStorage is not configured; cannot perform dedupe.'
+    $dedupeStorageAccountName = $env:DEDUPE_STORAGE_ACCOUNT_NAME
+    if ([string]::IsNullOrWhiteSpace($dedupeStorageAccountName)) {
+        throw 'DEDUPE_STORAGE_ACCOUNT_NAME is not configured; cannot perform dedupe.'
     }
 
-    $isDuplicate = Test-AndSet-Dedupe -DedupeKey $dedupeKey -ConnectionString $storageConnectionString -TableName $dedupeTableName
+    $dedupeEndpointSuffix = $env:DEDUPE_ENDPOINT_SUFFIX
+    $dedupeTableEndpoint = $env:DEDUPE_TABLE_ENDPOINT
+
+    $isDuplicate = Test-AndSet-Dedupe -DedupeKey $dedupeKey -StorageAccountName $dedupeStorageAccountName -EndpointSuffix $dedupeEndpointSuffix -TableEndpoint $dedupeTableEndpoint -TableName $dedupeTableName
 }
 
 # Minimal event introspection (shape depends on publisher + schema)

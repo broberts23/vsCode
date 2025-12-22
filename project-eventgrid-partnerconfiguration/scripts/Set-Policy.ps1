@@ -26,8 +26,8 @@ if ($null -eq $policy.allowLists) {
 }
 
 Write-Output ([pscustomobject]@{
-    PolicyPath = $PolicyPath
-    Version = $policy.version
-    Mode = $policy.mode
-    Rules = @($policy.rules).Count
-})
+        PolicyPath = $PolicyPath
+        Version    = $policy.version
+        Mode       = $policy.mode
+        Rules      = @($policy.rules).Count
+    })

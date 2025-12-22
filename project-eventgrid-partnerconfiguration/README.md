@@ -110,13 +110,16 @@ Keep policies explicit, versionable, and safe:
 Event delivery is at-least-once.
 
 - Compute a stable `dedupeKey` from event metadata (event `id` + `eventType` + `subject`).
-- Store processed keys in **Azure Table Storage** (table name defaults to `DedupeKeys`) using the `AzureWebJobsStorage` connection string.
+- Store processed keys in **Azure Table Storage** (table name defaults to `DedupeKeys`) using **Entra ID auth (managed identity)**.
 - Ensure remediation operations are safe to repeat (e.g., removing a user from a group should be treated as success even if already removed).
 
 Runtime settings:
 
 - `DEDUPE_ENABLED` (default: true)
 - `DEDUPE_TABLE_NAME` (default: `DedupeKeys`)
+- `DEDUPE_STORAGE_ACCOUNT_NAME` (required when dedupe is enabled)
+- `DEDUPE_ENDPOINT_SUFFIX` (default: `core.windows.net`)
+- `DEDUPE_TABLE_ENDPOINT` (optional override; if set, takes precedence over account name + suffix)
 
 ## Security posture
 

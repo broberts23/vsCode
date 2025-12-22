@@ -33,6 +33,9 @@ param storageAccountName string = toLower('st${uniqueString(resourceGroup().id)}
 @description('Name of the Azure Function within the Function App that Event Grid should invoke.')
 param functionName string = 'GovernanceEventHandler'
 
+@description('Name of the Azure Table Storage table used for idempotency/dedupe.')
+param dedupeTableName string = 'DedupeKeys'
+
 type PartnerAuthorizationEntry = {
   partnerRegistrationImmutableId: string
   partnerName: string
@@ -40,7 +43,7 @@ type PartnerAuthorizationEntry = {
 
 var shouldAuthorizePartner = !empty(authorizedPartnerRegistrationImmutableId)
 
-resource functionStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+resource functionStorage 'Microsoft.Storage/storageAccounts@2025-06-01' = {
   name: storageAccountName
   location: location
   kind: 'StorageV2'
@@ -54,7 +57,17 @@ resource functionStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
 }
 
-resource functionPlan 'Microsoft.Web/serverfarms@2023-12-01' = {
+resource functionStorageTableService 'Microsoft.Storage/storageAccounts/tableServices@2025-06-01' = {
+  name: 'default'
+  parent: functionStorage
+}
+
+resource functionStorageDedupeTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2025-06-01' = {
+  name: dedupeTableName
+  parent: functionStorageTableService
+}
+
+resource functionPlan 'Microsoft.Web/serverfarms@2025-03-01' = {
   name: appServicePlanName
   location: location
   sku: {
@@ -64,7 +77,7 @@ resource functionPlan 'Microsoft.Web/serverfarms@2023-12-01' = {
   properties: {}
 }
 
-resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
+resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
   name: functionAppName
   location: location
   kind: 'functionapp'
@@ -96,8 +109,42 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'FUNCTIONS_WORKER_RUNTIME'
           value: 'powershell'
         }
+        {
+          name: 'DEDUPE_ENABLED'
+          value: 'true'
+        }
+        {
+          name: 'DEDUPE_TABLE_NAME'
+          value: dedupeTableName
+        }
+        {
+          name: 'DEDUPE_STORAGE_ACCOUNT_NAME'
+          value: functionStorage.name
+        }
+        {
+          name: 'DEDUPE_ENDPOINT_SUFFIX'
+          value: environment().suffixes.storage
+        }
       ]
     }
+  }
+}
+
+// Data-plane RBAC for Table Storage access via the Function's managed identity.
+// Built-in role: Storage Table Data Contributor
+// See: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles
+var storageTableDataContributorRoleDefinitionId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
+)
+
+resource functionAppStorageTableDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(functionStorage.id, functionApp.id, storageTableDataContributorRoleDefinitionId)
+  scope: functionStorage
+  properties: {
+    roleDefinitionId: storageTableDataContributorRoleDefinitionId
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 
