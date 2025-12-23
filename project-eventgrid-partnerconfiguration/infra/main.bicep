@@ -36,6 +36,9 @@ param functionName string = 'GovernanceEventHandler'
 @description('Name of the Azure Table Storage table used for idempotency/dedupe.')
 param dedupeTableName string = 'DedupeKeys'
 
+@description('Name of the Azure Storage Queue used as a cheap buffer for work items.')
+param workQueueName string = 'governance-workitems'
+
 type PartnerAuthorizationEntry = {
   partnerRegistrationImmutableId: string
   partnerName: string
@@ -60,6 +63,16 @@ resource functionStorage 'Microsoft.Storage/storageAccounts@2025-06-01' = {
 resource functionStorageTableService 'Microsoft.Storage/storageAccounts/tableServices@2025-06-01' = {
   name: 'default'
   parent: functionStorage
+}
+
+resource functionStorageQueueService 'Microsoft.Storage/storageAccounts/queueServices@2025-06-01' = {
+  name: 'default'
+  parent: functionStorage
+}
+
+resource functionStorageWorkQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01' = {
+  name: workQueueName
+  parent: functionStorageQueueService
 }
 
 resource functionStorageDedupeTable 'Microsoft.Storage/storageAccounts/tableServices/tables@2025-06-01' = {
@@ -125,6 +138,20 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
           name: 'DEDUPE_ENDPOINT_SUFFIX'
           value: environment().suffixes.storage
         }
+        {
+          name: 'WORK_QUEUE_NAME'
+          value: workQueueName
+        }
+        // Identity-based connection for Storage Queue triggers/bindings.
+        // See: https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference#common-properties-for-identity-based-connections
+        {
+          name: 'WorkQueue__queueServiceUri'
+          value: functionStorage.properties.primaryEndpoints.queue
+        }
+        {
+          name: 'WorkQueue__credential'
+          value: 'managedidentity'
+        }
       ]
     }
   }
@@ -143,6 +170,40 @@ resource functionAppStorageTableDataContributor 'Microsoft.Authorization/roleAss
   scope: functionStorage
   properties: {
     roleDefinitionId: storageTableDataContributorRoleDefinitionId
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Data-plane RBAC for Queue access via the Function's managed identity.
+// Built-in roles:
+// - Storage Queue Data Message Processor (trigger)
+// - Storage Queue Data Message Sender (output)
+var storageQueueDataMessageProcessorRoleDefinitionId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '8a0f0c08-91a1-4084-bc3d-661d67233fed'
+)
+
+var storageQueueDataMessageSenderRoleDefinitionId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a'
+)
+
+resource functionAppStorageQueueDataMessageProcessor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(functionStorage.id, functionApp.id, storageQueueDataMessageProcessorRoleDefinitionId)
+  scope: functionStorage
+  properties: {
+    roleDefinitionId: storageQueueDataMessageProcessorRoleDefinitionId
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionAppStorageQueueDataMessageSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(functionStorage.id, functionApp.id, storageQueueDataMessageSenderRoleDefinitionId)
+  scope: functionStorage
+  properties: {
+    roleDefinitionId: storageQueueDataMessageSenderRoleDefinitionId
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }

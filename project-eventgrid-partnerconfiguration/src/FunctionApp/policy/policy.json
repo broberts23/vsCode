@@ -1,6 +1,19 @@
 {
   "version": 1,
   "mode": "detect",
+  "birthrights": {
+    "enabled": true,
+    "mode": "detect",
+    "assignments": [
+      {
+        "name": "Default-Birthright",
+        "when": {
+          "userType": "Member"
+        },
+        "addToGroups": []
+      }
+    ]
+  },
   "breakGlass": {
     "userPrincipalNames": [
       "breakglass1@contoso.com",

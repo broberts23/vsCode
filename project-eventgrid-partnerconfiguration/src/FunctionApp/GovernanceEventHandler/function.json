@@ -4,6 +4,13 @@
       "type": "eventGridTrigger",
       "name": "EventGridEvent",
       "direction": "in"
+    },
+    {
+      "type": "queue",
+      "name": "workItem",
+      "direction": "out",
+      "queueName": "%WORK_QUEUE_NAME%",
+      "connection": "WorkQueue"
     }
   ]
 }
