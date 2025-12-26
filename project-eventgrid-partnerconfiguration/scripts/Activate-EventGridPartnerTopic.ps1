@@ -21,7 +21,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(1, 60)]
-    [int]$TimeoutSeconds = 180
+    [int]$TimeoutSeconds = 180,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$AsJson
 )
 
 $ErrorActionPreference = 'Stop'
@@ -89,11 +92,18 @@ $topic = Invoke-AzRestJson -Method GET -Url $resourceUrl
 $activationState = $topic.properties.activationState
 
 if ($activationState -eq 'Activated') {
-    [pscustomobject]@{
+    $result = [pscustomobject]@{
         message          = 'Partner topic already activated'
         partnerTopicName = $PartnerTopicName
         activationState  = $activationState
         id               = $topic.id
+    }
+
+    if ($AsJson.IsPresent) {
+        $result | ConvertTo-Json -Depth 16
+    }
+    else {
+        $result
     }
     return
 }
@@ -159,10 +169,17 @@ if ($null -eq $final) {
     $final = Invoke-AzRestJson -Method GET -Url $resourceUrl
 }
 
-[pscustomobject]@{
+$result = [pscustomobject]@{
     message          = 'Partner topic activation attempted'
     partnerTopicName = $PartnerTopicName
     activationState  = $final.properties.activationState
     id               = $final.id
     apiVersion       = $ApiVersion
+}
+
+if ($AsJson.IsPresent) {
+    $result | ConvertTo-Json -Depth 16
+}
+else {
+    $result
 }

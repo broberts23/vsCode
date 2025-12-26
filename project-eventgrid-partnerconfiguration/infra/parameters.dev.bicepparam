@@ -3,12 +3,11 @@ using './main.bicep'
 param location = 'centralindia'
 param partnerConfigurationName = 'default'
 
-// Optional: authorization entry (leave empty to manage out-of-band)
-param authorizedPartnerRegistrationImmutableId = 'c02e0126-707c-436d-b6a1-175d2748fb58'
-param authorizedPartnerName = 'MicrosoftGraphAPI'
-param authorizedPartnerAuthorizationExpirationTimeInUtc = ''
+// Partner authorization: omit these params to use main.bicep defaults
+// (authorizedPartnerName = 'Microsoft Graph API', expiration = utcNow()+7 days).
 
-// Optional: route an existing partner topic to a Function
-param partnerTopicName = 'default'
-param partnerTopicEventSubscriptionName = 'to-governance-function'
-param functionResourceId = ''
+// Optional: enable deployment-time bootstrap using a pre-created user-assigned managed identity
+// param bootstrapUserAssignedIdentityName = '<uami-name-in-this-rg>'
+
+// Optional: when bootstrap is enabled, set a partner topic name to be created/used by Graph
+// param partnerTopicName = 'default'

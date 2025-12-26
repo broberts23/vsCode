@@ -16,8 +16,15 @@ param(
     [string]$FunctionAppName,
 
     [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ManagedIdentityPrincipalId,
+
+    [Parameter(Mandatory = $false)]
     [ValidateSet('User.Read.All', 'Directory.Read.All')]
-    [string[]]$AppRoles = @('User.Read.All')
+    [string[]]$AppRoles = @('User.Read.All'),
+
+    [Parameter(Mandatory = $false)]
+    [switch]$AsJson
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,19 +98,25 @@ Assert-AzLogin
 
 $null = Invoke-AzJson -Arguments @('account', 'set', '--subscription', $SubscriptionId, '--only-show-errors')
 
-$identity = Invoke-AzJson -Arguments @(
-    'functionapp', 'identity', 'show',
-    '--resource-group', $ResourceGroupName,
-    '--name', $FunctionAppName,
-    '--only-show-errors',
-    '-o', 'json'
-)
-
-if ([string]::IsNullOrWhiteSpace($identity.principalId)) {
-    throw 'Function App has no system-assigned managed identity principalId. Ensure identity is enabled in Bicep.'
+$miServicePrincipalObjectId = $null
+if (-not [string]::IsNullOrWhiteSpace($ManagedIdentityPrincipalId)) {
+    $miServicePrincipalObjectId = [string]$ManagedIdentityPrincipalId
 }
+else {
+    $identity = Invoke-AzJson -Arguments @(
+        'functionapp', 'identity', 'show',
+        '--resource-group', $ResourceGroupName,
+        '--name', $FunctionAppName,
+        '--only-show-errors',
+        '-o', 'json'
+    )
 
-$miServicePrincipalObjectId = [string]$identity.principalId
+    if ([string]::IsNullOrWhiteSpace($identity.principalId)) {
+        throw 'Function App has no system-assigned managed identity principalId. Ensure identity is enabled in Bicep (or pass -ManagedIdentityPrincipalId).'
+    }
+
+    $miServicePrincipalObjectId = [string]$identity.principalId
+}
 
 # Microsoft Graph service principal (multi-tenant) appId
 $graphAppId = '00000003-0000-0000-c000-000000000000'
@@ -116,11 +129,28 @@ if ([string]::IsNullOrWhiteSpace($graphSpId)) {
 
 $graphAppRoles = @($graphSp.value[0].appRoles)
 
+# Existing assignments (idempotency)
+$existingAssignments = Invoke-GraphJson -Method GET -Url "https://graph.microsoft.com/v1.0/servicePrincipals/$miServicePrincipalObjectId/appRoleAssignments?`$select=id,resourceId,appRoleId"
+$existingForGraph = @($existingAssignments.value | Where-Object { $_.resourceId -eq $graphSpId })
+
 $results = @()
 foreach ($roleValue in $AppRoles) {
     $role = $graphAppRoles | Where-Object { $_.value -eq $roleValue -and $_.allowedMemberTypes -contains 'Application' } | Select-Object -First 1
     if ($null -eq $role) {
         throw "App role '$roleValue' not found on Microsoft Graph service principal, or not an Application role."
+    }
+
+    $already = $existingForGraph | Where-Object { $_.appRoleId -eq $role.id } | Select-Object -First 1
+    if ($null -ne $already) {
+        $results += [pscustomobject]@{
+            role                  = $roleValue
+            appRoleId             = $role.id
+            graphServicePrincipal = $graphSpId
+            managedIdentitySpId   = $miServicePrincipalObjectId
+            assignmentId          = $already.id
+            status                = 'AlreadyAssigned'
+        }
+        continue
     }
 
     $body = [ordered]@{
@@ -138,7 +168,13 @@ foreach ($roleValue in $AppRoles) {
         graphServicePrincipal = $graphSpId
         managedIdentitySpId   = $miServicePrincipalObjectId
         assignmentId          = $assignment.id
+        status                = 'Created'
     }
 }
 
-$results
+if ($AsJson.IsPresent) {
+    $results | ConvertTo-Json -Depth 16
+}
+else {
+    $results
+}

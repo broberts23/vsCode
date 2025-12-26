@@ -49,6 +49,14 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
     [string]$GraphEndpoint = 'https://graph.microsoft.com/v1.0'
+
+    ,
+    [Parameter(Mandatory = $false)]
+    [switch]$UseAzCliGraphToken
+
+    ,
+    [Parameter(Mandatory = $false)]
+    [switch]$AsJson
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,6 +125,59 @@ function Ensure-GraphConnection {
     }
 }
 
+function Assert-AzCliPresent {
+    [CmdletBinding()]
+    param()
+
+    $az = Get-Command -Name 'az' -ErrorAction SilentlyContinue
+    if ($null -eq $az) {
+        throw "Azure CLI ('az') not found. Install Azure CLI and run 'az login' first. See https://learn.microsoft.com/cli/azure/install-azure-cli"
+    }
+}
+
+function Get-AzCliGraphAccessToken {
+    [CmdletBinding()]
+    param()
+
+    Assert-AzCliPresent
+
+    $token = & az account get-access-token --resource https://graph.microsoft.com/ --query accessToken -o tsv 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to acquire Microsoft Graph access token via Azure CLI. Details: $token"
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$token)) {
+        throw 'Azure CLI returned an empty Microsoft Graph access token.'
+    }
+
+    return [string]$token
+}
+
+function Invoke-GraphRest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('GET', 'POST', 'PATCH')]
+        [string]$Method,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Uri,
+
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Body,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$AccessToken
+    )
+
+    $headers = @{ Authorization = "Bearer $AccessToken"; 'Content-Type' = 'application/json' }
+    $json = if ($null -ne $Body) { $Body | ConvertTo-Json -Depth 10 } else { $null }
+    return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers -Body $json
+}
+
 function New-EventGridPartnerEndpointUri {
     [CmdletBinding()]
     param(
@@ -153,7 +214,9 @@ $lifecycleNotificationUrl = $notificationUrl
 
 $expirationDateTime = (Get-Date).ToUniversalTime().AddMinutes($ExpirationInMinutes).ToString('o')
 
-Ensure-GraphConnection -Scopes $Scopes -TenantId $TenantId -UseDeviceCode:$UseDeviceCode
+if (-not $UseAzCliGraphToken.IsPresent) {
+    Ensure-GraphConnection -Scopes $Scopes -TenantId $TenantId -UseDeviceCode:$UseDeviceCode
+}
 
 $body = @{
     changeType               = $ChangeType
@@ -179,10 +242,18 @@ Write-Information -MessageData (
     }
 )
 
-$response = Invoke-MgGraphRequest -Method POST -Uri $createUri -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 8)
+
+$response = $null
+if ($UseAzCliGraphToken.IsPresent) {
+    $token = Get-AzCliGraphAccessToken
+    $response = Invoke-GraphRest -Method 'POST' -Uri $createUri -Body $body -AccessToken $token
+}
+else {
+    $response = Invoke-MgGraphRequest -Method POST -Uri $createUri -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 8)
+}
 
 # Return an object (useful for piping or CI).
-[pscustomobject]@{
+$result = [pscustomobject]@{
     subscriptionId           = $response.id
     resource                 = $response.resource
     changeType               = $response.changeType
@@ -191,4 +262,11 @@ $response = Invoke-MgGraphRequest -Method POST -Uri $createUri -ContentType 'app
     notificationUrl          = $notificationUrl
     lifecycleNotificationUrl = $lifecycleNotificationUrl
     partnerTopicName         = $PartnerTopicName
+}
+
+if ($AsJson.IsPresent) {
+    $result | ConvertTo-Json -Depth 16
+}
+else {
+    $result
 }

@@ -6,7 +6,7 @@ param location string = resourceGroup().location
 @description('Name of the partner configuration resource. Many deployments use `default`.')
 param partnerConfigurationName string = 'default'
 
-@description('Optional: the immutable ID of the partner registration to authorize. Leave empty to manage authorizations out-of-band.')
+@description('The immutable ID of the partner registration to authorize. Leave empty to manage authorizations out-of-band.')
 param authorizedPartnerRegistrationImmutableId string = ''
 
 @description('Partner name to authorize in Event Grid Partner Configuration. Defaults to Microsoft Graph API.')
@@ -15,13 +15,28 @@ param authorizedPartnerName string = 'Microsoft Graph API'
 @description('Expiration time (UTC) for the partner authorization entry. Defaults to 7 days from deployment time.')
 param authorizedPartnerAuthorizationExpirationTimeInUtc string = dateTimeAdd(utcNow(), 'P7D')
 
-@description('Optional: name of an existing partner topic. If empty, no event subscription is created by this template.')
+@description('Partner topic name used by Microsoft Graph (created as part of subscription creation). If empty, Graph bootstrap and partner topic event subscription creation are skipped.')
 param partnerTopicName string = ''
 
-@description('Optional: event subscription name (only used if `partnerTopicName` is set).')
+@description('Name of a user-assigned managed identity (in this resource group) used to run deploymentScripts and to own the Graph subscription. If empty, Graph bootstrap is skipped.')
+param bootstrapUserAssignedIdentityName string = ''
+
+var bootstrapIdentityResourceId = !empty(bootstrapUserAssignedIdentityName)
+  ? resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', bootstrapUserAssignedIdentityName)
+  : ''
+
+var bootstrapIdentityClientId = !empty(bootstrapUserAssignedIdentityName)
+  ? reference(bootstrapIdentityResourceId, '2025-01-31-preview').clientId
+  : ''
+
+var bootstrapIdentityPrincipalId = !empty(bootstrapUserAssignedIdentityName)
+  ? reference(bootstrapIdentityResourceId, '2025-01-31-preview').principalId
+  : ''
+
+@description('Event subscription name (only used if `partnerTopicName` is set).')
 param partnerTopicEventSubscriptionName string = 'to-governance-function'
 
-@description('Optional: resourceId of the Azure Function to invoke (only used if `partnerTopicName` is set). Example: /subscriptions/.../resourceGroups/.../providers/Microsoft.Web/sites/<app>/functions/<functionName>')
+@description('ResourceId of the Azure Function to invoke (only used if `partnerTopicName` is set). Example: /subscriptions/.../resourceGroups/.../providers/Microsoft.Web/sites/<app>/functions/<functionName>')
 param functionResourceId string = ''
 
 @description('Name of the Windows Function App (Microsoft.Web/sites).')
@@ -53,15 +68,21 @@ type PartnerAuthorizationEntry = {
 var shouldAuthorizePartner = !empty(authorizedPartnerRegistrationImmutableId) || !empty(authorizedPartnerName)
 
 var authorizedPartnerEntry = union(
-  !empty(authorizedPartnerRegistrationImmutableId) ? {
-    partnerRegistrationImmutableId: authorizedPartnerRegistrationImmutableId
-  } : {},
-  !empty(authorizedPartnerName) ? {
-    partnerName: authorizedPartnerName
-  } : {},
-  !empty(authorizedPartnerAuthorizationExpirationTimeInUtc) ? {
-    authorizationExpirationTimeInUtc: authorizedPartnerAuthorizationExpirationTimeInUtc
-  } : {}
+  !empty(authorizedPartnerRegistrationImmutableId)
+    ? {
+        partnerRegistrationImmutableId: authorizedPartnerRegistrationImmutableId
+      }
+    : {},
+  !empty(authorizedPartnerName)
+    ? {
+        partnerName: authorizedPartnerName
+      }
+    : {},
+  !empty(authorizedPartnerAuthorizationExpirationTimeInUtc)
+    ? {
+        authorizationExpirationTimeInUtc: authorizedPartnerAuthorizationExpirationTimeInUtc
+      }
+    : {}
 )
 
 resource functionStorage 'Microsoft.Storage/storageAccounts@2025-06-01' = {
@@ -118,68 +139,83 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
   location: location
   kind: 'functionapp'
   identity: {
-    type: 'SystemAssigned'
+    type: empty(bootstrapUserAssignedIdentityName) ? 'SystemAssigned' : 'SystemAssigned, UserAssigned'
+    userAssignedIdentities: empty(bootstrapUserAssignedIdentityName)
+      ? null
+      : {
+          '${bootstrapIdentityResourceId}': {}
+        }
   }
   properties: {
     httpsOnly: true
     serverFarmId: functionPlan.id
     siteConfig: {
-      appSettings: [
-        {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
-        }
-        {
-          name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
-        }
-        {
-          name: 'WEBSITE_CONTENTSHARE'
-          value: toLower('${functionAppName}-content')
-        }
-        {
-          name: 'FUNCTIONS_EXTENSION_VERSION'
-          value: '~4'
-        }
-        {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'powershell'
-        }
-        {
-          name: 'DEDUPE_ENABLED'
-          value: 'true'
-        }
-        {
-          name: 'DEDUPE_TABLE_NAME'
-          value: dedupeTableName
-        }
-        {
-          name: 'DEDUPE_STORAGE_ACCOUNT_NAME'
-          value: functionStorage.name
-        }
-        {
-          name: 'DEDUPE_ENDPOINT_SUFFIX'
-          value: environment().suffixes.storage
-        }
-        {
-          name: 'WORK_QUEUE_NAME'
-          value: workQueueName
-        }
-        {
-          name: 'LIFECYCLE_QUEUE_NAME'
-          value: lifecycleQueueName
-        }
-        // Identity-based connection for Storage Queue triggers/bindings.
-        // See: https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference#common-properties-for-identity-based-connections
-        {
-          name: 'WorkQueue__queueServiceUri'
-          value: functionStorage.properties.primaryEndpoints.queue
-        }
-        {
-          name: 'WorkQueue__credential'
-          value: 'managedidentity'
-        }
-      ]
+      appSettings: concat(
+        [
+          {
+            name: 'AzureWebJobsStorage'
+            value: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+          }
+          {
+            name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING'
+            value: 'DefaultEndpointsProtocol=https;AccountName=${functionStorage.name};AccountKey=${functionStorage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+          }
+          {
+            name: 'WEBSITE_CONTENTSHARE'
+            value: toLower('${functionAppName}-content')
+          }
+          {
+            name: 'FUNCTIONS_EXTENSION_VERSION'
+            value: '~4'
+          }
+          {
+            name: 'FUNCTIONS_WORKER_RUNTIME'
+            value: 'powershell'
+          }
+          {
+            name: 'DEDUPE_ENABLED'
+            value: 'true'
+          }
+          {
+            name: 'DEDUPE_TABLE_NAME'
+            value: dedupeTableName
+          }
+          {
+            name: 'DEDUPE_STORAGE_ACCOUNT_NAME'
+            value: functionStorage.name
+          }
+          {
+            name: 'DEDUPE_ENDPOINT_SUFFIX'
+            value: environment().suffixes.storage
+          }
+          {
+            name: 'WORK_QUEUE_NAME'
+            value: workQueueName
+          }
+          {
+            name: 'LIFECYCLE_QUEUE_NAME'
+            value: lifecycleQueueName
+          }
+          // Identity-based connection for Storage Queue triggers/bindings.
+          // See: https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference#common-properties-for-identity-based-connections
+          {
+            name: 'WorkQueue__queueServiceUri'
+            value: functionStorage.properties.primaryEndpoints.queue
+          }
+          {
+            name: 'WorkQueue__credential'
+            value: 'managedidentity'
+          }
+        ],
+        empty(bootstrapUserAssignedIdentityName)
+          ? []
+          : [
+              {
+                name: 'MANAGED_IDENTITY_CLIENT_ID'
+                value: bootstrapIdentityClientId
+              }
+            ]
+      )
     }
   }
 }
@@ -239,6 +275,7 @@ resource functionAppStorageQueueDataMessageSender 'Microsoft.Authorization/roleA
 var deployedFunctionResourceId = '${functionApp.id}/functions/${functionName}'
 var effectiveFunctionResourceId = !empty(functionResourceId) ? functionResourceId : deployedFunctionResourceId
 
+var shouldBootstrapGraph = !empty(partnerTopicName) && !empty(bootstrapUserAssignedIdentityName)
 var shouldCreatePartnerTopicSubscription = !empty(partnerTopicName) && !empty(effectiveFunctionResourceId)
 
 resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02-15' = {
@@ -267,6 +304,11 @@ resource partnerTopic 'Microsoft.EventGrid/partnerTopics@2025-02-15' existing = 
 resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventSubscriptions@2025-02-15' = if (shouldCreatePartnerTopicSubscription) {
   name: partnerTopicEventSubscriptionName
   parent: partnerTopic
+  dependsOn: shouldBootstrapGraph
+    ? [
+        activatePartnerTopic
+      ]
+    : []
   properties: {
     destination: {
       endpointType: 'AzureFunction'
@@ -278,9 +320,166 @@ resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventS
   }
 }
 
+// --- Imperative bootstrap via deployment scripts ---
+// Notes:
+// - Uses AzureCLI deployment scripts and runs pwsh scripts from this repo inline.
+// - Requires a user-assigned managed identity (bootstrapUserAssignedIdentityName) that is already granted the required Microsoft Graph application roles.
+
+resource createGraphSubscription 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: 'create-graph-subscription'
+  location: location
+  kind: 'AzureCLI'
+  identity: shouldBootstrapGraph
+    ? {
+        type: 'UserAssigned'
+        userAssignedIdentities: {
+          '${bootstrapIdentityResourceId}': {}
+        }
+      }
+    : null
+  dependsOn: [
+    partnerConfiguration
+  ]
+  properties: {
+    azCliVersion: '2.59.0'
+    timeout: 'PT45M'
+    cleanupPreference: 'OnSuccess'
+    retentionInterval: 'PT1H'
+    scriptContent: '''
+#!/bin/bash
+set -euo pipefail
+
+BOOTSTRAP_ENABLED='${string(shouldBootstrapGraph)}'
+if [ "${BOOTSTRAP_ENABLED}" != "True" ] && [ "${BOOTSTRAP_ENABLED}" != "true" ]; then
+  echo '{}' > "$AZ_SCRIPTS_OUTPUT_PATH"
+  exit 0
+fi
+
+cat > ./New-GraphUsersSubscriptionToEventGrid.ps1 <<'PS1'
+${loadTextContent('../scripts/New-GraphUsersSubscriptionToEventGrid.ps1')}
+PS1
+
+# Retry: Graph app role assignments may take time to become effective.
+attempt=1
+maxAttempts=20
+while true; do
+  set +e
+  out=$(pwsh -NoProfile -File ./New-GraphUsersSubscriptionToEventGrid.ps1 \
+    -AzureSubscriptionId "${subscription().subscriptionId}" \
+    -ResourceGroupName "${resourceGroup().name}" \
+    -PartnerTopicName "${partnerTopicName}" \
+    -Location "${location}" \
+    -UseAzCliGraphToken \
+    -AsJson 2>&1)
+  code=$?
+  set -e
+
+  if [ $code -eq 0 ]; then
+    echo "$out" > ./subscription.json
+    break
+  fi
+
+  if [ $attempt -ge $maxAttempts ]; then
+    echo "Graph subscription creation failed after $maxAttempts attempts. Last error:" >&2
+    echo "$out" >&2
+    exit $code
+  fi
+
+  echo "Attempt $attempt/$maxAttempts failed; retrying in 30s..." >&2
+  attempt=$((attempt + 1))
+  sleep 30
+done
+
+clientState=$(jq -r '.clientState' ./subscription.json)
+subscriptionId=$(jq -r '.subscriptionId' ./subscription.json)
+expirationDateTime=$(jq -r '.expirationDateTime' ./subscription.json)
+
+az functionapp config appsettings set \
+  --resource-group "${resourceGroup().name}" \
+  --name "${functionAppName}" \
+  --settings "GRAPH_CLIENT_STATE=${clientState}" \
+  --only-show-errors \
+  >/dev/null
+
+partnerTopicUrl="${environment().resourceManager}subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.EventGrid/partnerTopics/${partnerTopicName}?api-version=2025-02-15"
+
+# Wait for Graph to create the partner topic resource (eventual consistency)
+deadline=$((SECONDS + 600))
+while [ $SECONDS -lt $deadline ]; do
+  if az rest --method GET --url "$partnerTopicUrl" --only-show-errors >/dev/null 2>&1; then
+    break
+  fi
+  sleep 10
+done
+
+partnerTopicId=$(az rest --method GET --url "$partnerTopicUrl" --query id -o tsv --only-show-errors 2>/dev/null || true)
+
+jq -n -c \
+  --arg subscriptionId "$subscriptionId" \
+  --arg clientState "$clientState" \
+  --arg expirationDateTime "$expirationDateTime" \
+  --arg partnerTopicId "$partnerTopicId" \
+  '{subscriptionId: $subscriptionId, clientState: $clientState, expirationDateTime: $expirationDateTime, partnerTopicId: $partnerTopicId}' \
+  > "$AZ_SCRIPTS_OUTPUT_PATH"
+'''
+  }
+}
+
+resource activatePartnerTopic 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: 'activate-partner-topic'
+  location: location
+  kind: 'AzureCLI'
+  identity: shouldBootstrapGraph
+    ? {
+        type: 'UserAssigned'
+        userAssignedIdentities: {
+          '${bootstrapIdentityResourceId}': {}
+        }
+      }
+    : null
+  dependsOn: [
+    createGraphSubscription
+  ]
+  properties: {
+    azCliVersion: '2.59.0'
+    timeout: 'PT30M'
+    cleanupPreference: 'OnSuccess'
+    retentionInterval: 'PT1H'
+    scriptContent: '''
+#!/bin/bash
+set -euo pipefail
+
+BOOTSTRAP_ENABLED='${string(shouldBootstrapGraph)}'
+if [ "${BOOTSTRAP_ENABLED}" != "True" ] && [ "${BOOTSTRAP_ENABLED}" != "true" ]; then
+  echo '{}' > "$AZ_SCRIPTS_OUTPUT_PATH"
+  exit 0
+fi
+
+cat > ./Activate-EventGridPartnerTopic.ps1 <<'PS1'
+${loadTextContent('../scripts/Activate-EventGridPartnerTopic.ps1')}
+PS1
+
+pwsh -NoProfile -File ./Activate-EventGridPartnerTopic.ps1 \
+  -AzureSubscriptionId "${subscription().subscriptionId}" \
+  -ResourceGroupName "${resourceGroup().name}" \
+  -PartnerTopicName "${partnerTopicName}" \
+  -AsJson \
+  > ./activation.json
+
+jq -c '{activation: .}' ./activation.json > "$AZ_SCRIPTS_OUTPUT_PATH"
+'''
+  }
+}
+
 output partnerConfigurationId string = partnerConfiguration.id
 output functionAppId string = functionApp.id
 output functionResourceIdOut string = effectiveFunctionResourceId
 output partnerTopicEventSubscriptionId string = shouldCreatePartnerTopicSubscription
   ? partnerTopicEventSubscription.id
   : ''
+
+output bootstrapIdentityName string = bootstrapUserAssignedIdentityName
+output bootstrapIdentityClientId string = bootstrapIdentityClientId
+output bootstrapIdentityPrincipalId string = bootstrapIdentityPrincipalId
+output graphSubscription object = createGraphSubscription.properties.outputs
+output partnerTopicActivation object = activatePartnerTopic.properties.outputs

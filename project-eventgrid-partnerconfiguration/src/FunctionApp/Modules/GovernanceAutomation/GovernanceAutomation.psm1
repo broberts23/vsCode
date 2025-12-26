@@ -86,8 +86,16 @@ function Get-ManagedIdentityAccessToken {
         [string]$Resource = 'https://graph.microsoft.com/'
     )
 
+    $clientId = $env:MANAGED_IDENTITY_CLIENT_ID
+    $clientIdQuery = ''
+    if (-not [string]::IsNullOrWhiteSpace($clientId)) {
+        # App Service / Azure Functions local MSI endpoint supports client_id for user-assigned identity selection.
+        # See: https://learn.microsoft.com/azure/app-service/overview-managed-identity?tabs=portal,http#rest-endpoint-reference
+        $clientIdQuery = "&client_id=$([uri]::EscapeDataString($clientId))"
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($env:IDENTITY_ENDPOINT) -and -not [string]::IsNullOrWhiteSpace($env:IDENTITY_HEADER)) {
-        $uri = "$($env:IDENTITY_ENDPOINT)?resource=$([uri]::EscapeDataString($Resource))&api-version=2019-08-01"
+        $uri = "$($env:IDENTITY_ENDPOINT)?resource=$([uri]::EscapeDataString($Resource))&api-version=2019-08-01$clientIdQuery"
         $headers = @{ 'X-IDENTITY-HEADER' = $env:IDENTITY_HEADER }
 
         $tokenResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
@@ -99,7 +107,7 @@ function Get-ManagedIdentityAccessToken {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($env:MSI_ENDPOINT) -and -not [string]::IsNullOrWhiteSpace($env:MSI_SECRET)) {
-        $uri = "$($env:MSI_ENDPOINT)?resource=$([uri]::EscapeDataString($Resource))&api-version=2017-09-01"
+        $uri = "$($env:MSI_ENDPOINT)?resource=$([uri]::EscapeDataString($Resource))&api-version=2017-09-01$clientIdQuery"
         $headers = @{ 'Secret' = $env:MSI_SECRET }
 
         $tokenResponse = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers
