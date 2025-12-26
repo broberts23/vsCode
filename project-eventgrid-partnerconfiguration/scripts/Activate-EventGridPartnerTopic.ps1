@@ -82,7 +82,7 @@ function Invoke-AzRestJson {
 
 Assert-AzCliPresent
 
-$resourceUrl = "https://management.azure.com/subscriptions/$AzureSubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName?api-version=$ApiVersion"
+$resourceUrl = "https://management.azure.com/subscriptions/$AzureSubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName`?api-version=$ApiVersion"
 $activateUrl = "https://management.azure.com/subscriptions/$AzureSubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName/activate?api-version=$ApiVersion"
 
 $topic = Invoke-AzRestJson -Method GET -Url $resourceUrl

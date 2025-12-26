@@ -9,8 +9,11 @@ param partnerConfigurationName string = 'default'
 @description('Optional: the immutable ID of the partner registration to authorize. Leave empty to manage authorizations out-of-band.')
 param authorizedPartnerRegistrationImmutableId string = ''
 
-@description('Optional: partner name to document the authorization entry. Leave empty if not authorizing in this template.')
-param authorizedPartnerName string = ''
+@description('Partner name to authorize in Event Grid Partner Configuration. Defaults to Microsoft Graph API.')
+param authorizedPartnerName string = 'Microsoft Graph API'
+
+@description('Expiration time (UTC) for the partner authorization entry. Defaults to 7 days from deployment time.')
+param authorizedPartnerAuthorizationExpirationTimeInUtc string = dateTimeAdd(utcNow(), 'P7D')
 
 @description('Optional: name of an existing partner topic. If empty, no event subscription is created by this template.')
 param partnerTopicName string = ''
@@ -39,12 +42,27 @@ param dedupeTableName string = 'DedupeKeys'
 @description('Name of the Azure Storage Queue used as a cheap buffer for work items.')
 param workQueueName string = 'governance-workitems'
 
+@description('Name of the Azure Storage Queue used for Microsoft Graph subscription lifecycle maintenance work items.')
+param lifecycleQueueName string = 'governance-lifecycle'
+
 type PartnerAuthorizationEntry = {
   partnerRegistrationImmutableId: string
   partnerName: string
 }
 
-var shouldAuthorizePartner = !empty(authorizedPartnerRegistrationImmutableId)
+var shouldAuthorizePartner = !empty(authorizedPartnerRegistrationImmutableId) || !empty(authorizedPartnerName)
+
+var authorizedPartnerEntry = union(
+  !empty(authorizedPartnerRegistrationImmutableId) ? {
+    partnerRegistrationImmutableId: authorizedPartnerRegistrationImmutableId
+  } : {},
+  !empty(authorizedPartnerName) ? {
+    partnerName: authorizedPartnerName
+  } : {},
+  !empty(authorizedPartnerAuthorizationExpirationTimeInUtc) ? {
+    authorizationExpirationTimeInUtc: authorizedPartnerAuthorizationExpirationTimeInUtc
+  } : {}
+)
 
 resource functionStorage 'Microsoft.Storage/storageAccounts@2025-06-01' = {
   name: storageAccountName
@@ -72,6 +90,11 @@ resource functionStorageQueueService 'Microsoft.Storage/storageAccounts/queueSer
 
 resource functionStorageWorkQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01' = {
   name: workQueueName
+  parent: functionStorageQueueService
+}
+
+resource functionStorageLifecycleQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01' = {
+  name: lifecycleQueueName
   parent: functionStorageQueueService
 }
 
@@ -141,6 +164,10 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
         {
           name: 'WORK_QUEUE_NAME'
           value: workQueueName
+        }
+        {
+          name: 'LIFECYCLE_QUEUE_NAME'
+          value: lifecycleQueueName
         }
         // Identity-based connection for Storage Queue triggers/bindings.
         // See: https://learn.microsoft.com/en-us/azure/azure-functions/functions-reference#common-properties-for-identity-based-connections
@@ -216,15 +243,16 @@ var shouldCreatePartnerTopicSubscription = !empty(partnerTopicName) && !empty(ef
 
 resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02-15' = {
   name: partnerConfigurationName
-  location: location
+  location: 'global'
   properties: shouldAuthorizePartner
     ? {
         partnerAuthorization: {
           defaultMaximumExpirationTimeInDays: 7
           authorizedPartnersList: [
             {
-              partnerRegistrationImmutableId: authorizedPartnerRegistrationImmutableId
-              partnerName: authorizedPartnerName
+              // Schema supports identifying the partner by immutable ID and/or name.
+              // The authorizationExpirationTimeInUtc is recommended for clarity.
+              ...authorizedPartnerEntry
             }
           ]
         }
@@ -246,7 +274,7 @@ resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventS
         resourceId: effectiveFunctionResourceId
       }
     }
-    eventDeliverySchema: 'EventGridSchema'
+    eventDeliverySchema: 'CloudEventSchemaV1_0'
   }
 }
 

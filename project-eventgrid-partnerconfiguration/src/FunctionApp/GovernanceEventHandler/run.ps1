@@ -42,13 +42,21 @@ if ($dedupeEnabled) {
 }
 
 $workItem = New-GovernanceWorkItem -EventGridEvent $EventGridEvent -PolicyPath $policyPath
-Push-OutputBinding -Name workItem -Value ($workItem | ConvertTo-Json -Depth 16 -Compress)
+
+$isLifecycle = Test-IsGraphLifecycleEvent -EventGridEvent $EventGridEvent
+if ($isLifecycle) {
+    Push-OutputBinding -Name lifecycleWorkItem -Value ($workItem | ConvertTo-Json -Depth 16 -Compress)
+}
+else {
+    Push-OutputBinding -Name workItem -Value ($workItem | ConvertTo-Json -Depth 16 -Compress)
+}
 
 Write-Information -MessageData ([pscustomobject]@{
         message       = 'Enqueued governance work item'
         kind          = $workItem.kind
         schemaVersion = $workItem.schemaVersion
         correlationId = $workItem.correlationId
+        isLifecycle   = $isLifecycle
     })
 
 return

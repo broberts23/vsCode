@@ -16,8 +16,8 @@ param(
     [string]$FunctionAppName,
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('Subscriptions.ReadWrite.All', 'User.Read.All', 'Directory.Read.All')]
-    [string[]]$AppRoles = @('Subscriptions.ReadWrite.All')
+    [ValidateSet('User.Read.All', 'Directory.Read.All')]
+    [string[]]$AppRoles = @('User.Read.All')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -107,7 +107,7 @@ $miServicePrincipalObjectId = [string]$identity.principalId
 
 # Microsoft Graph service principal (multi-tenant) appId
 $graphAppId = '00000003-0000-0000-c000-000000000000'
-$graphSp = Invoke-GraphJson -Method GET -Url "https://graph.microsoft.com/v1.0/servicePrincipals?$filter=appId%20eq%20'$graphAppId'&$select=id,appId,displayName,appRoles"
+$graphSp = Invoke-GraphJson -Method GET -Url "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId%20eq%20'$graphAppId'&`$select=id,appId,displayName,appRoles"
 $graphSpId = $graphSp.value[0].id
 
 if ([string]::IsNullOrWhiteSpace($graphSpId)) {

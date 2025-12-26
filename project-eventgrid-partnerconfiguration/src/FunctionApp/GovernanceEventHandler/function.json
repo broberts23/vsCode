@@ -11,6 +11,13 @@
       "direction": "out",
       "queueName": "%WORK_QUEUE_NAME%",
       "connection": "WorkQueue"
+    },
+    {
+      "type": "queue",
+      "name": "lifecycleWorkItem",
+      "direction": "out",
+      "queueName": "%LIFECYCLE_QUEUE_NAME%",
+      "connection": "WorkQueue"
     }
   ]
 }

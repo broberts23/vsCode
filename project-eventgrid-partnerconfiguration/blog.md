@@ -133,7 +133,7 @@ The Function handles lifecycle events by calling:
 - `POST https://graph.microsoft.com/beta/subscriptions/{id}/reauthorize`
 - `PATCH https://graph.microsoft.com/v1.0/subscriptions/{id}` (extend expiration)
 
-So it needs Graph application permission to manage subscriptions.
+Microsoft Graph subscription management permissions are based on the underlying resource. For `users` subscriptions, the least-privileged application permission is typically `User.Read.All`.
 
 Grant it to the Function’s managed identity:
 
@@ -142,7 +142,7 @@ pwsh ./scripts/Grant-GraphAppRolesToManagedIdentity.ps1 \
   -SubscriptionId <sub> \
   -ResourceGroupName <rg> \
   -FunctionAppName <functionAppNameFromStep1> \
-  -AppRoles Subscriptions.ReadWrite.All
+  -AppRoles User.Read.All
 ```
 
 What to capture:
@@ -162,13 +162,11 @@ This is the “magic” step: we create a Graph subscription where both `notific
 
 ```powershell
 pwsh ./scripts/New-GraphUsersSubscriptionToEventGrid.ps1 \
-  -TenantId <tenant> \
-  -ClientId <bootstrapAppId> \
-  -ClientSecret <bootstrapSecret> \
   -AzureSubscriptionId <sub> \
   -ResourceGroupName <rg> \
   -PartnerTopicName <partnerTopic> \
-  -Location <location>
+  -Location <location> \
+  -UseDeviceCode
 ```
 
 Save the output values:

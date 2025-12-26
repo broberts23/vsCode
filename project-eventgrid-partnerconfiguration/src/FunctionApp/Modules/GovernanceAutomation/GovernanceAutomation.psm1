@@ -286,10 +286,145 @@ function New-GovernanceWorkItem {
     }
 }
 
+function Get-GraphNotificationItems {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$EventGridEvent
+    )
+
+    # Graph change notifications (and lifecycle notifications) are typically shaped like:
+    #   { "value": [ { ... }, { ... } ] }
+    # When delivered through Event Grid Partner Topics, that payload is commonly in EventGridEvent.data
+    # but we defensively probe a couple of common wrappers.
+    $candidates = @(
+        $EventGridEvent.data,
+        $EventGridEvent.data.data,
+        $EventGridEvent.payload,
+        $EventGridEvent.payload.data
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($null -eq $candidate) {
+            continue
+        }
+
+        if ($candidate.PSObject.Properties.Name -contains 'value') {
+            $items = @($candidate.value)
+            if ($items.Count -gt 0) {
+                return $items
+            }
+        }
+    }
+
+    return @()
+}
+
+function Test-IsGraphLifecycleEvent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$EventGridEvent
+    )
+
+    $items = Get-GraphNotificationItems -EventGridEvent $EventGridEvent
+    if ($items.Count -eq 0) {
+        return $false
+    }
+
+    foreach ($item in $items) {
+        if ($null -ne $item -and ($item.PSObject.Properties.Name -contains 'lifecycleEvent')) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$item.lifecycleEvent)) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function Invoke-GraphRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('GET', 'POST', 'PATCH', 'PUT', 'DELETE')]
+        [string]$Method,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Uri,
+
+        [Parameter(Mandatory = $false)]
+        [object]$Body,
+
+        [Parameter(Mandatory = $false)]
+        [int[]]$AllowStatusCodes = @()
+    )
+
+    $token = Get-ManagedIdentityAccessToken -Resource 'https://graph.microsoft.com/'
+    $headers = @{ Authorization = "Bearer $token" }
+
+    try {
+        if ($null -eq $Body) {
+            return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers
+        }
+
+        $jsonBody = $Body | ConvertTo-Json -Depth 16
+        return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers -ContentType 'application/json' -Body $jsonBody
+    }
+    catch {
+        $response = $_.Exception.Response
+        if ($null -ne $response) {
+            $statusCode = [int]$response.StatusCode
+            if ($AllowStatusCodes -contains $statusCode) {
+                return [pscustomobject]@{
+                    StatusCode = $statusCode
+                    Ignored    = $true
+                }
+            }
+        }
+
+        throw
+    }
+}
+
+function Invoke-GraphSubscriptionReauthorize {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SubscriptionId
+    )
+
+    $uri = "https://graph.microsoft.com/beta/subscriptions/$SubscriptionId/reauthorize"
+    return (Invoke-GraphRequest -Method 'POST' -Uri $uri)
+}
+
+function Set-GraphSubscriptionExpiration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ExpirationDateTime
+    )
+
+    $uri = "https://graph.microsoft.com/v1.0/subscriptions/$SubscriptionId"
+    $body = @{ expirationDateTime = $ExpirationDateTime }
+    return (Invoke-GraphRequest -Method 'PATCH' -Uri $uri -Body $body)
+}
+
 Export-ModuleMember -Function @(
     'Get-Policy',
     'Get-DedupeKey',
     'Test-AndSetDedupe',
     'Get-ManagedIdentityAccessToken',
-    'New-GovernanceWorkItem'
+    'New-GovernanceWorkItem',
+    'Get-GraphNotificationItems',
+    'Test-IsGraphLifecycleEvent',
+    'Invoke-GraphSubscriptionReauthorize',
+    'Set-GraphSubscriptionExpiration'
 )

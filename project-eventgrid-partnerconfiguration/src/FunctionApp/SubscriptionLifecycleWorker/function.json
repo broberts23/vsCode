@@ -1,0 +1,11 @@
+{
+  "bindings": [
+    {
+      "type": "queueTrigger",
+      "name": "QueueItem",
+      "direction": "in",
+      "queueName": "%LIFECYCLE_QUEUE_NAME%",
+      "connection": "WorkQueue"
+    }
+  ]
+}

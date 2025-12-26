@@ -67,6 +67,7 @@ When conditions match policy, the Function can automatically:
 This project can receive **Microsoft Graph** change notifications (for example, `users`) through **Azure Event Grid partner topics**.
 
 - Create the Graph subscription using [scripts/New-GraphUsersSubscriptionToEventGrid.ps1](scripts/New-GraphUsersSubscriptionToEventGrid.ps1).
+- Create the Graph subscription using [scripts/New-GraphUsersSubscriptionToEventGrid.ps1](scripts/New-GraphUsersSubscriptionToEventGrid.ps1) (delegated auth via your signed-in account).
 - This creates (or reuses) an Event Grid **partner topic** in your resource group.
 - Activate the partner topic (required before events flow) using [scripts/Activate-EventGridPartnerTopic.ps1](scripts/Activate-EventGridPartnerTopic.ps1), then deploy an Event Grid event subscription to route events to the Function.
 

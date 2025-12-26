@@ -3,17 +3,9 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
     [string]$TenantId,
-
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
-    [string]$ClientId,
-
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
-    [string]$ClientSecret,
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
@@ -33,11 +25,18 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
+    [string[]]$Scopes = @('User.Read.All'),
+
+    [Parameter(Mandatory = $false)]
+    [switch]$UseDeviceCode,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]$Resource = 'users',
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('updated', 'updated,deleted')]
-    [string]$ChangeType = 'updated',
+    [ValidateSet('updated', 'updated,deleted,created')]
+    [string]$ChangeType = 'updated,deleted,created',
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(45, 41760)]
@@ -64,35 +63,58 @@ function New-RandomClientState {
     return [Convert]::ToBase64String($bytes).TrimEnd('=')
 }
 
-function Get-GraphAccessToken {
+function Ensure-GraphConnection {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
+        [string[]]$Scopes,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
         [string]$TenantId,
 
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$ClientId,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$ClientSecret
+        [Parameter(Mandatory = $false)]
+        [switch]$UseDeviceCode
     )
 
-    $tokenEndpoint = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-    $tokenResponse = Invoke-RestMethod -Method Post -Uri $tokenEndpoint -ContentType 'application/x-www-form-urlencoded' -Body @{
-        client_id     = $ClientId
-        client_secret = $ClientSecret
-        scope         = 'https://graph.microsoft.com/.default'
-        grant_type    = 'client_credentials'
+    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+
+    $context = $null
+    try {
+        $context = Get-MgContext -ErrorAction Stop
+    }
+    catch {
+        $context = $null
     }
 
-    if ([string]::IsNullOrWhiteSpace($tokenResponse.access_token)) {
-        throw 'Failed to acquire Microsoft Graph access token (empty access_token).'
+    $missingScopes = @()
+    if ($null -eq $context -or $null -eq $context.Scopes) {
+        $missingScopes = $Scopes
+    }
+    else {
+        foreach ($scope in $Scopes) {
+            if ($context.Scopes -notcontains $scope) {
+                $missingScopes += $scope
+            }
+        }
     }
 
-    return $tokenResponse.access_token
+    if ($missingScopes.Count -gt 0) {
+        $connectParams = @{
+            Scopes    = $Scopes
+            NoWelcome = $true
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($TenantId)) {
+            $connectParams['TenantId'] = $TenantId
+        }
+        if ($UseDeviceCode.IsPresent) {
+            $connectParams['UseDeviceCode'] = $true
+        }
+
+        Connect-MgGraph @connectParams | Out-Null
+    }
 }
 
 function New-EventGridPartnerEndpointUri {
@@ -131,9 +153,7 @@ $lifecycleNotificationUrl = $notificationUrl
 
 $expirationDateTime = (Get-Date).ToUniversalTime().AddMinutes($ExpirationInMinutes).ToString('o')
 
-$accessToken = Get-GraphAccessToken -TenantId $TenantId -ClientId $ClientId -ClientSecret $ClientSecret
-
-$headers = @{ Authorization = "Bearer $accessToken" }
+Ensure-GraphConnection -Scopes $Scopes -TenantId $TenantId -UseDeviceCode:$UseDeviceCode
 
 $body = @{
     changeType               = $ChangeType
@@ -159,7 +179,7 @@ Write-Information -MessageData (
     }
 )
 
-$response = Invoke-RestMethod -Method Post -Uri $createUri -Headers $headers -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 8)
+$response = Invoke-MgGraphRequest -Method POST -Uri $createUri -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 8)
 
 # Return an object (useful for piping or CI).
 [pscustomobject]@{

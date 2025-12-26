@@ -13,7 +13,7 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
-    [string]$Location = 'westeurope',
+    [string]$Location = 'centralindia',
 
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
@@ -99,13 +99,41 @@ $args = @(
     '-o', 'json'
 )
 
-$raw = & az @args 2>&1
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Deployment failed: $raw"
+$stderrFile = New-TemporaryFile
+try {
+    $raw = & az @args 2> $stderrFile
+    $stderr = Get-Content -Path $stderrFile -Raw
+}
+finally {
+    Remove-Item -Path $stderrFile -Force -ErrorAction SilentlyContinue
 }
 
-$outputs = $raw | ConvertFrom-Json -Depth 64
+if ($LASTEXITCODE -ne 0) {
+    $details = if (-not [string]::IsNullOrWhiteSpace($stderr)) { $stderr } else { ($raw -join "`n") }
+    throw "Deployment failed: $details"
+}
+
+$rawText = if ($raw -is [System.Array]) { ($raw -join "`n") } else { [string]$raw }
+$rawText = $rawText.Trim()
+if ([string]::IsNullOrWhiteSpace($rawText)) {
+    throw "Deployment succeeded but produced no JSON outputs. stderr: $stderr"
+}
+
+try {
+    $outputs = $rawText | ConvertFrom-Json -Depth 64
+}
+catch {
+    # Fallback: attempt to extract the JSON object if extra text leaked into stdout.
+    $start = $rawText.IndexOf('{')
+    $end = $rawText.LastIndexOf('}')
+    if ($start -ge 0 -and $end -gt $start) {
+        $jsonOnly = $rawText.Substring($start, $end - $start + 1)
+        $outputs = $jsonOnly | ConvertFrom-Json -Depth 64
+    }
+    else {
+        throw
+    }
+}
 
 $functionAppId = $outputs.functionAppId.value
 $functionResourceId = $outputs.functionResourceIdOut.value
