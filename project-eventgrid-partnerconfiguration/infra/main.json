@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.39.26.7824",
-      "templateHash": "304573372399685860"
+      "templateHash": "13364942771001998252"
     }
   },
   "definitions": {
@@ -63,6 +63,27 @@
       "defaultValue": "",
       "metadata": {
         "description": "Name of a user-assigned managed identity (in this resource group) used by the Function App (and used by deployment tooling for Graph bootstrap)."
+      }
+    },
+    "partnerTopicName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Partner topic name used by Microsoft Graph. When provided, the template can create/update the partner topic event subscription to the Function."
+      }
+    },
+    "partnerTopicEventSubscriptionName": {
+      "type": "string",
+      "defaultValue": "to-governance-function",
+      "metadata": {
+        "description": "Event subscription name for the partner topic -> Function link (only used when partnerTopicName is set)."
+      }
+    },
+    "functionResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "ResourceId of the Azure Function to invoke. If empty, uses the function deployed by this template (only used when partnerTopicName is set)."
       }
     },
     "functionAppName": {
@@ -122,7 +143,9 @@
     "storageTableDataContributorRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3')]",
     "storageQueueDataMessageProcessorRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8a0f0c08-91a1-4084-bc3d-661d67233fed')]",
     "storageQueueDataMessageSenderRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a')]",
-    "functionResourceIdOut": "[format('{0}/functions/{1}', resourceId('Microsoft.Web/sites', parameters('functionAppName')), parameters('functionName'))]"
+    "functionResourceIdOut": "[format('{0}/functions/{1}', resourceId('Microsoft.Web/sites', parameters('functionAppName')), parameters('functionName'))]",
+    "effectiveFunctionResourceId": "[if(not(empty(parameters('functionResourceId'))), parameters('functionResourceId'), variables('functionResourceIdOut'))]",
+    "shouldCreatePartnerTopicSubscription": "[and(not(empty(parameters('partnerTopicName'))), not(empty(variables('effectiveFunctionResourceId'))))]"
   },
   "resources": {
     "functionStorage": {
@@ -264,6 +287,34 @@
       "name": "[parameters('partnerConfigurationName')]",
       "location": "global",
       "properties": "[if(variables('shouldAuthorizePartner'), createObject('partnerAuthorization', createObject('defaultMaximumExpirationTimeInDays', 7, 'authorizedPartnersList', createArray(shallowMerge(createArray(variables('authorizedPartnerEntry')))))), createObject())]"
+    },
+    "partnerTopic": {
+      "condition": "[variables('shouldCreatePartnerTopicSubscription')]",
+      "existing": true,
+      "type": "Microsoft.EventGrid/partnerTopics",
+      "apiVersion": "2025-02-15",
+      "name": "[parameters('partnerTopicName')]",
+      "dependsOn": [
+        "functionApp"
+      ]
+    },
+    "partnerTopicEventSubscription": {
+      "condition": "[variables('shouldCreatePartnerTopicSubscription')]",
+      "type": "Microsoft.EventGrid/partnerTopics/eventSubscriptions",
+      "apiVersion": "2025-02-15",
+      "name": "[format('{0}/{1}', parameters('partnerTopicName'), parameters('partnerTopicEventSubscriptionName'))]",
+      "properties": {
+        "destination": {
+          "endpointType": "AzureFunction",
+          "properties": {
+            "resourceId": "[variables('effectiveFunctionResourceId')]"
+          }
+        },
+        "eventDeliverySchema": "CloudEventSchemaV1_0"
+      },
+      "dependsOn": [
+        "functionApp"
+      ]
     }
   },
   "outputs": {
@@ -278,6 +329,10 @@
     "functionResourceIdOut": {
       "type": "string",
       "value": "[variables('functionResourceIdOut')]"
+    },
+    "partnerTopicEventSubscriptionId": {
+      "type": "string",
+      "value": "[if(variables('shouldCreatePartnerTopicSubscription'), resourceId('Microsoft.EventGrid/partnerTopics/eventSubscriptions', parameters('partnerTopicName'), parameters('partnerTopicEventSubscriptionName')), '')]"
     },
     "bootstrapIdentityName": {
       "type": "string",

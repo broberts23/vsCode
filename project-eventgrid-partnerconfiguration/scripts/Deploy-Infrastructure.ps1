@@ -46,6 +46,33 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+function Write-Log {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Message,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('Information', 'Warning', 'Error', 'Success')]
+        [string]$Level = 'Information'
+    )
+
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $color = switch ($Level) {
+        'Information' { 'White' }
+        'Warning' { 'Yellow' }
+        'Error' { 'Red' }
+        'Success' { 'Green' }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        $Message = '(no message)'
+    }
+
+    Write-Host "[$timestamp] [$Level] $Message" -ForegroundColor $color
+}
+
 function Assert-AzCliPresent {
     [CmdletBinding()]
     param()
@@ -184,6 +211,38 @@ function Wait-PartnerTopic {
     throw "Partner topic did not become visible within ${TimeoutSeconds}s: $url"
 }
 
+function Wait-FunctionResource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$FunctionResourceId,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ApiVersion = '2025-03-01',
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(10, 7200)]
+        [int]$TimeoutSeconds = 900
+    )
+
+    $url = "https://management.azure.com$FunctionResourceId`?api-version=$ApiVersion"
+    $deadline = (Get-Date).ToUniversalTime().AddSeconds($TimeoutSeconds)
+
+    while ((Get-Date).ToUniversalTime() -lt $deadline) {
+        try {
+            Invoke-AzJson -AzParameters @('rest', '--method', 'GET', '--url', $url, '--only-show-errors') | Out-Null
+            return
+        }
+        catch {
+            Start-Sleep -Seconds 10
+        }
+    }
+
+    throw "Function resource did not become visible within ${TimeoutSeconds}s: $url"
+}
+
 function Set-FunctionAppSetting {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
@@ -285,7 +344,7 @@ function New-PartnerTopicEventSubscriptionWithRetry {
             }
         }
         catch {
-            Write-Verbose "Attempt $attempt/$MaxAttempts - failed to create partner topic event subscription. $($_.Exception.Message)"
+            Write-Log -Level Warning -Message "Attempt $attempt/$MaxAttempts - failed to create partner topic event subscription. $($_.Exception.Message)"
         }
 
         Start-Sleep -Seconds $SleepSeconds
@@ -393,7 +452,7 @@ function Resolve-ServicePrincipalObjectIdByAppId {
             }
         }
         catch {
-            Write-Verbose "Attempt $attempt of ${MaxAttempts} - service principal for appId '$AppId' not resolvable yet. $($_.Exception.Message)"
+            Write-Log -Level Warning -Message "Attempt $attempt of ${MaxAttempts} - service principal for appId '$AppId' not resolvable yet. $($_.Exception.Message)"
         }
 
         Start-Sleep -Seconds $SleepSeconds
@@ -518,8 +577,8 @@ function New-GraphAppRoleAssignmentsIfMissing {
 Assert-AzCliPresent
 Assert-AzLogin
 
-Write-Verbose "Deploying infra to RG '$ResourceGroupName' in subscription '$SubscriptionId'"
-Write-Verbose "Parameters: $ParametersFile"
+Write-Log -Level Information -Message "Deploying infra to RG '$ResourceGroupName' in subscription '$SubscriptionId'"
+Write-Log -Level Information -Message "Parameters: $ParametersFile"
 
 if (-not (Test-Path -Path $ParametersFile -PathType Leaf)) {
     throw "Parameters file not found: $ParametersFile"
@@ -530,7 +589,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to set Azure subscription context to '$SubscriptionId'."
 }
 
-Write-Verbose "Ensuring resource group exists: $ResourceGroupName ($Location)"
+Write-Log -Level Information -Message "Ensuring resource group exists: $ResourceGroupName ($Location)"
 & az group create --name $ResourceGroupName --location $Location --only-show-errors | Out-Null
 if ($LASTEXITCODE -ne 0) {
     throw "Failed to create/ensure resource group '$ResourceGroupName'."
@@ -542,7 +601,7 @@ if ([string]::IsNullOrWhiteSpace($uamiName)) {
     $uamiName = Get-SafeResourceName -Base 'uami-eg-governance' -Suffix "$ResourceGroupName-$suffix"
 }
 
-Write-Verbose "Ensuring user-assigned managed identity exists: $uamiName"
+Write-Log -Level Information -Message "Ensuring user-assigned managed identity exists: $uamiName"
 $uami = Get-OrCreateUserAssignedManagedIdentity -ResourceGroupName $ResourceGroupName -Location $Location -Name $uamiName -Confirm:$false
 
 if ([string]::IsNullOrWhiteSpace([string]$uami.principalId) -or [string]::IsNullOrWhiteSpace([string]$uami.clientId)) {
@@ -550,12 +609,12 @@ if ([string]::IsNullOrWhiteSpace([string]$uami.principalId) -or [string]::IsNull
 }
 
 $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
-Write-Verbose "Ensuring Azure RBAC role assignments on scope: $rgScope"
+Write-Log -Level Information -Message "Ensuring Azure RBAC role assignments on scope: $rgScope"
 $rbac = @(
     New-RoleAssignmentIfMissing -AssigneeObjectId $uami.principalId -Role 'Contributor' -Scope $rgScope -Confirm:$false
 )
 
-Write-Verbose "Ensuring Microsoft Graph app role assignments: $($BootstrapGraphAppRoles -join ',')"
+Write-Log -Level Information -Message "Ensuring Microsoft Graph app role assignments: $($BootstrapGraphAppRoles -join ',')"
 $graphRoleAssignments = New-GraphAppRoleAssignmentsIfMissing -ServicePrincipalAppId $uami.clientId -AppRoles $BootstrapGraphAppRoles -Confirm:$false
 
 $templateFile = (Join-Path -Path $PSScriptRoot -ChildPath '../infra/main.bicep')
@@ -564,7 +623,7 @@ if (-not (Test-Path -Path $templateFile -PathType Leaf)) {
 }
 
 $deploymentName = "eg-partnercfg-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-Write-Verbose "Starting deployment: $deploymentName"
+Write-Log -Level Information -Message "Starting deployment: $deploymentName"
 
 $deploymentAzParameters = @(
     'deployment', 'group', 'create',
@@ -654,35 +713,71 @@ if ($outputs.PSObject.Properties.Name -contains 'partnerTopicActivation') {
 $functionAppName = (Get-NameFromResourceId -ResourceId $functionAppId)
 
 if (-not $SkipGraphBootstrap.IsPresent) {
+    $deployFunctionCodeScript = (Join-Path -Path $PSScriptRoot -ChildPath './Deploy-FunctionCode.ps1')
+    if (-not (Test-Path -Path $deployFunctionCodeScript -PathType Leaf)) {
+        throw "Deploy script not found: $deployFunctionCodeScript"
+    }
+
+    Write-Log -Level Information -Message "Deploying Function code (zip deploy) to '$functionAppName'"
+
+    $rawDeployCode = & pwsh -NoProfile -File $deployFunctionCodeScript `
+        -SubscriptionId $SubscriptionId `
+        -ResourceGroupName $ResourceGroupName `
+        -FunctionAppName $functionAppName 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Deploy-FunctionCode.ps1 failed: $rawDeployCode"
+    }
+
+    try {
+        $deployCodeObj = $rawDeployCode | ConvertFrom-Json -Depth 32
+        if ($null -ne $deployCodeObj -and -not [string]::IsNullOrWhiteSpace([string]$deployCodeObj.deploymentStatus)) {
+            Write-Log -Level Success -Message "Function code deployed. status=$($deployCodeObj.deploymentStatus)"
+        }
+        else {
+            Write-Log -Level Success -Message 'Function code deployed.'
+        }
+    }
+    catch {
+        Write-Log -Level Success -Message 'Function code deployed.'
+    }
+
+    Write-Log -Level Information -Message "Waiting for Function resource to appear (required for Event Grid endpoint validation): $functionResourceId"
+    Wait-FunctionResource -FunctionResourceId $functionResourceId
+
     $rg = Invoke-AzJson -AzParameters @('group', 'show', '--name', $ResourceGroupName, '--only-show-errors', '-o', 'json')
     $effectivePartnerTopicName = Get-EffectivePartnerTopicName -PartnerTopicName $PartnerTopicName -ResourceGroupId $rg.id
     $partnerTopicNameOut = $effectivePartnerTopicName
 
-    Write-Verbose "Bootstrapping Graph->EventGrid subscription using partner topic '$effectivePartnerTopicName'"
+    Write-Log -Level Information -Message "Bootstrapping Graph -> Event Grid using partner topic '$effectivePartnerTopicName'"
 
     $newSubscriptionScript = (Join-Path -Path $PSScriptRoot -ChildPath './New-GraphUsersSubscriptionToEventGrid.ps1')
     if (-not (Test-Path -Path $newSubscriptionScript -PathType Leaf)) {
         throw "Bootstrap script not found: $newSubscriptionScript"
     }
 
-    $rawGraphSub = & pwsh -NoProfile -File $newSubscriptionScript \
-    -AzureSubscriptionId $SubscriptionId \
-    -ResourceGroupName $ResourceGroupName \
-    -PartnerTopicName $effectivePartnerTopicName \
-    -Location $Location \
-    -UseAzCliGraphToken \
-    -AsJson 2>&1
+    $rawGraphSub = & pwsh -NoProfile -File $newSubscriptionScript `
+        -AzureSubscriptionId $SubscriptionId `
+        -ResourceGroupName $ResourceGroupName `
+        -PartnerTopicName $effectivePartnerTopicName `
+        -Location $Location `
+        -UseAzCliGraphToken `
+        -AsJson -InformationAction SilentlyContinue 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "New-GraphUsersSubscriptionToEventGrid.ps1 failed: $rawGraphSub"
     }
 
     $graphSubscription = ($rawGraphSub | ConvertFrom-Json -Depth 32)
 
+    if ($null -ne $graphSubscription -and -not [string]::IsNullOrWhiteSpace([string]$graphSubscription.subscriptionId)) {
+        Write-Log -Level Success -Message "Graph subscription created. subscriptionId=$($graphSubscription.subscriptionId) expires=$($graphSubscription.expirationDateTime)"
+    }
+
     if (-not [string]::IsNullOrWhiteSpace([string]$graphSubscription.clientState)) {
+        Write-Log -Level Information -Message 'Updating Function App setting GRAPH_CLIENT_STATE'
         Set-FunctionAppSetting -ResourceGroupName $ResourceGroupName -FunctionAppName $functionAppName -Name 'GRAPH_CLIENT_STATE' -Value $graphSubscription.clientState -Confirm:$false
     }
 
-    Write-Verbose "Waiting for partner topic resource to appear: $effectivePartnerTopicName"
+    Write-Log -Level Information -Message "Waiting for partner topic resource to appear: $effectivePartnerTopicName"
     Wait-PartnerTopic -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -PartnerTopicName $effectivePartnerTopicName
 
     $activateScript = (Join-Path -Path $PSScriptRoot -ChildPath './Activate-EventGridPartnerTopic.ps1')
@@ -690,25 +785,82 @@ if (-not $SkipGraphBootstrap.IsPresent) {
         throw "Bootstrap script not found: $activateScript"
     }
 
-    $rawActivation = & pwsh -NoProfile -File $activateScript \
-    -AzureSubscriptionId $SubscriptionId \
-    -ResourceGroupName $ResourceGroupName \
-    -PartnerTopicName $effectivePartnerTopicName \
-    -AsJson 2>&1
+    $rawActivation = & pwsh -NoProfile -File $activateScript `
+        -AzureSubscriptionId $SubscriptionId `
+        -ResourceGroupName $ResourceGroupName `
+        -PartnerTopicName $effectivePartnerTopicName `
+        -AsJson -InformationAction SilentlyContinue 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Activate-EventGridPartnerTopic.ps1 failed: $rawActivation"
     }
 
     $partnerTopicActivation = ($rawActivation | ConvertFrom-Json -Depth 32)
 
-    Write-Verbose "Creating partner topic event subscription '$PartnerTopicEventSubscriptionName'"
-    $partnerTopicEventSubscriptionId = New-PartnerTopicEventSubscriptionWithRetry \
-    -SubscriptionId $SubscriptionId \
-    -ResourceGroupName $ResourceGroupName \
-    -PartnerTopicName $effectivePartnerTopicName \
-    -EventSubscriptionName $PartnerTopicEventSubscriptionName \
-    -AzureFunctionResourceId $functionResourceId \
-    -Confirm:$false
+    if ($null -ne $partnerTopicActivation -and -not [string]::IsNullOrWhiteSpace([string]$partnerTopicActivation.activationState)) {
+        Write-Log -Level Success -Message "Partner topic activation state: $($partnerTopicActivation.activationState)"
+    }
+
+    # Second deployment: now that the partner topic exists/activated, create the partner topic -> Function event subscription via Bicep.
+    $deploymentNameLink = "${deploymentName}-link"
+    Write-Log -Level Information -Message "Creating partner topic -> Function link via Bicep deployment: $deploymentNameLink"
+
+    $deploymentAzParametersLink = @(
+        'deployment', 'group', 'create',
+        '--name', $deploymentNameLink,
+        '--resource-group', $ResourceGroupName,
+        '--template-file', $templateFile,
+        '--parameters', $ParametersFile,
+        '--parameters', "bootstrapUserAssignedIdentityName=$uamiName",
+        '--parameters', "partnerTopicName=$effectivePartnerTopicName",
+        '--parameters', "partnerTopicEventSubscriptionName=$PartnerTopicEventSubscriptionName",
+        '--parameters', "functionResourceId=$functionResourceId",
+        '--only-show-errors',
+        '--query', 'properties.outputs',
+        '-o', 'json'
+    )
+
+    $stderrFileLink = New-TemporaryFile
+    try {
+        $rawLink = & az $deploymentAzParametersLink 2> $stderrFileLink
+        $stderrLink = Get-Content -Path $stderrFileLink -Raw
+    }
+    finally {
+        Remove-Item -Path $stderrFileLink -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        $detailsLink = if (-not [string]::IsNullOrWhiteSpace($stderrLink)) { $stderrLink } else { ($rawLink -join "`n") }
+        throw "Link deployment failed: $detailsLink"
+    }
+
+    $rawLinkText = if ($rawLink -is [System.Array]) { ($rawLink -join "`n") } else { [string]$rawLink }
+    $rawLinkText = $rawLinkText.Trim()
+    if ([string]::IsNullOrWhiteSpace($rawLinkText)) {
+        throw "Link deployment succeeded but produced no JSON outputs. stderr: $stderrLink"
+    }
+
+    $outputsLink = $null
+    try {
+        $outputsLink = $rawLinkText | ConvertFrom-Json -Depth 64
+    }
+    catch {
+        $startLink = $rawLinkText.IndexOf('{')
+        $endLink = $rawLinkText.LastIndexOf('}')
+        if ($startLink -ge 0 -and $endLink -gt $startLink) {
+            $jsonOnlyLink = $rawLinkText.Substring($startLink, $endLink - $startLink + 1)
+            $outputsLink = $jsonOnlyLink | ConvertFrom-Json -Depth 64
+        }
+        else {
+            throw
+        }
+    }
+
+    if ($null -ne $outputsLink -and $outputsLink.PSObject.Properties.Name -contains 'partnerTopicEventSubscriptionId') {
+        $partnerTopicEventSubscriptionId = $outputsLink.partnerTopicEventSubscriptionId.value
+        if (-not [string]::IsNullOrWhiteSpace([string]$partnerTopicEventSubscriptionId)) {
+            Write-Log -Level Success -Message "Partner topic event subscription created/updated. id=$partnerTopicEventSubscriptionId"
+        }
+    }
 }
 
 [pscustomobject]@{

@@ -18,6 +18,15 @@ param authorizedPartnerAuthorizationExpirationTimeInUtc string = dateTimeAdd(utc
 @description('Name of a user-assigned managed identity (in this resource group) used by the Function App (and used by deployment tooling for Graph bootstrap).')
 param bootstrapUserAssignedIdentityName string = ''
 
+@description('Partner topic name used by Microsoft Graph. When provided, the template can create/update the partner topic event subscription to the Function.')
+param partnerTopicName string = ''
+
+@description('Event subscription name for the partner topic -> Function link (only used when partnerTopicName is set).')
+param partnerTopicEventSubscriptionName string = 'to-governance-function'
+
+@description('ResourceId of the Azure Function to invoke. If empty, uses the function deployed by this template (only used when partnerTopicName is set).')
+param functionResourceId string = ''
+
 var bootstrapIdentityResourceId = !empty(bootstrapUserAssignedIdentityName)
   ? resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', bootstrapUserAssignedIdentityName)
   : ''
@@ -264,6 +273,9 @@ resource functionAppStorageQueueDataMessageSender 'Microsoft.Authorization/roleA
 }
 
 var functionResourceIdOut = '${functionApp.id}/functions/${functionName}'
+var effectiveFunctionResourceId = !empty(functionResourceId) ? functionResourceId : functionResourceIdOut
+
+var shouldCreatePartnerTopicSubscription = !empty(partnerTopicName) && !empty(effectiveFunctionResourceId)
 
 resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02-15' = {
   name: partnerConfigurationName
@@ -284,9 +296,31 @@ resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02
     : {}
 }
 
+resource partnerTopic 'Microsoft.EventGrid/partnerTopics@2025-02-15' existing = if (shouldCreatePartnerTopicSubscription) {
+  name: partnerTopicName
+}
+
+resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventSubscriptions@2025-02-15' = if (shouldCreatePartnerTopicSubscription) {
+  name: partnerTopicEventSubscriptionName
+  parent: partnerTopic
+  properties: {
+    destination: {
+      endpointType: 'AzureFunction'
+      properties: {
+        resourceId: effectiveFunctionResourceId
+      }
+    }
+    eventDeliverySchema: 'CloudEventSchemaV1_0'
+  }
+}
+
 output partnerConfigurationId string = partnerConfiguration.id
 output functionAppId string = functionApp.id
 output functionResourceIdOut string = functionResourceIdOut
+
+output partnerTopicEventSubscriptionId string = shouldCreatePartnerTopicSubscription
+  ? partnerTopicEventSubscription.id
+  : ''
 
 output bootstrapIdentityName string = bootstrapUserAssignedIdentityName
 output bootstrapIdentityClientId string = bootstrapIdentityClientId
