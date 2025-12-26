@@ -1,11 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
 
-[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSAvoidAssignmentToAutomaticVariable',
-    '',
-    Justification = 'No assignment to $args exists in this script; suppress false-positive editor diagnostic.'
-)]
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -27,6 +22,21 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateNotNullOrEmpty()]
     [string]$BootstrapUserAssignedIdentityName,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$PartnerTopicName,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$PartnerTopicEventSubscriptionName = 'to-governance-function',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$FunctionResourceId,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipGraphBootstrap,
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('User.Read.All', 'Directory.Read.All')]
@@ -95,6 +105,195 @@ function Get-SafeResourceName {
     return $name
 }
 
+function Get-DeterministicShortHash {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Value,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(4, 32)]
+        [int]$Length = 12
+    )
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    $hashBytes = [System.Security.Cryptography.SHA256]::HashData($bytes)
+    $hex = [System.BitConverter]::ToString($hashBytes).Replace('-', '').ToLowerInvariant()
+    return $hex.Substring(0, $Length)
+}
+
+function Get-EffectivePartnerTopicName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$PartnerTopicName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupId
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($PartnerTopicName)) {
+        return $PartnerTopicName
+    }
+
+    $suffix = Get-DeterministicShortHash -Value $ResourceGroupId -Length 14
+    # Keep name simple and deterministic across redeploys.
+    return "pt-graph-$suffix"
+}
+
+function Wait-PartnerTopic {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PartnerTopicName,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ApiVersion = '2025-02-15',
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(10, 7200)]
+        [int]$TimeoutSeconds = 1800
+    )
+
+    $url = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName`?api-version=$ApiVersion"
+    $deadline = (Get-Date).ToUniversalTime().AddSeconds($TimeoutSeconds)
+
+    while ((Get-Date).ToUniversalTime() -lt $deadline) {
+        try {
+            Invoke-AzJson -AzParameters @('rest', '--method', 'GET', '--url', $url, '--only-show-errors') | Out-Null
+            return
+        }
+        catch {
+            Start-Sleep -Seconds 10
+        }
+    }
+
+    throw "Partner topic did not become visible within ${TimeoutSeconds}s: $url"
+}
+
+function Set-FunctionAppSetting {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$FunctionAppName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Value
+    )
+
+    if (-not $PSCmdlet.ShouldProcess("$ResourceGroupName/$FunctionAppName", "Set Function App appSetting '$Name'")) {
+        return
+    }
+
+    & az functionapp config appsettings set --resource-group $ResourceGroupName --name $FunctionAppName --settings "$Name=$Value" --only-show-errors | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to set Function App setting '$Name' on '$FunctionAppName'."
+    }
+}
+
+function New-PartnerTopicEventSubscriptionWithRetry {
+    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PartnerTopicName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$EventSubscriptionName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$AzureFunctionResourceId,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ApiVersion = '2025-02-15',
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 120)]
+        [int]$MaxAttempts = 60,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 60)]
+        [int]$SleepSeconds = 10
+    )
+
+    $url = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName/eventSubscriptions/$EventSubscriptionName`?api-version=$ApiVersion"
+
+    $body = [ordered]@{
+        properties = [ordered]@{
+            destination         = [ordered]@{
+                endpointType = 'AzureFunction'
+                properties   = [ordered]@{
+                    resourceId = $AzureFunctionResourceId
+                }
+            }
+            eventDeliverySchema = 'CloudEventSchemaV1_0'
+        }
+    } | ConvertTo-Json -Depth 32
+
+    if (-not $PSCmdlet.ShouldProcess("$ResourceGroupName/$PartnerTopicName/$EventSubscriptionName", 'Create partner topic event subscription')) {
+        return $null
+    }
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $created = Invoke-AzJson -AzParameters @(
+                'rest',
+                '--method', 'PUT',
+                '--url', $url,
+                '--headers', 'Content-Type=application/json',
+                '--body', $body,
+                '--only-show-errors',
+                '-o', 'json'
+            )
+
+            if ($null -ne $created -and -not [string]::IsNullOrWhiteSpace([string]$created.id)) {
+                return [string]$created.id
+            }
+        }
+        catch {
+            Write-Verbose "Attempt $attempt/$MaxAttempts - failed to create partner topic event subscription. $($_.Exception.Message)"
+        }
+
+        Start-Sleep -Seconds $SleepSeconds
+    }
+
+    throw "Failed to create partner topic event subscription after $MaxAttempts attempts: $url"
+}
+
 function Invoke-AzJson {
     [CmdletBinding()]
     param(
@@ -115,11 +314,6 @@ function Invoke-AzJson {
     return ($raw | ConvertFrom-Json -Depth 64)
 }
 
-[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSUseApprovedVerbs',
-    '',
-    Justification = 'Internal helper function.'
-)]
 function Get-OrCreateUserAssignedManagedIdentity {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
@@ -168,11 +362,46 @@ function Get-OrCreateUserAssignedManagedIdentity {
         ))
 }
 
-[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSUseApprovedVerbs',
-    '',
-    Justification = 'Internal helper function.'
-)]
+function Resolve-ServicePrincipalObjectIdByAppId {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$AppId,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 60)]
+        [int]$MaxAttempts = 30,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, 60)]
+        [int]$SleepSeconds = 5
+    )
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $sp = Invoke-AzJson -AzParameters @(
+                'rest',
+                '--method', 'GET',
+                '--url', "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId%20eq%20'$AppId'&`$select=id,appId,displayName",
+                '--only-show-errors'
+            )
+
+            $id = if ($null -ne $sp.value -and @($sp.value).Count -gt 0) { $sp.value[0].id } else { $null }
+            if (-not [string]::IsNullOrWhiteSpace([string]$id)) {
+                return [string]$id
+            }
+        }
+        catch {
+            Write-Verbose "Attempt $attempt of ${MaxAttempts} - service principal for appId '$AppId' not resolvable yet. $($_.Exception.Message)"
+        }
+
+        Start-Sleep -Seconds $SleepSeconds
+    }
+
+    throw "Unable to resolve service principal object id for appId '$AppId' after $MaxAttempts attempts."
+}
+
 function New-RoleAssignmentIfMissing {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
@@ -211,22 +440,19 @@ function New-RoleAssignmentIfMissing {
     return [pscustomobject]@{ role = $Role; scope = $Scope; status = 'Created'; assignmentId = $created.id }
 }
 
-[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSUseApprovedVerbs',
-    '',
-    Justification = 'Internal helper function.'
-)]
 function New-GraphAppRoleAssignmentsIfMissing {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]$ServicePrincipalObjectId,
+        [string]$ServicePrincipalAppId,
 
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [string[]]$AppRoles
     )
+
+    $servicePrincipalObjectId = Resolve-ServicePrincipalObjectIdByAppId -AppId $ServicePrincipalAppId
 
     $graphAppId = '00000003-0000-0000-c000-000000000000'
     $graphSp = Invoke-AzJson -AzParameters @(
@@ -245,7 +471,7 @@ function New-GraphAppRoleAssignmentsIfMissing {
     $existingAssignments = Invoke-AzJson -AzParameters @(
         'rest',
         '--method', 'GET',
-        '--url', "https://graph.microsoft.com/v1.0/servicePrincipals/$ServicePrincipalObjectId/appRoleAssignments?`$select=id,resourceId,appRoleId",
+        '--url', "https://graph.microsoft.com/v1.0/servicePrincipals/$servicePrincipalObjectId/appRoleAssignments?`$select=id,resourceId,appRoleId",
         '--only-show-errors'
     )
     $existingForGraph = @($existingAssignments.value | Where-Object { $_.resourceId -eq $graphSpId })
@@ -264,12 +490,12 @@ function New-GraphAppRoleAssignmentsIfMissing {
         }
 
         $body = [ordered]@{
-            principalId = $ServicePrincipalObjectId
+            principalId = $servicePrincipalObjectId
             resourceId  = $graphSpId
             appRoleId   = $role.id
         } | ConvertTo-Json -Depth 8
 
-        if (-not $PSCmdlet.ShouldProcess($ServicePrincipalObjectId, "Assign Microsoft Graph app role '$roleValue'")) {
+        if (-not $PSCmdlet.ShouldProcess($servicePrincipalObjectId, "Assign Microsoft Graph app role '$roleValue'")) {
             $results += [pscustomobject]@{ role = $roleValue; appRoleId = $role.id; assignmentId = $null; status = 'Skipped' }
             continue
         }
@@ -277,7 +503,7 @@ function New-GraphAppRoleAssignmentsIfMissing {
         $created = Invoke-AzJson -AzParameters @(
             'rest',
             '--method', 'POST',
-            '--url', "https://graph.microsoft.com/v1.0/servicePrincipals/$ServicePrincipalObjectId/appRoleAssignments",
+            '--url', "https://graph.microsoft.com/v1.0/servicePrincipals/$servicePrincipalObjectId/appRoleAssignments",
             '--headers', 'Content-Type=application/json',
             '--body', $body,
             '--only-show-errors'
@@ -317,7 +543,7 @@ if ([string]::IsNullOrWhiteSpace($uamiName)) {
 }
 
 Write-Verbose "Ensuring user-assigned managed identity exists: $uamiName"
-$uami = Get-OrCreateUserAssignedManagedIdentity -ResourceGroupName $ResourceGroupName -Location $Location -Name $uamiName
+$uami = Get-OrCreateUserAssignedManagedIdentity -ResourceGroupName $ResourceGroupName -Location $Location -Name $uamiName -Confirm:$false
 
 if ([string]::IsNullOrWhiteSpace([string]$uami.principalId) -or [string]::IsNullOrWhiteSpace([string]$uami.clientId)) {
     throw 'Managed identity missing principalId/clientId.'
@@ -326,11 +552,11 @@ if ([string]::IsNullOrWhiteSpace([string]$uami.principalId) -or [string]::IsNull
 $rgScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
 Write-Verbose "Ensuring Azure RBAC role assignments on scope: $rgScope"
 $rbac = @(
-    New-RoleAssignmentIfMissing -AssigneeObjectId $uami.principalId -Role 'Contributor' -Scope $rgScope
+    New-RoleAssignmentIfMissing -AssigneeObjectId $uami.principalId -Role 'Contributor' -Scope $rgScope -Confirm:$false
 )
 
 Write-Verbose "Ensuring Microsoft Graph app role assignments: $($BootstrapGraphAppRoles -join ',')"
-$graphRoleAssignments = New-GraphAppRoleAssignmentsIfMissing -ServicePrincipalObjectId $uami.principalId -AppRoles $BootstrapGraphAppRoles
+$graphRoleAssignments = New-GraphAppRoleAssignmentsIfMissing -ServicePrincipalAppId $uami.clientId -AppRoles $BootstrapGraphAppRoles -Confirm:$false
 
 $templateFile = (Join-Path -Path $PSScriptRoot -ChildPath '../infra/main.bicep')
 if (-not (Test-Path -Path $templateFile -PathType Leaf)) {
@@ -351,6 +577,10 @@ $deploymentAzParameters = @(
     '--query', 'properties.outputs',
     '-o', 'json'
 )
+
+if (-not [string]::IsNullOrWhiteSpace($FunctionResourceId)) {
+    $deploymentAzParameters += @('--parameters', "functionResourceId=$FunctionResourceId")
+}
 
 $stderrFile = New-TemporaryFile
 try {
@@ -399,6 +629,9 @@ $bootstrapGraphRoleAssignments = $null
 $graphSubscription = $null
 $partnerTopicActivation = $null
 
+$partnerTopicNameOut = $null
+$partnerTopicEventSubscriptionId = $null
+
 if ($outputs.PSObject.Properties.Name -contains 'bootstrapIdentityName') {
     $bootstrapIdentityName = $outputs.bootstrapIdentityName.value
 }
@@ -418,22 +651,84 @@ if ($outputs.PSObject.Properties.Name -contains 'partnerTopicActivation') {
     $partnerTopicActivation = $outputs.partnerTopicActivation.value
 }
 
+$functionAppName = (Get-NameFromResourceId -ResourceId $functionAppId)
+
+if (-not $SkipGraphBootstrap.IsPresent) {
+    $rg = Invoke-AzJson -AzParameters @('group', 'show', '--name', $ResourceGroupName, '--only-show-errors', '-o', 'json')
+    $effectivePartnerTopicName = Get-EffectivePartnerTopicName -PartnerTopicName $PartnerTopicName -ResourceGroupId $rg.id
+    $partnerTopicNameOut = $effectivePartnerTopicName
+
+    Write-Verbose "Bootstrapping Graph->EventGrid subscription using partner topic '$effectivePartnerTopicName'"
+
+    $newSubscriptionScript = (Join-Path -Path $PSScriptRoot -ChildPath './New-GraphUsersSubscriptionToEventGrid.ps1')
+    if (-not (Test-Path -Path $newSubscriptionScript -PathType Leaf)) {
+        throw "Bootstrap script not found: $newSubscriptionScript"
+    }
+
+    $rawGraphSub = & pwsh -NoProfile -File $newSubscriptionScript \
+    -AzureSubscriptionId $SubscriptionId \
+    -ResourceGroupName $ResourceGroupName \
+    -PartnerTopicName $effectivePartnerTopicName \
+    -Location $Location \
+    -UseAzCliGraphToken \
+    -AsJson 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "New-GraphUsersSubscriptionToEventGrid.ps1 failed: $rawGraphSub"
+    }
+
+    $graphSubscription = ($rawGraphSub | ConvertFrom-Json -Depth 32)
+
+    if (-not [string]::IsNullOrWhiteSpace([string]$graphSubscription.clientState)) {
+        Set-FunctionAppSetting -ResourceGroupName $ResourceGroupName -FunctionAppName $functionAppName -Name 'GRAPH_CLIENT_STATE' -Value $graphSubscription.clientState -Confirm:$false
+    }
+
+    Write-Verbose "Waiting for partner topic resource to appear: $effectivePartnerTopicName"
+    Wait-PartnerTopic -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -PartnerTopicName $effectivePartnerTopicName
+
+    $activateScript = (Join-Path -Path $PSScriptRoot -ChildPath './Activate-EventGridPartnerTopic.ps1')
+    if (-not (Test-Path -Path $activateScript -PathType Leaf)) {
+        throw "Bootstrap script not found: $activateScript"
+    }
+
+    $rawActivation = & pwsh -NoProfile -File $activateScript \
+    -AzureSubscriptionId $SubscriptionId \
+    -ResourceGroupName $ResourceGroupName \
+    -PartnerTopicName $effectivePartnerTopicName \
+    -AsJson 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Activate-EventGridPartnerTopic.ps1 failed: $rawActivation"
+    }
+
+    $partnerTopicActivation = ($rawActivation | ConvertFrom-Json -Depth 32)
+
+    Write-Verbose "Creating partner topic event subscription '$PartnerTopicEventSubscriptionName'"
+    $partnerTopicEventSubscriptionId = New-PartnerTopicEventSubscriptionWithRetry \
+    -SubscriptionId $SubscriptionId \
+    -ResourceGroupName $ResourceGroupName \
+    -PartnerTopicName $effectivePartnerTopicName \
+    -EventSubscriptionName $PartnerTopicEventSubscriptionName \
+    -AzureFunctionResourceId $functionResourceId \
+    -Confirm:$false
+}
+
 [pscustomobject]@{
-    deploymentName                = $deploymentName
-    resourceGroupName             = $ResourceGroupName
-    location                      = $Location
-    partnerConfigurationId        = $partnerConfigurationId
-    functionAppId                 = $functionAppId
-    functionAppName               = (Get-NameFromResourceId -ResourceId $functionAppId)
-    functionResourceId            = $functionResourceId
-    functionName                  = (Get-NameFromResourceId -ResourceId $functionResourceId)
+    deploymentName                  = $deploymentName
+    resourceGroupName               = $ResourceGroupName
+    location                        = $Location
+    partnerConfigurationId          = $partnerConfigurationId
+    functionAppId                   = $functionAppId
+    functionAppName                 = $functionAppName
+    functionResourceId              = $functionResourceId
+    functionName                    = (Get-NameFromResourceId -ResourceId $functionResourceId)
 
-    bootstrapIdentityName         = $bootstrapIdentityName
-    bootstrapIdentityClientId     = $bootstrapIdentityClientId
-    bootstrapIdentityPrincipalId  = $bootstrapIdentityPrincipalId
+    bootstrapIdentityName           = $bootstrapIdentityName
+    bootstrapIdentityClientId       = $bootstrapIdentityClientId
+    bootstrapIdentityPrincipalId    = $bootstrapIdentityPrincipalId
 
-    bootstrapGraphRoleAssignments = if ($null -ne $bootstrapGraphRoleAssignments) { $bootstrapGraphRoleAssignments } else { $graphRoleAssignments }
-    bootstrapAzureRbacAssignments = $rbac
-    graphSubscription             = $graphSubscription
-    partnerTopicActivation        = $partnerTopicActivation
+    bootstrapGraphRoleAssignments   = if ($null -ne $bootstrapGraphRoleAssignments) { $bootstrapGraphRoleAssignments } else { $graphRoleAssignments }
+    bootstrapAzureRbacAssignments   = $rbac
+    partnerTopicName                = $partnerTopicNameOut
+    partnerTopicEventSubscriptionId = $partnerTopicEventSubscriptionId
+    graphSubscription               = $graphSubscription
+    partnerTopicActivation          = $partnerTopicActivation
 }

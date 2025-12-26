@@ -9,16 +9,13 @@ param partnerConfigurationName string = 'default'
 @description('The immutable ID of the partner registration to authorize. Leave empty to manage authorizations out-of-band.')
 param authorizedPartnerRegistrationImmutableId string = ''
 
-@description('Partner name to authorize in Event Grid Partner Configuration. Defaults to Microsoft Graph API.')
-param authorizedPartnerName string = 'Microsoft Graph API'
+@description('Partner name to authorize in Event Grid Partner Configuration. Defaults to MicrosoftGraphAPI (Microsoft Graph API partner).')
+param authorizedPartnerName string = 'MicrosoftGraphAPI'
 
 @description('Expiration time (UTC) for the partner authorization entry. Defaults to 7 days from deployment time.')
 param authorizedPartnerAuthorizationExpirationTimeInUtc string = dateTimeAdd(utcNow(), 'P7D')
 
-@description('Partner topic name used by Microsoft Graph (created as part of subscription creation). If empty, Graph bootstrap and partner topic event subscription creation are skipped.')
-param partnerTopicName string = ''
-
-@description('Name of a user-assigned managed identity (in this resource group) used to run deploymentScripts and to own the Graph subscription. If empty, Graph bootstrap is skipped.')
+@description('Name of a user-assigned managed identity (in this resource group) used by the Function App (and used by deployment tooling for Graph bootstrap).')
 param bootstrapUserAssignedIdentityName string = ''
 
 var bootstrapIdentityResourceId = !empty(bootstrapUserAssignedIdentityName)
@@ -32,12 +29,6 @@ var bootstrapIdentityClientId = !empty(bootstrapUserAssignedIdentityName)
 var bootstrapIdentityPrincipalId = !empty(bootstrapUserAssignedIdentityName)
   ? reference(bootstrapIdentityResourceId, '2025-01-31-preview').principalId
   : ''
-
-@description('Event subscription name (only used if `partnerTopicName` is set).')
-param partnerTopicEventSubscriptionName string = 'to-governance-function'
-
-@description('ResourceId of the Azure Function to invoke (only used if `partnerTopicName` is set). Example: /subscriptions/.../resourceGroups/.../providers/Microsoft.Web/sites/<app>/functions/<functionName>')
-param functionResourceId string = ''
 
 @description('Name of the Windows Function App (Microsoft.Web/sites).')
 param functionAppName string = 'func-eg-governance-${uniqueString(resourceGroup().id)}'
@@ -272,11 +263,7 @@ resource functionAppStorageQueueDataMessageSender 'Microsoft.Authorization/roleA
   }
 }
 
-var deployedFunctionResourceId = '${functionApp.id}/functions/${functionName}'
-var effectiveFunctionResourceId = !empty(functionResourceId) ? functionResourceId : deployedFunctionResourceId
-
-var shouldBootstrapGraph = !empty(partnerTopicName) && !empty(bootstrapUserAssignedIdentityName)
-var shouldCreatePartnerTopicSubscription = !empty(partnerTopicName) && !empty(effectiveFunctionResourceId)
+var functionResourceIdOut = '${functionApp.id}/functions/${functionName}'
 
 resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02-15' = {
   name: partnerConfigurationName
@@ -297,189 +284,10 @@ resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02
     : {}
 }
 
-resource partnerTopic 'Microsoft.EventGrid/partnerTopics@2025-02-15' existing = if (shouldCreatePartnerTopicSubscription) {
-  name: partnerTopicName
-}
-
-resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventSubscriptions@2025-02-15' = if (shouldCreatePartnerTopicSubscription) {
-  name: partnerTopicEventSubscriptionName
-  parent: partnerTopic
-  dependsOn: shouldBootstrapGraph
-    ? [
-        activatePartnerTopic
-      ]
-    : []
-  properties: {
-    destination: {
-      endpointType: 'AzureFunction'
-      properties: {
-        resourceId: effectiveFunctionResourceId
-      }
-    }
-    eventDeliverySchema: 'CloudEventSchemaV1_0'
-  }
-}
-
-// --- Imperative bootstrap via deployment scripts ---
-// Notes:
-// - Uses AzureCLI deployment scripts and runs pwsh scripts from this repo inline.
-// - Requires a user-assigned managed identity (bootstrapUserAssignedIdentityName) that is already granted the required Microsoft Graph application roles.
-
-resource createGraphSubscription 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
-  name: 'create-graph-subscription'
-  location: location
-  kind: 'AzureCLI'
-  identity: shouldBootstrapGraph
-    ? {
-        type: 'UserAssigned'
-        userAssignedIdentities: {
-          '${bootstrapIdentityResourceId}': {}
-        }
-      }
-    : null
-  dependsOn: [
-    partnerConfiguration
-  ]
-  properties: {
-    azCliVersion: '2.59.0'
-    timeout: 'PT45M'
-    cleanupPreference: 'OnSuccess'
-    retentionInterval: 'PT1H'
-    scriptContent: '''
-#!/bin/bash
-set -euo pipefail
-
-BOOTSTRAP_ENABLED='${string(shouldBootstrapGraph)}'
-if [ "${BOOTSTRAP_ENABLED}" != "True" ] && [ "${BOOTSTRAP_ENABLED}" != "true" ]; then
-  echo '{}' > "$AZ_SCRIPTS_OUTPUT_PATH"
-  exit 0
-fi
-
-cat > ./New-GraphUsersSubscriptionToEventGrid.ps1 <<'PS1'
-${loadTextContent('../scripts/New-GraphUsersSubscriptionToEventGrid.ps1')}
-PS1
-
-# Retry: Graph app role assignments may take time to become effective.
-attempt=1
-maxAttempts=20
-while true; do
-  set +e
-  out=$(pwsh -NoProfile -File ./New-GraphUsersSubscriptionToEventGrid.ps1 \
-    -AzureSubscriptionId "${subscription().subscriptionId}" \
-    -ResourceGroupName "${resourceGroup().name}" \
-    -PartnerTopicName "${partnerTopicName}" \
-    -Location "${location}" \
-    -UseAzCliGraphToken \
-    -AsJson 2>&1)
-  code=$?
-  set -e
-
-  if [ $code -eq 0 ]; then
-    echo "$out" > ./subscription.json
-    break
-  fi
-
-  if [ $attempt -ge $maxAttempts ]; then
-    echo "Graph subscription creation failed after $maxAttempts attempts. Last error:" >&2
-    echo "$out" >&2
-    exit $code
-  fi
-
-  echo "Attempt $attempt/$maxAttempts failed; retrying in 30s..." >&2
-  attempt=$((attempt + 1))
-  sleep 30
-done
-
-clientState=$(jq -r '.clientState' ./subscription.json)
-subscriptionId=$(jq -r '.subscriptionId' ./subscription.json)
-expirationDateTime=$(jq -r '.expirationDateTime' ./subscription.json)
-
-az functionapp config appsettings set \
-  --resource-group "${resourceGroup().name}" \
-  --name "${functionAppName}" \
-  --settings "GRAPH_CLIENT_STATE=${clientState}" \
-  --only-show-errors \
-  >/dev/null
-
-partnerTopicUrl="${environment().resourceManager}subscriptions/${subscription().subscriptionId}/resourceGroups/${resourceGroup().name}/providers/Microsoft.EventGrid/partnerTopics/${partnerTopicName}?api-version=2025-02-15"
-
-# Wait for Graph to create the partner topic resource (eventual consistency)
-deadline=$((SECONDS + 600))
-while [ $SECONDS -lt $deadline ]; do
-  if az rest --method GET --url "$partnerTopicUrl" --only-show-errors >/dev/null 2>&1; then
-    break
-  fi
-  sleep 10
-done
-
-partnerTopicId=$(az rest --method GET --url "$partnerTopicUrl" --query id -o tsv --only-show-errors 2>/dev/null || true)
-
-jq -n -c \
-  --arg subscriptionId "$subscriptionId" \
-  --arg clientState "$clientState" \
-  --arg expirationDateTime "$expirationDateTime" \
-  --arg partnerTopicId "$partnerTopicId" \
-  '{subscriptionId: $subscriptionId, clientState: $clientState, expirationDateTime: $expirationDateTime, partnerTopicId: $partnerTopicId}' \
-  > "$AZ_SCRIPTS_OUTPUT_PATH"
-'''
-  }
-}
-
-resource activatePartnerTopic 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
-  name: 'activate-partner-topic'
-  location: location
-  kind: 'AzureCLI'
-  identity: shouldBootstrapGraph
-    ? {
-        type: 'UserAssigned'
-        userAssignedIdentities: {
-          '${bootstrapIdentityResourceId}': {}
-        }
-      }
-    : null
-  dependsOn: [
-    createGraphSubscription
-  ]
-  properties: {
-    azCliVersion: '2.59.0'
-    timeout: 'PT30M'
-    cleanupPreference: 'OnSuccess'
-    retentionInterval: 'PT1H'
-    scriptContent: '''
-#!/bin/bash
-set -euo pipefail
-
-BOOTSTRAP_ENABLED='${string(shouldBootstrapGraph)}'
-if [ "${BOOTSTRAP_ENABLED}" != "True" ] && [ "${BOOTSTRAP_ENABLED}" != "true" ]; then
-  echo '{}' > "$AZ_SCRIPTS_OUTPUT_PATH"
-  exit 0
-fi
-
-cat > ./Activate-EventGridPartnerTopic.ps1 <<'PS1'
-${loadTextContent('../scripts/Activate-EventGridPartnerTopic.ps1')}
-PS1
-
-pwsh -NoProfile -File ./Activate-EventGridPartnerTopic.ps1 \
-  -AzureSubscriptionId "${subscription().subscriptionId}" \
-  -ResourceGroupName "${resourceGroup().name}" \
-  -PartnerTopicName "${partnerTopicName}" \
-  -AsJson \
-  > ./activation.json
-
-jq -c '{activation: .}' ./activation.json > "$AZ_SCRIPTS_OUTPUT_PATH"
-'''
-  }
-}
-
 output partnerConfigurationId string = partnerConfiguration.id
 output functionAppId string = functionApp.id
-output functionResourceIdOut string = effectiveFunctionResourceId
-output partnerTopicEventSubscriptionId string = shouldCreatePartnerTopicSubscription
-  ? partnerTopicEventSubscription.id
-  : ''
+output functionResourceIdOut string = functionResourceIdOut
 
 output bootstrapIdentityName string = bootstrapUserAssignedIdentityName
 output bootstrapIdentityClientId string = bootstrapIdentityClientId
 output bootstrapIdentityPrincipalId string = bootstrapIdentityPrincipalId
-output graphSubscription object = createGraphSubscription.properties.outputs
-output partnerTopicActivation object = activatePartnerTopic.properties.outputs
