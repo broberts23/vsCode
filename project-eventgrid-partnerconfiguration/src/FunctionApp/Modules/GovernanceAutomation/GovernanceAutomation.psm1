@@ -49,15 +49,48 @@ function Get-DedupeKey {
         [object]$Event
     )
 
-    $id = $Event.id
-    $eventType = $Event.eventType
-    $subject = $Event.subject
-
-    if ([string]::IsNullOrWhiteSpace($id)) {
-        $id = "$($Event.eventTime)-$subject-$eventType"
+    # Defensive: the Event Grid trigger can hand us an array (batch). We expect a single event here.
+    if ($Event -is [System.Array]) {
+        if ($Event.Count -eq 1) {
+            $Event = $Event[0]
+        }
+        else {
+            throw "Get-DedupeKey expects a single event object; received an array of $($Event.Count)."
+        }
     }
 
-    return "$eventType|$subject|$id"
+    # Event Grid can deliver in either EventGridSchema or CloudEvents 1.0.
+    # - EventGridSchema: eventType, eventTime, topic
+    # - CloudEvents:     type, time, source
+    $id = if ($Event.PSObject.Properties.Name -contains 'id') { [string]$Event.id } else { '' }
+    $type = if ($Event.PSObject.Properties.Name -contains 'eventType') { [string]$Event.eventType } elseif ($Event.PSObject.Properties.Name -contains 'type') { [string]$Event.type } else { '' }
+    $subject = if ($Event.PSObject.Properties.Name -contains 'subject') { [string]$Event.subject } else { '' }
+    $time = if ($Event.PSObject.Properties.Name -contains 'eventTime') { [string]$Event.eventTime } elseif ($Event.PSObject.Properties.Name -contains 'time') { [string]$Event.time } else { '' }
+
+    if ([string]::IsNullOrWhiteSpace($id)) {
+        $id = "$time-$subject-$type"
+    }
+
+    $dedupeKey = "$type|$subject|$id"
+
+    # If we still couldn't extract anything meaningful, fall back to hashing the full payload
+    # to avoid pathological collisions like "||--".
+    $idLooksEmpty = ([string]::IsNullOrWhiteSpace($id) -or $id -eq '--' -or $id -eq '-')
+    if ([string]::IsNullOrWhiteSpace($type) -and [string]::IsNullOrWhiteSpace($subject) -and $idLooksEmpty) {
+        $json = $Event | ConvertTo-Json -Depth 32 -Compress
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($bytes)
+        }
+        finally {
+            $sha256.Dispose()
+        }
+        $hashHex = ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+        $dedupeKey = "hash:$hashHex"
+    }
+
+    return $dedupeKey
 }
 
 function ConvertTo-Sha256Hex {
@@ -272,6 +305,12 @@ function New-GovernanceWorkItem {
 
     $policy = Get-Policy -PolicyPath $PolicyPath
 
+    $id = if ($EventGridEvent.PSObject.Properties.Name -contains 'id') { [string]$EventGridEvent.id } else { '' }
+    $eventType = if ($EventGridEvent.PSObject.Properties.Name -contains 'eventType') { [string]$EventGridEvent.eventType } elseif ($EventGridEvent.PSObject.Properties.Name -contains 'type') { [string]$EventGridEvent.type } else { '' }
+    $subject = if ($EventGridEvent.PSObject.Properties.Name -contains 'subject') { [string]$EventGridEvent.subject } else { '' }
+    $eventTime = if ($EventGridEvent.PSObject.Properties.Name -contains 'eventTime') { [string]$EventGridEvent.eventTime } elseif ($EventGridEvent.PSObject.Properties.Name -contains 'time') { [string]$EventGridEvent.time } else { '' }
+    $topic = if ($EventGridEvent.PSObject.Properties.Name -contains 'topic') { [string]$EventGridEvent.topic } elseif ($EventGridEvent.PSObject.Properties.Name -contains 'source') { [string]$EventGridEvent.source } else { '' }
+
     return [pscustomobject]@{
         schemaVersion = 1
         kind          = 'eventgrid.v1'
@@ -282,11 +321,11 @@ function New-GovernanceWorkItem {
             mode    = $policy.mode
         }
         source        = [pscustomobject]@{
-            id        = $EventGridEvent.id
-            eventType = $EventGridEvent.eventType
-            subject   = $EventGridEvent.subject
-            eventTime = $EventGridEvent.eventTime
-            topic     = $EventGridEvent.topic
+            id        = $id
+            eventType = $eventType
+            subject   = $subject
+            eventTime = $eventTime
+            topic     = $topic
         }
         payload       = [pscustomobject]@{
             event = $EventGridEvent

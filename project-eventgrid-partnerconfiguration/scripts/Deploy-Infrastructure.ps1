@@ -192,7 +192,7 @@ function Wait-PartnerTopic {
 
         [Parameter(Mandatory = $false)]
         [ValidateRange(10, 7200)]
-        [int]$TimeoutSeconds = 1800
+        [int]$TimeoutSeconds = 300
     )
 
     $url = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName`?api-version=$ApiVersion"
@@ -271,86 +271,6 @@ function Set-FunctionAppSetting {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to set Function App setting '$Name' on '$FunctionAppName'."
     }
-}
-
-function New-PartnerTopicEventSubscriptionWithRetry {
-    [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
-    param(
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$SubscriptionId,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$ResourceGroupName,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$PartnerTopicName,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$EventSubscriptionName,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
-        [string]$AzureFunctionResourceId,
-
-        [Parameter(Mandatory = $false)]
-        [ValidateNotNullOrEmpty()]
-        [string]$ApiVersion = '2025-02-15',
-
-        [Parameter(Mandatory = $false)]
-        [ValidateRange(1, 120)]
-        [int]$MaxAttempts = 60,
-
-        [Parameter(Mandatory = $false)]
-        [ValidateRange(1, 60)]
-        [int]$SleepSeconds = 10
-    )
-
-    $url = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName/eventSubscriptions/$EventSubscriptionName`?api-version=$ApiVersion"
-
-    $body = [ordered]@{
-        properties = [ordered]@{
-            destination         = [ordered]@{
-                endpointType = 'AzureFunction'
-                properties   = [ordered]@{
-                    resourceId = $AzureFunctionResourceId
-                }
-            }
-            eventDeliverySchema = 'CloudEventSchemaV1_0'
-        }
-    } | ConvertTo-Json -Depth 32
-
-    if (-not $PSCmdlet.ShouldProcess("$ResourceGroupName/$PartnerTopicName/$EventSubscriptionName", 'Create partner topic event subscription')) {
-        return $null
-    }
-
-    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        try {
-            $created = Invoke-AzJson -AzParameters @(
-                'rest',
-                '--method', 'PUT',
-                '--url', $url,
-                '--headers', 'Content-Type=application/json',
-                '--body', $body,
-                '--only-show-errors',
-                '-o', 'json'
-            )
-
-            if ($null -ne $created -and -not [string]::IsNullOrWhiteSpace([string]$created.id)) {
-                return [string]$created.id
-            }
-        }
-        catch {
-            Write-Log -Level Warning -Message "Attempt $attempt/$MaxAttempts - failed to create partner topic event subscription. $($_.Exception.Message)"
-        }
-
-        Start-Sleep -Seconds $SleepSeconds
-    }
-
-    throw "Failed to create partner topic event subscription after $MaxAttempts attempts: $url"
 }
 
 function Invoke-AzJson {
@@ -574,6 +494,8 @@ function New-GraphAppRoleAssignmentsIfMissing {
     return $results
 }
 
+# --- Main script logic ---
+
 Assert-AzCliPresent
 Assert-AzLogin
 
@@ -643,6 +565,7 @@ if (-not [string]::IsNullOrWhiteSpace($FunctionResourceId)) {
 
 $stderrFile = New-TemporaryFile
 try {
+    Write-Log -Level Information -Message "Starting az deployment..."
     $raw = & az $deploymentAzParameters 2> $stderrFile
     $stderr = Get-Content -Path $stderrFile -Raw
 }
@@ -676,6 +599,8 @@ catch {
         throw
     }
 }
+
+Write-Log -Level Success -Message "Deployment succeeded: $deploymentName"
 
 $functionAppId = $outputs.functionAppId.value
 $functionResourceId = $outputs.functionResourceIdOut.value
@@ -720,7 +645,7 @@ if (-not $SkipGraphBootstrap.IsPresent) {
 
     Write-Log -Level Information -Message "Deploying Function code (zip deploy) to '$functionAppName'"
 
-    $rawDeployCode = & pwsh -NoProfile -File $deployFunctionCodeScript `
+    $DeployCode = & pwsh -NoProfile -File $deployFunctionCodeScript `
         -SubscriptionId $SubscriptionId `
         -ResourceGroupName $ResourceGroupName `
         -FunctionAppName $functionAppName 2>&1
@@ -728,17 +653,24 @@ if (-not $SkipGraphBootstrap.IsPresent) {
         throw "Deploy-FunctionCode.ps1 failed: $rawDeployCode"
     }
 
-    try {
-        $deployCodeObj = $rawDeployCode | ConvertFrom-Json -Depth 32
-        if ($null -ne $deployCodeObj -and -not [string]::IsNullOrWhiteSpace([string]$deployCodeObj.deploymentStatus)) {
-            Write-Log -Level Success -Message "Function code deployed. status=$($deployCodeObj.deploymentStatus)"
-        }
-        else {
-            Write-Log -Level Success -Message 'Function code deployed.'
-        }
+    if ($null -eq $DeployCode) {
+        Write-Log -Level Error -Message 'Function code deployment returned no result.'
     }
-    catch {
-        Write-Log -Level Success -Message 'Function code deployed.'
+    elseif (-not [string]::IsNullOrWhiteSpace([string]$DeployCode.deploymentStatus)) {
+        $detailsParts = @(
+            "status=$($DeployCode.deploymentStatus)"
+            $(if (-not [string]::IsNullOrWhiteSpace([string]$DeployCode.deploymentId)) { "id=$($DeployCode.deploymentId)" })
+            $(if ($null -ne $DeployCode.active) { "active=$($DeployCode.active)" })
+        ) | Where-Object { $null -ne $_ }
+
+        $details = $detailsParts -join ' '
+
+        $msg = if (-not [string]::IsNullOrWhiteSpace([string]$DeployCode.message)) { $DeployCode.message } else { 'Function code deployed.' }
+        Write-Log -Level Success -Message "$msg $details".Trim()
+    }
+    else {
+        $msg = if (-not [string]::IsNullOrWhiteSpace([string]$DeployCode.message)) { $DeployCode.message } else { 'Function code deployed.' }
+        Write-Log -Level Success -Message $msg
     }
 
     Write-Log -Level Information -Message "Waiting for Function resource to appear (required for Event Grid endpoint validation): $functionResourceId"

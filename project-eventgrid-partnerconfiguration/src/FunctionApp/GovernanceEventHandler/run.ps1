@@ -22,41 +22,70 @@ catch {
 
 $policyPath = if (-not [string]::IsNullOrWhiteSpace($env:POLICY_PATH)) { $env:POLICY_PATH } else { 'policy/policy.json' }
 
-$dedupeEnabled = ($env:DEDUPE_ENABLED -eq 'true')
-if ($dedupeEnabled) {
-    $tableName = if (-not [string]::IsNullOrWhiteSpace($env:DEDUPE_TABLE_NAME)) { $env:DEDUPE_TABLE_NAME } else { 'DedupeKeys' }
-    $accountName = $env:DEDUPE_STORAGE_ACCOUNT_NAME
-    if ([string]::IsNullOrWhiteSpace($accountName)) {
-        throw 'DEDUPE_STORAGE_ACCOUNT_NAME must be set when DEDUPE_ENABLED=true.'
-    }
-
-    $dedupeKey = Get-DedupeKey -Event $EventGridEvent
-    $isDuplicate = Test-AndSetDedupe -DedupeKey $dedupeKey -StorageAccountName $accountName -EndpointSuffix $env:DEDUPE_ENDPOINT_SUFFIX -TableEndpoint $env:DEDUPE_TABLE_ENDPOINT -TableName $tableName
-    if ($isDuplicate) {
-        Write-Information -MessageData ([pscustomobject]@{
-                message   = 'Duplicate event detected; skipping processing'
-                dedupeKey = $dedupeKey
-            })
-        return
-    }
-}
-
-$workItem = New-GovernanceWorkItem -EventGridEvent $EventGridEvent -PolicyPath $policyPath
-
-$isLifecycle = Test-IsGraphLifecycleEvent -EventGridEvent $EventGridEvent
-if ($isLifecycle) {
-    Push-OutputBinding -Name lifecycleWorkItem -Value ($workItem | ConvertTo-Json -Depth 16 -Compress)
+# Event Grid trigger can deliver a batch (array) of events.
+# Normalize to an array so we handle both single-event and batched deliveries.
+$events = @()
+if ($EventGridEvent -is [System.Array]) {
+    $events = @($EventGridEvent)
 }
 else {
-    Push-OutputBinding -Name workItem -Value ($workItem | ConvertTo-Json -Depth 16 -Compress)
+    $events = @($EventGridEvent)
+}
+
+$workItemPayloads = @()
+$lifecycleWorkItemPayloads = @()
+$duplicateCount = 0
+
+$dedupeEnabled = ($env:DEDUPE_ENABLED -eq 'true')
+foreach ($evt in $events) {
+    if ($null -eq $evt) {
+        continue
+    }
+
+    if ($dedupeEnabled) {
+        $tableName = if (-not [string]::IsNullOrWhiteSpace($env:DEDUPE_TABLE_NAME)) { $env:DEDUPE_TABLE_NAME } else { 'DedupeKeys' }
+        $accountName = $env:DEDUPE_STORAGE_ACCOUNT_NAME
+        if ([string]::IsNullOrWhiteSpace($accountName)) {
+            throw 'DEDUPE_STORAGE_ACCOUNT_NAME must be set when DEDUPE_ENABLED=true.'
+        }
+
+        $dedupeKey = Get-DedupeKey -Event $evt
+        $isDuplicate = Test-AndSetDedupe -DedupeKey $dedupeKey -StorageAccountName $accountName -EndpointSuffix $env:DEDUPE_ENDPOINT_SUFFIX -TableEndpoint $env:DEDUPE_TABLE_ENDPOINT -TableName $tableName
+        if ($isDuplicate) {
+            $duplicateCount++
+            Write-Information -MessageData ([pscustomobject]@{
+                    message   = 'Duplicate event detected; skipping processing'
+                    dedupeKey = $dedupeKey
+                })
+            continue
+        }
+    }
+
+    $workItem = New-GovernanceWorkItem -EventGridEvent $evt -PolicyPath $policyPath
+    $isLifecycle = Test-IsGraphLifecycleEvent -EventGridEvent $evt
+
+    if ($isLifecycle) {
+        $lifecycleWorkItemPayloads += ($workItem | ConvertTo-Json -Depth 16 -Compress)
+    }
+    else {
+        $workItemPayloads += ($workItem | ConvertTo-Json -Depth 16 -Compress)
+    }
+}
+
+if ($lifecycleWorkItemPayloads.Count -gt 0) {
+    Push-OutputBinding -Name lifecycleWorkItem -Value $lifecycleWorkItemPayloads
+}
+
+if ($workItemPayloads.Count -gt 0) {
+    Push-OutputBinding -Name workItem -Value $workItemPayloads
 }
 
 Write-Information -MessageData ([pscustomobject]@{
-        message       = 'Enqueued governance work item'
-        kind          = $workItem.kind
-        schemaVersion = $workItem.schemaVersion
-        correlationId = $workItem.correlationId
-        isLifecycle   = $isLifecycle
+        message           = 'Enqueued governance work items'
+        totalEvents       = $events.Count
+        enqueuedWork      = $workItemPayloads.Count
+        enqueuedLifecycle = $lifecycleWorkItemPayloads.Count
+        duplicates        = $duplicateCount
     })
 
 return
