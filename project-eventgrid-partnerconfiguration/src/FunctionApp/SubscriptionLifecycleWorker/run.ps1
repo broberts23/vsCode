@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$QueueItem,
+    [object]$QueueItem,
 
     [Parameter(Mandatory = $false)]
     [hashtable]$TriggerMetadata
@@ -14,7 +14,56 @@ $modulePath = Join-Path -Path $PSScriptRoot -ChildPath '../Modules/GovernanceAut
 Remove-Module -Name 'GovernanceAutomation' -Force -ErrorAction SilentlyContinue
 Import-Module -Name $modulePath -Force -ErrorAction Stop
 
-$workItem = $QueueItem | ConvertFrom-Json -Depth 32
+function Get-QueueItemText {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$InputObject
+    )
+
+    if ($InputObject -is [byte[]]) {
+        return [System.Text.Encoding]::UTF8.GetString($InputObject)
+    }
+
+    $text = [string]$InputObject
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return $text
+    }
+
+    $trimmed = $text.Trim()
+    if ($trimmed.StartsWith('{') -or $trimmed.StartsWith('[')) {
+        return $trimmed
+    }
+
+    try {
+        $decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($trimmed))
+        $decodedTrimmed = $decoded.Trim()
+        if ($decodedTrimmed.StartsWith('{') -or $decodedTrimmed.StartsWith('[')) {
+            return $decodedTrimmed
+        }
+    }
+    catch {
+        # Ignore base64 decode failures; fall back to raw text.
+    }
+
+    return $trimmed
+}
+
+$queueItemType = if ($null -eq $QueueItem) { '<null>' } else { $QueueItem.GetType().FullName }
+$queueText = Get-QueueItemText -InputObject $QueueItem
+
+$workItem = $null
+try {
+    $workItem = $queueText | ConvertFrom-Json -Depth 32
+}
+catch {
+    Write-Information -MessageData ([pscustomobject]@{
+            message        = 'Queue item was not valid JSON; skipping'
+            queueItemType  = $queueItemType
+            payloadFirstCh = if ([string]::IsNullOrEmpty($queueText)) { '' } else { $queueText.Substring(0, 1) }
+        })
+    return
+}
+
 $event = $workItem.payload.event
 
 Write-Information -MessageData ([pscustomobject]@{
@@ -125,7 +174,7 @@ foreach ($subscriptionId in $subscriptionIds) {
             operation      = 'reauthorize'
         })
 
-    $newExpiration = (Get-Date).ToUniversalTime().AddMinutes($renewalMinutes).ToString('o')
+    $newExpiration = (Get-Date).ToUniversalTime().AddMinutes($renewMinutes).ToString('o')
     $null = Set-GraphSubscriptionExpiration -SubscriptionId $subscriptionId -ExpirationDateTime $newExpiration
 
     Write-Information -MessageData ([pscustomobject]@{

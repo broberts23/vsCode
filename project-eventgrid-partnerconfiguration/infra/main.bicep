@@ -290,35 +290,18 @@ resource functionAppStorageTableDataContributor 'Microsoft.Authorization/roleAss
   }
 }
 
-// Data-plane RBAC for Queue access via the Function's managed identity.
-// Built-in roles:
-// - Storage Queue Data Message Processor (trigger)
-// - Storage Queue Data Message Sender (output)
-var storageQueueDataMessageProcessorRoleDefinitionId = subscriptionResourceId(
+// Built-in role: Storage Queue Data Contributor
+// Grants both read/process and send rights for queue data-plane operations.
+var storageQueueDataContributorRoleDefinitionId = subscriptionResourceId(
   'Microsoft.Authorization/roleDefinitions',
-  '8a0f0c08-91a1-4084-bc3d-661d67233fed'
+  '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
 )
 
-var storageQueueDataMessageSenderRoleDefinitionId = subscriptionResourceId(
-  'Microsoft.Authorization/roleDefinitions',
-  'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a'
-)
-
-resource functionAppStorageQueueDataMessageProcessor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(functionStorage.id, bootstrapIdentityResourceId, storageQueueDataMessageProcessorRoleDefinitionId)
+resource functionAppStorageQueueDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(functionStorage.id, bootstrapIdentityResourceId, storageQueueDataContributorRoleDefinitionId)
   scope: functionStorage
   properties: {
-    roleDefinitionId: storageQueueDataMessageProcessorRoleDefinitionId
-    principalId: bootstrapIdentityPrincipalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource functionAppStorageQueueDataMessageSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(functionStorage.id, bootstrapIdentityResourceId, storageQueueDataMessageSenderRoleDefinitionId)
-  scope: functionStorage
-  properties: {
-    roleDefinitionId: storageQueueDataMessageSenderRoleDefinitionId
+    roleDefinitionId: storageQueueDataContributorRoleDefinitionId
     principalId: bootstrapIdentityPrincipalId
     principalType: 'ServicePrincipal'
   }
