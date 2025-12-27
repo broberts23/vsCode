@@ -241,6 +241,17 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
   }
 }
 
+resource functionConfig 'Microsoft.Web/sites/config@2025-03-01' = {
+  name: 'web'
+  parent: functionApp
+  properties: {
+    alwaysOn: false
+    ftpsState: 'Disabled'
+    powerShellVersion: '7.4'
+    functionAppScaleLimit: 10
+  }
+}
+
 resource functionAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   name: 'send-to-loganalytics'
   scope: functionApp
