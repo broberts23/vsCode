@@ -340,15 +340,63 @@ function Get-GraphNotificationItems {
         [object]$EventGridEvent
     )
 
+    function Get-OptionalPropertyValue {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]
+            [AllowNull()]
+            [object]$Object,
+
+            [Parameter(Mandatory = $true)]
+            [ValidateNotNullOrEmpty()]
+            [string]$Name
+        )
+
+        if ($null -eq $Object) {
+            return $null
+        }
+
+        # If we got JSON as a string, try to parse it.
+        if ($Object -is [string]) {
+            $text = [string]$Object
+            $trimmed = $text.Trim()
+            if ($trimmed.StartsWith('{') -or $trimmed.StartsWith('[')) {
+                try {
+                    $Object = $trimmed | ConvertFrom-Json -Depth 64
+                }
+                catch {
+                    return $null
+                }
+            }
+            else {
+                return $null
+            }
+        }
+
+        $prop = $Object.PSObject.Properties[$Name]
+        if ($null -eq $prop) {
+            return $null
+        }
+
+        return $prop.Value
+    }
+
     # Graph change notifications (and lifecycle notifications) are typically shaped like:
     #   { "value": [ { ... }, { ... } ] }
     # When delivered through Event Grid Partner Topics, that payload is commonly in EventGridEvent.data
     # but we defensively probe a couple of common wrappers.
+    $data = Get-OptionalPropertyValue -Object $EventGridEvent -Name 'data'
+    $dataData = Get-OptionalPropertyValue -Object $data -Name 'data'
+    $payload = Get-OptionalPropertyValue -Object $EventGridEvent -Name 'payload'
+    $payloadData = Get-OptionalPropertyValue -Object $payload -Name 'data'
+
+    # Also include the event itself as a candidate because some producers send the Graph payload directly.
     $candidates = @(
-        $EventGridEvent.data,
-        $EventGridEvent.data.data,
-        $EventGridEvent.payload,
-        $EventGridEvent.payload.data
+        $data,
+        $dataData,
+        $payload,
+        $payloadData,
+        $EventGridEvent
     )
 
     foreach ($candidate in $candidates) {
@@ -356,15 +404,18 @@ function Get-GraphNotificationItems {
             continue
         }
 
-        if ($candidate.PSObject.Properties.Name -contains 'value') {
-            $items = @($candidate.value)
+        $value = Get-OptionalPropertyValue -Object $candidate -Name 'value'
+        if ($null -ne $value) {
+            $items = @($value)
             if ($items.Count -gt 0) {
-                return $items
+                # Use unary comma to prevent PowerShell from enumerating the array on the pipeline.
+                return , $items
             }
         }
     }
 
-    return @()
+    # Ensure callers always receive an array (even when empty) under StrictMode.
+    return , @()
 }
 
 function Test-IsGraphLifecycleEvent {
@@ -374,7 +425,8 @@ function Test-IsGraphLifecycleEvent {
         [object]$EventGridEvent
     )
 
-    $items = Get-GraphNotificationItems -EventGridEvent $EventGridEvent
+    # Force array semantics: Get-GraphNotificationItems can return no output, which would otherwise yield $null.
+    $items = @(Get-GraphNotificationItems -EventGridEvent $EventGridEvent)
     if ($items.Count -eq 0) {
         return $false
     }

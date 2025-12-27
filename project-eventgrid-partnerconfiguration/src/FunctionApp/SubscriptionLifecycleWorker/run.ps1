@@ -9,7 +9,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-Import-Module -Name GovernanceAutomation -Force -ErrorAction Stop
+$modulePath = Join-Path -Path $PSScriptRoot -ChildPath '../Modules/GovernanceAutomation/GovernanceAutomation.psm1'
+
+Remove-Module -Name 'GovernanceAutomation' -Force -ErrorAction SilentlyContinue
+Import-Module -Name $modulePath -Force -ErrorAction Stop
 
 $workItem = $QueueItem | ConvertFrom-Json -Depth 32
 $event = $workItem.payload.event

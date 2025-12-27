@@ -11,13 +11,14 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# Ingress-only mode: validate/dedupe, enqueue work item, return.
-# The remainder of this file contains legacy scaffold code and is intentionally unreachable.
+$modulePath = Join-Path -Path $PSScriptRoot -ChildPath '../Modules/GovernanceAutomation/GovernanceAutomation.psm1'
+
 try {
-    Import-Module -Name GovernanceAutomation -Force -ErrorAction Stop
+    Remove-Module -Name 'GovernanceAutomation' -Force -ErrorAction SilentlyContinue
+    Import-Module -Name $modulePath -Force -ErrorAction Stop
 }
 catch {
-    throw "Failed to import GovernanceAutomation module. Ensure the module exists under src/FunctionApp/Modules and is deployed. Error: $($_.Exception.Message)"
+    throw "Failed to import GovernanceAutomation module from '$modulePath'. Error: $($_.Exception.Message)"
 }
 
 $policyPath = if (-not [string]::IsNullOrWhiteSpace($env:POLICY_PATH)) { $env:POLICY_PATH } else { 'policy/policy.json' }
