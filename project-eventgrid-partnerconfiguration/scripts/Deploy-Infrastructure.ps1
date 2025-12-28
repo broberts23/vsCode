@@ -645,12 +645,20 @@ if (-not $SkipGraphBootstrap.IsPresent) {
 
     Write-Log -Level Information -Message "Deploying Function code (zip deploy) to '$functionAppName'"
 
-    $DeployCode = & pwsh -NoProfile -File $deployFunctionCodeScript `
+    # IMPORTANT: Call the script in-process so you receive a real object back.
+    # If we spawn a new `pwsh` process, PowerShell formats the object to text and properties like
+    # `.deploymentStatus` no longer exist.
+    $DeployCode = & $deployFunctionCodeScript `
         -SubscriptionId $SubscriptionId `
         -ResourceGroupName $ResourceGroupName `
-        -FunctionAppName $functionAppName 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Deploy-FunctionCode.ps1 failed: $rawDeployCode"
+        -FunctionAppName $functionAppName
+
+    # Some scripts can emit multiple pipeline objects; prefer the last PSCustomObject if so.
+    if ($DeployCode -is [System.Array]) {
+        $DeployCode = @($DeployCode | Where-Object { $_ -is [psobject] } | Select-Object -Last 1)
+        if ($DeployCode -is [System.Array] -and $DeployCode.Count -gt 0) {
+            $DeployCode = $DeployCode[0]
+        }
     }
 
     if ($null -eq $DeployCode) {

@@ -21,6 +21,9 @@ param logAnalyticsWorkspaceName string = 'law-eg-governance-${uniqueString(resou
 @description('Retention (days) for the Log Analytics workspace.')
 param logAnalyticsRetentionInDays int = 30
 
+@description('Name of the Application Insights component (workspace-based) used by the Function App.')
+param applicationInsightsName string = 'appi-eg-governance-${uniqueString(resourceGroup().id)}'
+
 @description('Name of a user-assigned managed identity (in this resource group) used by the Function App (and used by deployment tooling for Graph bootstrap).')
 param bootstrapUserAssignedIdentityName string = ''
 
@@ -105,6 +108,19 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2025-07
     sku: {
       name: 'PerGB2018'
     }
+  }
+}
+
+// Workspace-based Application Insights (data ingests into the Log Analytics workspace above).
+resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: applicationInsightsName
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    Flow_Type: 'Bluefield'
+    Request_Source: 'rest'
+    WorkspaceResourceId: logAnalyticsWorkspace.id
   }
 }
 
@@ -193,6 +209,19 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
         {
           name: 'FUNCTIONS_WORKER_RUNTIME'
           value: 'powershell'
+        }
+        // Application Insights
+        {
+          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+          value: applicationInsights.properties.ConnectionString
+        }
+        {
+          name: 'APPINSIGHTS_INSTRUMENTATIONKEY'
+          value: applicationInsights.properties.InstrumentationKey
+        }
+        {
+          name: 'ApplicationInsightsAgent_EXTENSION_VERSION'
+          value: '~3'
         }
         {
           name: 'DEDUPE_ENABLED'
@@ -348,8 +377,17 @@ resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02
     : {}
 }
 
-resource partnerTopic 'Microsoft.EventGrid/partnerTopics@2025-02-15' existing = if (shouldCreatePartnerTopicSubscription) {
+// Attach the same UAMI used by the Function App to the partner topic so Event Grid can
+// use it for delivery/dead-lettering scenarios that support resource identity.
+resource partnerTopic 'Microsoft.EventGrid/partnerTopics@2025-02-15' = if (shouldCreatePartnerTopicSubscription) {
   name: partnerTopicName
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${bootstrapIdentityResourceId}': {}
+    }
+  }
 }
 
 resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventSubscriptions@2025-02-15' = if (shouldCreatePartnerTopicSubscription) {
@@ -366,11 +404,19 @@ resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventS
       }
     }
     eventDeliverySchema: 'CloudEventSchemaV1_0'
-    deadLetterDestination: {
-      endpointType: 'StorageBlob'
-      properties: {
-        resourceId: deadLetterStorage.id
-        blobContainerName: deadLetterContainerName
+    // Dead-letter using the parent resource identity (partner topic) so we don't rely on
+    // Event Grid's built-in identity. This uses the UAMI attached above.
+    deadLetterWithResourceIdentity: {
+      deadLetterDestination: {
+        endpointType: 'StorageBlob'
+        properties: {
+          resourceId: deadLetterStorage.id
+          blobContainerName: deadLetterContainerName
+        }
+      }
+      identity: {
+        type: 'UserAssigned'
+        userAssignedIdentity: bootstrapIdentityResourceId
       }
     }
   }
