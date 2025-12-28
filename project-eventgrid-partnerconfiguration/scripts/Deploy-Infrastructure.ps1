@@ -171,6 +171,86 @@ function Get-EffectivePartnerTopicName {
     return "pt-graph-$suffix"
 }
 
+function Test-PartnerTopicExists {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PartnerTopicName,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ApiVersion = '2025-02-15'
+    )
+
+    $url = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName`?api-version=$ApiVersion"
+    $raw = & az rest --method GET --url $url --only-show-errors 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        return $true
+    }
+
+    # If it's a 404 / NotFound, treat as non-existent; otherwise surface the error.
+    $text = [string]$raw
+    if ($text -match 'NotFound' -or $text -match '404') {
+        return $false
+    }
+
+    throw "Failed checking partner topic existence for '$PartnerTopicName'. Details: $text"
+}
+
+function Get-AvailablePartnerTopicName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$PartnerTopicName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupName
+    )
+
+    # If the caller explicitly provided a name, respect it.
+    if (-not [string]::IsNullOrWhiteSpace($PartnerTopicName)) {
+        return $PartnerTopicName
+    }
+
+    $baseName = Get-EffectivePartnerTopicName -PartnerTopicName $null -ResourceGroupId $ResourceGroupId
+
+    # Microsoft Graph bootstrap can fail if a partner topic with the same name already exists.
+    # In that case, pick a unique name (without deleting anything automatically).
+    if (-not (Test-PartnerTopicExists -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -PartnerTopicName $baseName)) {
+        return $baseName
+    }
+
+    for ($i = 1; $i -le 5; $i++) {
+        $suffix = ([Guid]::NewGuid().ToString('N')).Substring(0, 8)
+        $candidate = "$baseName-$suffix"
+        if (-not (Test-PartnerTopicExists -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -PartnerTopicName $candidate)) {
+            Write-Log -Level Warning -Message "Partner topic '$baseName' already exists; using '$candidate' for this run."
+            return $candidate
+        }
+    }
+
+    throw "Unable to find an available partner topic name based on '$baseName' after multiple attempts. Consider supplying -PartnerTopicName explicitly."
+}
+
 function Wait-PartnerTopic {
     [CmdletBinding()]
     param(
@@ -209,6 +289,41 @@ function Wait-PartnerTopic {
     }
 
     throw "Partner topic did not become visible within ${TimeoutSeconds}s: $url"
+}
+
+function Get-PartnerTopicSource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PartnerTopicName,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ApiVersion = '2025-02-15'
+    )
+
+    $url = "https://management.azure.com/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.EventGrid/partnerTopics/$PartnerTopicName`?api-version=$ApiVersion"
+    $pt = Invoke-AzJson -AzParameters @('rest', '--method', 'GET', '--url', $url, '--only-show-errors')
+
+    $source = $null
+    if ($null -ne $pt -and $null -ne $pt.properties) {
+        $source = $pt.properties.source
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string]$source)) {
+        throw "Partner topic '$PartnerTopicName' has no properties.source; cannot safely update partner topic identity."
+    }
+
+    return [string]$source
 }
 
 function Wait-FunctionResource {
@@ -685,7 +800,7 @@ if (-not $SkipGraphBootstrap.IsPresent) {
     Wait-FunctionResource -FunctionResourceId $functionResourceId
 
     $rg = Invoke-AzJson -AzParameters @('group', 'show', '--name', $ResourceGroupName, '--only-show-errors', '-o', 'json')
-    $effectivePartnerTopicName = Get-EffectivePartnerTopicName -PartnerTopicName $PartnerTopicName -ResourceGroupId $rg.id
+    $effectivePartnerTopicName = Get-AvailablePartnerTopicName -PartnerTopicName $PartnerTopicName -ResourceGroupId $rg.id -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName
     $partnerTopicNameOut = $effectivePartnerTopicName
 
     Write-Log -Level Information -Message "Bootstrapping Graph -> Event Grid using partner topic '$effectivePartnerTopicName'"
@@ -720,6 +835,9 @@ if (-not $SkipGraphBootstrap.IsPresent) {
     Write-Log -Level Information -Message "Waiting for partner topic resource to appear: $effectivePartnerTopicName"
     Wait-PartnerTopic -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -PartnerTopicName $effectivePartnerTopicName
 
+    Write-Log -Level Information -Message "Reading partner topic source (required for safe update): $effectivePartnerTopicName"
+    $partnerTopicSource = Get-PartnerTopicSource -SubscriptionId $SubscriptionId -ResourceGroupName $ResourceGroupName -PartnerTopicName $effectivePartnerTopicName
+
     $activateScript = (Join-Path -Path $PSScriptRoot -ChildPath './Activate-EventGridPartnerTopic.ps1')
     if (-not (Test-Path -Path $activateScript -PathType Leaf)) {
         throw "Bootstrap script not found: $activateScript"
@@ -744,14 +862,19 @@ if (-not $SkipGraphBootstrap.IsPresent) {
     $deploymentNameLink = "${deploymentName}-link"
     Write-Log -Level Information -Message "Creating partner topic -> Function link via Bicep deployment: $deploymentNameLink"
 
+    $linkTemplateFile = (Join-Path -Path $PSScriptRoot -ChildPath '../infra/link.bicep')
+    if (-not (Test-Path -Path $linkTemplateFile -PathType Leaf)) {
+        throw "Link Bicep template not found: $linkTemplateFile"
+    }
+
     $deploymentAzParametersLink = @(
         'deployment', 'group', 'create',
         '--name', $deploymentNameLink,
         '--resource-group', $ResourceGroupName,
-        '--template-file', $templateFile,
-        '--parameters', $ParametersFile,
+        '--template-file', $linkTemplateFile,
         '--parameters', "bootstrapUserAssignedIdentityName=$uamiName",
         '--parameters', "partnerTopicName=$effectivePartnerTopicName",
+        '--parameters', "partnerTopicSource=$partnerTopicSource",
         '--parameters', "partnerTopicEventSubscriptionName=$PartnerTopicEventSubscriptionName",
         '--parameters', "functionResourceId=$functionResourceId",
         '--only-show-errors',

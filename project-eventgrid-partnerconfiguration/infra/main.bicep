@@ -27,15 +27,6 @@ param applicationInsightsName string = 'appi-eg-governance-${uniqueString(resour
 @description('Name of a user-assigned managed identity (in this resource group) used by the Function App (and used by deployment tooling for Graph bootstrap).')
 param bootstrapUserAssignedIdentityName string = ''
 
-@description('Partner topic name used by Microsoft Graph. When provided, the template can create/update the partner topic event subscription to the Function.')
-param partnerTopicName string = ''
-
-@description('Event subscription name for the partner topic -> Function link (only used when partnerTopicName is set).')
-param partnerTopicEventSubscriptionName string = 'to-governance-function'
-
-@description('ResourceId of the Azure Function to invoke. If empty, uses the function deployed by this template (only used when partnerTopicName is set).')
-param functionResourceId string = ''
-
 var bootstrapIdentityResourceId = !empty(bootstrapUserAssignedIdentityName)
   ? resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', bootstrapUserAssignedIdentityName)
   : ''
@@ -56,12 +47,6 @@ param appServicePlanName string = 'plan-eg-governance-${uniqueString(resourceGro
 
 @description('Name of the Storage Account used by the Function App. Must be globally unique and 3-24 lowercase alphanumeric.')
 param storageAccountName string = toLower('st${uniqueString(resourceGroup().id)}')
-
-@description('Name of the Storage Account used for Event Grid dead-lettering. Must be globally unique and 3-24 lowercase alphanumeric.')
-param deadLetterStorageAccountName string = toLower('dls${uniqueString(resourceGroup().id)}')
-
-@description('Blob container name used for Event Grid dead-letter delivery.')
-param deadLetterContainerName string = 'eventgrid-deadletter'
 
 @description('Name of the Azure Function within the Function App that Event Grid should invoke.')
 param functionName string = 'GovernanceEventHandler'
@@ -354,9 +339,6 @@ resource functionAppStorageBlobDataContributor 'Microsoft.Authorization/roleAssi
 }
 
 var functionResourceIdOut = '${functionApp.id}/functions/${functionName}'
-var effectiveFunctionResourceId = !empty(functionResourceId) ? functionResourceId : functionResourceIdOut
-
-var shouldCreatePartnerTopicSubscription = !empty(partnerTopicName) && !empty(effectiveFunctionResourceId)
 
 resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02-15' = {
   name: partnerConfigurationName
@@ -377,95 +359,9 @@ resource partnerConfiguration 'Microsoft.EventGrid/partnerConfigurations@2025-02
     : {}
 }
 
-// Attach the same UAMI used by the Function App to the partner topic so Event Grid can
-// use it for delivery/dead-lettering scenarios that support resource identity.
-resource partnerTopic 'Microsoft.EventGrid/partnerTopics@2025-02-15' = if (shouldCreatePartnerTopicSubscription) {
-  name: partnerTopicName
-  location: location
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${bootstrapIdentityResourceId}': {}
-    }
-  }
-}
-
-resource partnerTopicEventSubscription 'Microsoft.EventGrid/partnerTopics/eventSubscriptions@2025-02-15' = if (shouldCreatePartnerTopicSubscription) {
-  name: partnerTopicEventSubscriptionName
-  parent: partnerTopic
-  dependsOn: [
-    deadLetterContainer
-  ]
-  properties: {
-    destination: {
-      endpointType: 'AzureFunction'
-      properties: {
-        resourceId: effectiveFunctionResourceId
-      }
-    }
-    eventDeliverySchema: 'CloudEventSchemaV1_0'
-    // Dead-letter using the parent resource identity (partner topic) so we don't rely on
-    // Event Grid's built-in identity. This uses the UAMI attached above.
-    deadLetterWithResourceIdentity: {
-      deadLetterDestination: {
-        endpointType: 'StorageBlob'
-        properties: {
-          resourceId: deadLetterStorage.id
-          blobContainerName: deadLetterContainerName
-        }
-      }
-      identity: {
-        type: 'UserAssigned'
-        userAssignedIdentity: bootstrapIdentityResourceId
-      }
-    }
-  }
-}
-
-resource deadLetterStorage 'Microsoft.Storage/storageAccounts@2025-06-01' = if (shouldCreatePartnerTopicSubscription) {
-  name: deadLetterStorageAccountName
-  location: location
-  kind: 'StorageV2'
-  sku: {
-    name: 'Standard_LRS'
-  }
-  properties: {
-    supportsHttpsTrafficOnly: true
-    minimumTlsVersion: 'TLS1_2'
-    allowBlobPublicAccess: false
-  }
-}
-
-resource deadLetterBlobService 'Microsoft.Storage/storageAccounts/blobServices@2025-06-01' = if (shouldCreatePartnerTopicSubscription) {
-  name: 'default'
-  parent: deadLetterStorage
-}
-
-resource deadLetterContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01' = if (shouldCreatePartnerTopicSubscription) {
-  name: deadLetterContainerName
-  parent: deadLetterBlobService
-  properties: {
-    publicAccess: 'None'
-  }
-}
-
-resource deadLetterStorageBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (shouldCreatePartnerTopicSubscription) {
-  name: guid(deadLetterStorage.id, bootstrapIdentityResourceId, storageBlobDataContributorRoleDefinitionId)
-  scope: deadLetterStorage
-  properties: {
-    roleDefinitionId: storageBlobDataContributorRoleDefinitionId
-    principalId: bootstrapIdentityPrincipalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
 output partnerConfigurationId string = partnerConfiguration.id
 output functionAppId string = functionApp.id
 output functionResourceIdOut string = functionResourceIdOut
-
-output partnerTopicEventSubscriptionId string = shouldCreatePartnerTopicSubscription
-  ? partnerTopicEventSubscription.id
-  : ''
 
 output bootstrapIdentityName string = bootstrapUserAssignedIdentityName
 output bootstrapIdentityClientId string = bootstrapIdentityClientId
