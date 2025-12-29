@@ -173,7 +173,7 @@ try {
                 [string]$UserId
             )
 
-            $uri = "https://graph.microsoft.com/v1.0/users/$UserId?`$select=id,userPrincipalName,userType,createdDateTime,accountEnabled"
+            $uri = "https://graph.microsoft.com/v1.0/users/${UserId}?`$select=id,userPrincipalName,userType,createdDateTime,accountEnabled"
             return (Invoke-GraphRequest -Method 'GET' -Uri $uri)
         }
 
@@ -295,41 +295,46 @@ try {
             $null = Invoke-GraphRequest -Method 'POST' -Uri $uri -Body $body
         }
 
-        $configuredGroupIds = @()
-
-        function Add-GroupIdsFromValue {
+        function ConvertTo-StringList {
+            [CmdletBinding()]
             param(
                 [Parameter(Mandatory = $false)]
                 [AllowNull()]
                 [object]$Value
             )
 
+            $items = @()
+
             if ($null -eq $Value) {
-                return
+                return $items
             }
 
             if ($Value -is [string]) {
                 if (-not [string]::IsNullOrWhiteSpace($Value)) {
-                    $configuredGroupIds += $Value
+                    $items += $Value
                 }
-                return
+                return $items
             }
 
             if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
                 foreach ($v in $Value) {
                     if ($v -is [string] -and -not [string]::IsNullOrWhiteSpace($v)) {
-                        $configuredGroupIds += $v
+                        $items += $v
                     }
                 }
-                return
+                return $items
             }
+
+            return $items
         }
+
+        $configuredGroupIds = @()
 
         # Support both:
         # - birthrights.assignments[*].addToGroups
         # - birthrights.addToGroups
         if ($null -ne $policy.birthrights -and $null -ne $policy.birthrights.PSObject.Properties['addToGroups']) {
-            Add-GroupIdsFromValue -Value $policy.birthrights.addToGroups
+            $configuredGroupIds += ConvertTo-StringList -Value $policy.birthrights.addToGroups
         }
 
         foreach ($assignment in $assignments) {
@@ -338,7 +343,7 @@ try {
             if ($assignment -is [System.Collections.IDictionary]) {
                 foreach ($k in @('addToGroups', 'groupIds', 'groups')) {
                     if ($assignment.Contains($k)) {
-                        Add-GroupIdsFromValue -Value $assignment[$k]
+                        $configuredGroupIds += ConvertTo-StringList -Value $assignment[$k]
                         break
                     }
                 }
@@ -346,15 +351,15 @@ try {
             }
 
             if ($null -ne $assignment.PSObject.Properties['addToGroups']) {
-                Add-GroupIdsFromValue -Value $assignment.addToGroups
+                $configuredGroupIds += ConvertTo-StringList -Value $assignment.addToGroups
                 continue
             }
             if ($null -ne $assignment.PSObject.Properties['groupIds']) {
-                Add-GroupIdsFromValue -Value $assignment.groupIds
+                $configuredGroupIds += ConvertTo-StringList -Value $assignment.groupIds
                 continue
             }
             if ($null -ne $assignment.PSObject.Properties['groups']) {
-                Add-GroupIdsFromValue -Value $assignment.groups
+                $configuredGroupIds += ConvertTo-StringList -Value $assignment.groups
                 continue
             }
         }
@@ -365,11 +370,57 @@ try {
             Select-Object -Unique
         )
 
+        $birthrightsTopLevelGroups = $null
+        $birthrightsTopLevelGroupsType = ''
+        $birthrightsTopLevelGroupsCount = 0
+        if ($null -ne $policy.birthrights -and $null -ne $policy.birthrights.PSObject.Properties['addToGroups']) {
+            $birthrightsTopLevelGroups = $policy.birthrights.addToGroups
+            $birthrightsTopLevelGroupsType = if ($null -eq $birthrightsTopLevelGroups) { '<null>' } else { $birthrightsTopLevelGroups.GetType().FullName }
+            if ($birthrightsTopLevelGroups -is [System.Collections.IEnumerable] -and -not ($birthrightsTopLevelGroups -is [string])) {
+                $birthrightsTopLevelGroupsCount = @($birthrightsTopLevelGroups).Count
+            }
+            elseif ($birthrightsTopLevelGroups -is [string]) {
+                $birthrightsTopLevelGroupsCount = 1
+            }
+        }
+
+        $firstAssignmentGroups = $null
+        $firstAssignmentGroupsType = ''
+        $firstAssignmentGroupsCount = 0
+        if ($assignments.Count -gt 0 -and $null -ne $assignments[0]) {
+            $a0 = $assignments[0]
+            if ($a0 -is [System.Collections.IDictionary]) {
+                if ($a0.Contains('addToGroups')) {
+                    $firstAssignmentGroups = $a0['addToGroups']
+                }
+            }
+            else {
+                if ($null -ne $a0.PSObject.Properties['addToGroups']) {
+                    $firstAssignmentGroups = $a0.addToGroups
+                }
+            }
+
+            $firstAssignmentGroupsType = if ($null -eq $firstAssignmentGroups) { '<null>' } else { $firstAssignmentGroups.GetType().FullName }
+            if ($firstAssignmentGroups -is [System.Collections.IEnumerable] -and -not ($firstAssignmentGroups -is [string])) {
+                $firstAssignmentGroupsCount = @($firstAssignmentGroups).Count
+            }
+            elseif ($firstAssignmentGroups -is [string]) {
+                $firstAssignmentGroupsCount = 1
+            }
+        }
+
         Write-Information -MessageData ([pscustomobject]@{
-                message            = 'Birthrights policy present'
-                mode               = if ($null -ne $policy.birthrights.PSObject.Properties['mode']) { $policy.birthrights.mode } else { '' }
-                assignmentCount    = $assignments.Count
-                configuredGroupIds = $configuredGroupIds
+                message                        = 'Birthrights policy present'
+                policyPath                     = $policyPath
+                mode                           = if ($null -ne $policy.birthrights.PSObject.Properties['mode']) { $policy.birthrights.mode } else { '' }
+                assignmentCount                = $assignments.Count
+                configuredGroupIds             = $configuredGroupIds
+                configuredGroupIdsCount        = $configuredGroupIds.Count
+                configuredGroupIdsJoined       = ($configuredGroupIds -join ',')
+                birthrightsTopLevelGroupsType  = $birthrightsTopLevelGroupsType
+                birthrightsTopLevelGroupsCount = $birthrightsTopLevelGroupsCount
+                firstAssignmentGroupsType      = $firstAssignmentGroupsType
+                firstAssignmentGroupsCount     = $firstAssignmentGroupsCount
             })
 
         $birthrightsMode = if ($null -ne $policy.birthrights -and ($policy.birthrights.PSObject.Properties.Name -contains 'mode')) { [string]$policy.birthrights.mode } else { 'detect' }
@@ -383,7 +434,12 @@ try {
 
         if ($configuredGroupIds.Count -eq 0) {
             Write-Information -MessageData ([pscustomobject]@{
-                    message = 'Birthrights remediate enabled but no groups configured; skipping'
+                    message                        = 'Birthrights remediate enabled but no groups configured; skipping'
+                    policyPath                     = $policyPath
+                    birthrightsTopLevelGroupsType  = $birthrightsTopLevelGroupsType
+                    birthrightsTopLevelGroupsCount = $birthrightsTopLevelGroupsCount
+                    firstAssignmentGroupsType      = $firstAssignmentGroupsType
+                    firstAssignmentGroupsCount     = $firstAssignmentGroupsCount
                 })
             return
         }
@@ -401,11 +457,12 @@ try {
             $user = Get-GraphUserById -UserId $userId
         }
         catch {
-            Write-Error -MessageData ([pscustomobject]@{
-                    message = 'Failed to load user from Microsoft Graph'
-                    userId  = $userId
-                    error   = $_.Exception.Message
-                })
+            $errObj = [pscustomobject]@{
+                message = 'Failed to load user from Microsoft Graph'
+                userId  = $userId
+                error   = $_.Exception.Message
+            }
+            Write-Error -Message ($errObj | ConvertTo-Json -Depth 8 -Compress) -ErrorAction Continue
             throw
         }
 
@@ -435,37 +492,8 @@ try {
         # Apply group birthrights only for assignments that match the user.
         $effectiveGroupIds = @()
 
-        function Add-EffectiveGroupIdsFromValue {
-            [CmdletBinding()]
-            param(
-                [Parameter(Mandatory = $false)]
-                [AllowNull()]
-                [object]$Value
-            )
-
-            if ($null -eq $Value) {
-                return
-            }
-
-            if ($Value -is [string]) {
-                if (-not [string]::IsNullOrWhiteSpace($Value)) {
-                    $effectiveGroupIds += $Value
-                }
-                return
-            }
-
-            if (($Value -is [System.Collections.IEnumerable]) -and -not ($Value -is [string])) {
-                foreach ($v in $Value) {
-                    if ($v -is [string] -and -not [string]::IsNullOrWhiteSpace($v)) {
-                        $effectiveGroupIds += $v
-                    }
-                }
-                return
-            }
-        }
-
         if ($null -ne $policy.birthrights -and $null -ne $policy.birthrights.PSObject.Properties['addToGroups']) {
-            Add-EffectiveGroupIdsFromValue -Value $policy.birthrights.addToGroups
+            $effectiveGroupIds += ConvertTo-StringList -Value $policy.birthrights.addToGroups
         }
 
         foreach ($assignment in $assignments) {
@@ -476,7 +504,7 @@ try {
             if ($assignment -is [System.Collections.IDictionary]) {
                 foreach ($k in @('addToGroups', 'groupIds', 'groups')) {
                     if ($assignment.Contains($k)) {
-                        Add-EffectiveGroupIdsFromValue -Value $assignment[$k]
+                        $effectiveGroupIds += ConvertTo-StringList -Value $assignment[$k]
                         break
                     }
                 }
@@ -485,7 +513,7 @@ try {
                 foreach ($k in @('addToGroups', 'groupIds', 'groups')) {
                     $v = Get-OptionalPropertyValue -Object $assignment -Name $k
                     if ($null -ne $v) {
-                        Add-EffectiveGroupIdsFromValue -Value $v
+                        $effectiveGroupIds += ConvertTo-StringList -Value $v
                         break
                     }
                 }
@@ -516,19 +544,69 @@ try {
             throw 'DEDUPE_STORAGE_ACCOUNT_NAME must be set when DEDUPE_ENABLED=true.'
         }
 
+        # Optional: logical expiry for the marker so a future missing-membership remediation can re-run.
+        # Note: Azure Table Storage doesn't support native TTL, so this is enforced by checking DedupedAtUtc.
+        $markerTtlHours = 0
+        if (-not [string]::IsNullOrWhiteSpace($env:BIRTHRIGHT_MARKER_TTL_HOURS)) {
+            $parsed = 0
+            if ([int]::TryParse([string]$env:BIRTHRIGHT_MARKER_TTL_HOURS, [ref]$parsed) -and $parsed -ge 0 -and $parsed -le 8760) {
+                $markerTtlHours = $parsed
+            }
+        }
+
         foreach ($groupId in $effectiveGroupIds) {
             try {
                 if ($markerEnabled) {
                     $markerKey = "birthright|group:$groupId|user:$userId"
                     try {
-                        if (Test-DedupeExists -DedupeKey $markerKey -StorageAccountName $markerStorageAccountName -EndpointSuffix $env:DEDUPE_ENDPOINT_SUFFIX -TableEndpoint $env:DEDUPE_TABLE_ENDPOINT -TableName $markerTableName) {
+                        $entity = Get-DedupeEntity -DedupeKey $markerKey -StorageAccountName $markerStorageAccountName -EndpointSuffix $env:DEDUPE_ENDPOINT_SUFFIX -TableEndpoint $env:DEDUPE_TABLE_ENDPOINT -TableName $markerTableName
+                        if ($null -ne $entity) {
+                            $isFresh = $true
+                            if ($markerTtlHours -gt 0) {
+                                $dedupedAtUtc = $null
+                                try {
+                                    $raw = [string]($entity.PSObject.Properties['DedupedAtUtc'].Value)
+                                    if (-not [string]::IsNullOrWhiteSpace($raw)) {
+                                        $dedupedAtUtc = ([DateTime]::Parse(
+                                                $raw,
+                                                [System.Globalization.CultureInfo]::InvariantCulture,
+                                                [System.Globalization.DateTimeStyles]::RoundtripKind
+                                            )).ToUniversalTime()
+                                    }
+                                }
+                                catch {
+                                    $dedupedAtUtc = $null
+                                }
+
+                                if ($null -eq $dedupedAtUtc) {
+                                    $isFresh = $false
+                                }
+                                else {
+                                    $ageHours = ((Get-Date).ToUniversalTime() - $dedupedAtUtc).TotalHours
+                                    if ($ageHours -gt $markerTtlHours) {
+                                        $isFresh = $false
+                                    }
+                                }
+                            }
+
+                            if ($isFresh) {
+                                Write-Information -MessageData ([pscustomobject]@{
+                                        message        = 'Birthright marker exists; skipping group processing'
+                                        userId         = $userId
+                                        groupId        = $groupId
+                                        markerKey      = $markerKey
+                                        markerTtlHours = $markerTtlHours
+                                    })
+                                continue
+                            }
+
                             Write-Information -MessageData ([pscustomobject]@{
-                                    message   = 'Birthright marker exists; skipping group processing'
-                                    userId    = $userId
-                                    groupId   = $groupId
-                                    markerKey = $markerKey
+                                    message        = 'Birthright marker expired; continuing'
+                                    userId         = $userId
+                                    groupId        = $groupId
+                                    markerKey      = $markerKey
+                                    markerTtlHours = $markerTtlHours
                                 })
-                            continue
                         }
                     }
                     catch {
@@ -589,12 +667,13 @@ try {
                 }
             }
             catch {
-                Write-Error -MessageData ([pscustomobject]@{
-                        message = 'Failed to add user to birthright group'
-                        userId  = $userId
-                        groupId = $groupId
-                        error   = $_.Exception.Message
-                    })
+                $errObj = [pscustomobject]@{
+                    message = 'Failed to add user to birthright group'
+                    userId  = $userId
+                    groupId = $groupId
+                    error   = $_.Exception.Message
+                }
+                Write-Error -Message ($errObj | ConvertTo-Json -Depth 8 -Compress) -ErrorAction Continue
                 throw
             }
         }
@@ -604,9 +683,10 @@ try {
     }
 }
 catch {
-    Write-Error -MessageData ([pscustomobject]@{
-            message = 'Error processing governance work item'
-            error   = $_.Exception.Message
-        })
+    $errObj = [pscustomobject]@{
+        message = 'Error processing governance work item'
+        error   = $_.Exception.Message
+    }
+    Write-Error -Message ($errObj | ConvertTo-Json -Depth 8 -Compress) -ErrorAction Continue
     throw
 }

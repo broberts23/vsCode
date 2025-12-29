@@ -528,6 +528,70 @@ function Test-DedupeExists {
     return $true
 }
 
+function Get-DedupeEntity {
+    <#
+    .SYNOPSIS
+    Gets an existing dedupe entity from Azure Table Storage.
+
+    .DESCRIPTION
+    Uses the same SHA-256 hashing strategy as `Test-AndSetDedupe` to derive PartitionKey/RowKey, then performs
+    a GET against the Table entity.
+
+    Returns the entity object when present and `$null` when not found.
+    This enables TTL-style logic by inspecting properties like `DedupedAtUtc`.
+
+    .PARAMETER DedupeKey
+    Stable dedupe key string.
+
+    .PARAMETER StorageAccountName
+    The Storage Account name hosting the table.
+
+    .PARAMETER TableName
+    The table name.
+
+    .OUTPUTS
+    System.Object
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$DedupeKey,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory = $false)]
+        [string]$EndpointSuffix,
+
+        [Parameter(Mandatory = $false)]
+        [string]$TableEndpoint,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$TableName
+    )
+
+    $hash = ConvertTo-Sha256Hex -Value $DedupeKey
+    $partitionKey = $hash.Substring(0, 2)
+    $rowKey = $hash
+
+    # Escape single quotes for OData key syntax.
+    $pk = $partitionKey.Replace("'", "''")
+    $rk = $rowKey.Replace("'", "''")
+
+    $path = "$TableName(PartitionKey='$pk',RowKey='$rk')"
+    $result = Invoke-AzureStorageTableRequest -Method 'GET' -Path $path -StorageAccountName $StorageAccountName -EndpointSuffix $EndpointSuffix -TableEndpoint $TableEndpoint -AllowStatusCodes @(404)
+
+    if ($null -ne $result -and $result.PSObject.Properties.Name -contains 'StatusCode' -and $result.StatusCode -eq 404) {
+        return $null
+    }
+
+    return $result
+}
+
 function New-GovernanceWorkItem {
     <#
     .SYNOPSIS
@@ -1002,6 +1066,7 @@ Export-ModuleMember -Function @(
     'Get-DedupeKey',
     'Test-AndSetDedupe',
     'Test-DedupeExists',
+    'Get-DedupeEntity',
     'Get-ManagedIdentityAccessToken',
     'New-GovernanceWorkItem',
     'Get-GraphNotificationItems',

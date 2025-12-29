@@ -39,8 +39,13 @@ param(
     [switch]$SkipGraphBootstrap,
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('User.Read.All', 'Directory.Read.All')]
-    [string[]]$BootstrapGraphAppRoles = @('User.Read.All')
+    [ValidateSet(
+        'User.ReadWrite.All',
+        'Directory.Read.All',
+        'GroupMember.ReadWrite.All',
+        'Group.ReadWrite.All'
+    )]
+    [string[]]$BootstrapGraphAppRoles = @('User.ReadWrite.All')
 )
 
 $ErrorActionPreference = 'Stop'
