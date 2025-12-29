@@ -3,14 +3,14 @@
   "mode": "detect",
   "birthrights": {
     "enabled": true,
-    "mode": "detect",
+    "mode": "remediate",
     "assignments": [
       {
         "name": "Default-Birthright",
         "when": {
           "userType": "Member"
         },
-        "addToGroups": []
+        "addToGroups": ["928bd0ce-8abc-43dd-94a0-d350fe49e991"]
       }
     ]
   },
@@ -36,10 +36,7 @@
       },
       "action": {
         "type": "remediate",
-        "steps": [
-          "RevokeSessions",
-          "RemoveFromHighRiskGroups"
-        ]
+        "steps": ["RevokeSessions", "RemoveFromHighRiskGroups"]
       }
     }
   ]

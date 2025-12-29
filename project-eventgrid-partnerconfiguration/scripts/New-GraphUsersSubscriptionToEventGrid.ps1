@@ -35,8 +35,8 @@ param(
     [string]$Resource = 'users',
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('updated', 'updated,deleted,created')]
-    [string]$ChangeType = 'updated,deleted,created',
+    [ValidateSet('updated', 'updated,deleted')]
+    [string]$ChangeType = 'updated,deleted',
 
     [Parameter(Mandatory = $false)]
     [ValidateRange(45, 41760)]
@@ -235,6 +235,7 @@ Write-Information -MessageData (
         graphEndpoint       = $GraphEndpoint
         resource            = $Resource
         changeType          = $ChangeType
+        note                = "For 'users' subscriptions, Graph delivers user creation as 'updated' notifications (changeType 'created' isn't supported for users)."
         expirationDateTime  = $expirationDateTime
         partnerTopic        = $PartnerTopicName
         resourceGroup       = $ResourceGroupName

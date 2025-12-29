@@ -464,6 +464,70 @@ function Test-AndSetDedupe {
     return $false
 }
 
+function Test-DedupeExists {
+    <#
+    .SYNOPSIS
+    Checks whether a dedupe key already exists in Azure Table Storage.
+
+    .DESCRIPTION
+    Uses the same SHA-256 hashing strategy as `Test-AndSetDedupe` to derive PartitionKey/RowKey, then performs
+    a GET against the Table entity. Returns `$true` when the entity exists and `$false` when it does not.
+
+    This is useful when you need a read-only existence check (for example, to skip work) without creating the
+    dedupe record ahead of a potentially failing operation.
+
+    .PARAMETER DedupeKey
+    Stable dedupe key string.
+
+    .PARAMETER StorageAccountName
+    The Storage Account name hosting the table.
+
+    .PARAMETER TableName
+    The table name.
+
+    .OUTPUTS
+    System.Boolean
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$DedupeKey,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory = $false)]
+        [string]$EndpointSuffix,
+
+        [Parameter(Mandatory = $false)]
+        [string]$TableEndpoint,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$TableName
+    )
+
+    $hash = ConvertTo-Sha256Hex -Value $DedupeKey
+    $partitionKey = $hash.Substring(0, 2)
+    $rowKey = $hash
+
+    # Escape single quotes for OData key syntax.
+    $pk = $partitionKey.Replace("'", "''")
+    $rk = $rowKey.Replace("'", "''")
+
+    $path = "$TableName(PartitionKey='$pk',RowKey='$rk')"
+    $result = Invoke-AzureStorageTableRequest -Method 'GET' -Path $path -StorageAccountName $StorageAccountName -EndpointSuffix $EndpointSuffix -TableEndpoint $TableEndpoint -AllowStatusCodes @(404)
+
+    if ($null -ne $result -and $result.PSObject.Properties.Name -contains 'StatusCode' -and $result.StatusCode -eq 404) {
+        return $false
+    }
+
+    return $true
+}
+
 function New-GovernanceWorkItem {
     <#
     .SYNOPSIS
@@ -937,10 +1001,12 @@ Export-ModuleMember -Function @(
     'Get-Policy',
     'Get-DedupeKey',
     'Test-AndSetDedupe',
+    'Test-DedupeExists',
     'Get-ManagedIdentityAccessToken',
     'New-GovernanceWorkItem',
     'Get-GraphNotificationItems',
     'Test-IsGraphLifecycleEvent',
+    'Invoke-GraphRequest',
     'Invoke-GraphSubscriptionReauthorize',
     'Set-GraphSubscriptionExpiration'
 )
