@@ -2,6 +2,21 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Get-FunctionAppRootPath {
+    <#
+    .SYNOPSIS
+    Returns the absolute path to the Function App root directory.
+
+    .DESCRIPTION
+    The module lives under `<FunctionAppRoot>/Modules/GovernanceAutomation`. This helper walks up two directories
+    from `$PSScriptRoot` to find the Function App root. It is used to resolve relative paths like `policy/policy.json`.
+
+    .OUTPUTS
+    System.String
+
+    .EXAMPLE
+    Get-FunctionAppRootPath
+    #>
+
     [CmdletBinding()]
     param()
 
@@ -10,6 +25,24 @@ function Get-FunctionAppRootPath {
 }
 
 function Resolve-GovernancePath {
+    <#
+    .SYNOPSIS
+    Resolves a relative governance path to an absolute file system path.
+
+    .DESCRIPTION
+    If the provided path is already rooted (absolute), it is returned unchanged.
+    Otherwise the path is treated as relative to the Function App root (see `Get-FunctionAppRootPath`).
+
+    .PARAMETER Path
+    The path to resolve. Can be absolute or relative.
+
+    .OUTPUTS
+    System.String
+
+    .EXAMPLE
+    Resolve-GovernancePath -Path 'policy/policy.json'
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -26,6 +59,24 @@ function Resolve-GovernancePath {
 }
 
 function Get-Policy {
+    <#
+    .SYNOPSIS
+    Loads and parses the governance policy JSON file.
+
+    .DESCRIPTION
+    Resolves the provided policy path (absolute or relative to the Function App root), validates the file exists,
+    then parses it as JSON.
+
+    .PARAMETER PolicyPath
+    Path to the policy JSON file. Supports absolute paths or paths relative to the Function App root.
+
+    .OUTPUTS
+    System.Object
+
+    .EXAMPLE
+    $policy = Get-Policy -PolicyPath 'policy/policy.json'
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -43,29 +94,48 @@ function Get-Policy {
 }
 
 function Get-DedupeKey {
+    <#
+    .SYNOPSIS
+    Builds a stable dedupe key for an Event Grid event.
+
+    .DESCRIPTION
+    Generates a string key that is stable across retries so the system can implement idempotency.
+    Understands both EventGridSchema (`eventType`, `eventTime`, `topic`) and CloudEvents 1.0 (`type`, `time`, `source`).
+
+    .PARAMETER Event
+    The Event Grid event object. If an array is provided, it must contain exactly one item.
+
+    .OUTPUTS
+    System.String
+
+    .EXAMPLE
+    $key = Get-DedupeKey -Event $EventGridEvent
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [object]$Event
+        [Alias('Event')]
+        [object]$InputEvent
     )
 
     # Defensive: the Event Grid trigger can hand us an array (batch). We expect a single event here.
-    if ($Event -is [System.Array]) {
-        if ($Event.Count -eq 1) {
-            $Event = $Event[0]
+    if ($InputEvent -is [System.Array]) {
+        if ($InputEvent.Count -eq 1) {
+            $InputEvent = $InputEvent[0]
         }
         else {
-            throw "Get-DedupeKey expects a single event object; received an array of $($Event.Count)."
+            throw "Get-DedupeKey expects a single event object; received an array of $($InputEvent.Count)."
         }
     }
 
     # Event Grid can deliver in either EventGridSchema or CloudEvents 1.0.
     # - EventGridSchema: eventType, eventTime, topic
     # - CloudEvents:     type, time, source
-    $id = if ($Event.PSObject.Properties.Name -contains 'id') { [string]$Event.id } else { '' }
-    $type = if ($Event.PSObject.Properties.Name -contains 'eventType') { [string]$Event.eventType } elseif ($Event.PSObject.Properties.Name -contains 'type') { [string]$Event.type } else { '' }
-    $subject = if ($Event.PSObject.Properties.Name -contains 'subject') { [string]$Event.subject } else { '' }
-    $time = if ($Event.PSObject.Properties.Name -contains 'eventTime') { [string]$Event.eventTime } elseif ($Event.PSObject.Properties.Name -contains 'time') { [string]$Event.time } else { '' }
+    $id = if ($InputEvent.PSObject.Properties.Name -contains 'id') { [string]$InputEvent.id } else { '' }
+    $type = if ($InputEvent.PSObject.Properties.Name -contains 'eventType') { [string]$InputEvent.eventType } elseif ($InputEvent.PSObject.Properties.Name -contains 'type') { [string]$InputEvent.type } else { '' }
+    $subject = if ($InputEvent.PSObject.Properties.Name -contains 'subject') { [string]$InputEvent.subject } else { '' }
+    $time = if ($InputEvent.PSObject.Properties.Name -contains 'eventTime') { [string]$InputEvent.eventTime } elseif ($InputEvent.PSObject.Properties.Name -contains 'time') { [string]$InputEvent.time } else { '' }
 
     if ([string]::IsNullOrWhiteSpace($id)) {
         $id = "$time-$subject-$type"
@@ -77,7 +147,7 @@ function Get-DedupeKey {
     # to avoid pathological collisions like "||--".
     $idLooksEmpty = ([string]::IsNullOrWhiteSpace($id) -or $id -eq '--' -or $id -eq '-')
     if ([string]::IsNullOrWhiteSpace($type) -and [string]::IsNullOrWhiteSpace($subject) -and $idLooksEmpty) {
-        $json = $Event | ConvertTo-Json -Depth 32 -Compress
+        $json = $InputEvent | ConvertTo-Json -Depth 32 -Compress
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
         $sha256 = [System.Security.Cryptography.SHA256]::Create()
         try {
@@ -94,6 +164,24 @@ function Get-DedupeKey {
 }
 
 function ConvertTo-Sha256Hex {
+    <#
+    .SYNOPSIS
+    Computes a SHA-256 hash of a string and returns it as lowercase hex.
+
+    .DESCRIPTION
+    Used to convert potentially-large keys into a fixed-length value (for example for Azure Table Storage
+    PartitionKey/RowKey components).
+
+    .PARAMETER Value
+    The input string to hash. Empty strings are allowed.
+
+    .OUTPUTS
+    System.String
+
+    .EXAMPLE
+    ConvertTo-Sha256Hex -Value 'type|subject|id'
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -112,6 +200,27 @@ function ConvertTo-Sha256Hex {
 }
 
 function Get-ManagedIdentityAccessToken {
+    <#
+    .SYNOPSIS
+    Gets an access token for a resource using the Function App's managed identity.
+
+    .DESCRIPTION
+    Uses the managed identity endpoint exposed by Azure Functions/App Service to request an OAuth 2.0 access token
+    for the specified resource.
+
+    Supports both the newer `IDENTITY_ENDPOINT`/`IDENTITY_HEADER` variables and the older `MSI_ENDPOINT`/`MSI_SECRET`.
+    If `MANAGED_IDENTITY_CLIENT_ID` is set, the request includes `client_id=...` to select a user-assigned identity.
+
+    .PARAMETER Resource
+    The resource/audience to request a token for.
+
+    .OUTPUTS
+    System.String
+
+    .EXAMPLE
+    $graphToken = Get-ManagedIdentityAccessToken
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $false)]
@@ -155,6 +264,27 @@ function Get-ManagedIdentityAccessToken {
 }
 
 function Get-AzureStorageTableContextFromEnvironment {
+    <#
+    .SYNOPSIS
+    Builds a lightweight Table Storage context object from environment/config values.
+
+    .DESCRIPTION
+    Returns an object containing the storage account name and the resolved Table endpoint URI.
+    This module uses REST calls authenticated with managed identity, so this context is just enough to build URIs.
+
+    .PARAMETER StorageAccountName
+    The Storage Account name.
+
+    .PARAMETER EndpointSuffix
+    Optional endpoint suffix (defaults to `core.windows.net`).
+
+    .PARAMETER TableEndpoint
+    Optional full Table endpoint URI.
+
+    .OUTPUTS
+    System.Object
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -185,6 +315,27 @@ function Get-AzureStorageTableContextFromEnvironment {
 }
 
 function Invoke-AzureStorageTableRequest {
+    <#
+    .SYNOPSIS
+    Invokes an authenticated Azure Table Storage REST request using managed identity.
+
+    .DESCRIPTION
+    Builds a REST request to the Table endpoint and authenticates using a managed identity access token
+    for the Storage resource (`https://storage.azure.com/`).
+
+    .PARAMETER Method
+    HTTP method to use. Supported values: GET, POST, PUT, MERGE, DELETE.
+
+    .PARAMETER Path
+    The Table REST path relative to the Table endpoint.
+
+    .PARAMETER AllowStatusCodes
+    Optional list of HTTP status codes that should be treated as handled.
+
+    .OUTPUTS
+    System.Object
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -252,6 +403,27 @@ function Invoke-AzureStorageTableRequest {
 }
 
 function Test-AndSetDedupe {
+    <#
+    .SYNOPSIS
+    Implements idempotency by recording a dedupe key in Azure Table Storage.
+
+    .DESCRIPTION
+    Hashes the provided dedupe key to build deterministic PartitionKey/RowKey values, then attempts to insert
+    an entity into the specified table. If the entity already exists, Azure Table Storage returns HTTP 409 Conflict.
+
+    .PARAMETER DedupeKey
+    Stable dedupe key string (for example from `Get-DedupeKey`).
+
+    .PARAMETER StorageAccountName
+    The Storage Account name hosting the table.
+
+    .PARAMETER TableName
+    The table name.
+
+    .OUTPUTS
+    System.Boolean
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -293,6 +465,27 @@ function Test-AndSetDedupe {
 }
 
 function New-GovernanceWorkItem {
+    <#
+    .SYNOPSIS
+    Creates a normalized work-item object from an Event Grid event.
+
+    .DESCRIPTION
+    Takes an Event Grid event and a policy path and returns a stable work-item object that downstream queue
+    workers can process.
+
+    Normalizes EventGridSchema and CloudEvents 1.0 fields (`eventType/type`, `eventTime/time`, `topic/source`).
+    Extracts key Microsoft Graph partner-event details from `data.*` when present and normalizes timestamps to ISO 8601 UTC.
+
+    .PARAMETER EventGridEvent
+    The Event Grid event object. If an array is provided, it must contain exactly one item.
+
+    .PARAMETER PolicyPath
+    Path to the policy JSON.
+
+    .OUTPUTS
+    System.Object
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -476,6 +669,24 @@ function New-GovernanceWorkItem {
 }
 
 function Get-GraphNotificationItems {
+    <#
+    .SYNOPSIS
+    Extracts Microsoft Graph notification items from an Event Grid event payload.
+
+    .DESCRIPTION
+    Graph change notifications and lifecycle notifications are typically shaped like:
+    `{ "value": [ { ... }, { ... } ] }`
+
+    When delivered through Event Grid Partner Topics, the Graph payload is commonly nested under `EventGridEvent.data`.
+    This function defensively probes multiple common wrappers and always returns an array (possibly empty).
+
+    .PARAMETER EventGridEvent
+    The Event Grid event object.
+
+    .OUTPUTS
+    System.Object[]
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -561,6 +772,20 @@ function Get-GraphNotificationItems {
 }
 
 function Test-IsGraphLifecycleEvent {
+    <#
+    .SYNOPSIS
+    Determines whether an Event Grid event represents a Microsoft Graph lifecycle notification.
+
+    .DESCRIPTION
+    Uses `Get-GraphNotificationItems` and returns `$true` if any item contains a non-empty `lifecycleEvent` property.
+
+    .PARAMETER EventGridEvent
+    The Event Grid event object.
+
+    .OUTPUTS
+    System.Boolean
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -585,6 +810,24 @@ function Test-IsGraphLifecycleEvent {
 }
 
 function Invoke-GraphRequest {
+    <#
+    .SYNOPSIS
+    Invokes a Microsoft Graph REST request using managed identity.
+
+    .DESCRIPTION
+    Requests an access token for Microsoft Graph and performs an HTTP request with a Bearer token.
+    Supports an allow-list of HTTP status codes so callers can treat certain responses as handled.
+
+    .PARAMETER Method
+    HTTP method to use.
+
+    .PARAMETER Uri
+    Absolute Microsoft Graph URI.
+
+    .OUTPUTS
+    System.Object
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -630,6 +873,21 @@ function Invoke-GraphRequest {
 }
 
 function Invoke-GraphSubscriptionReauthorize {
+    <#
+    .SYNOPSIS
+    Calls Microsoft Graph to reauthorize a subscription.
+
+    .DESCRIPTION
+    Invokes the Graph subscription `reauthorize` action (beta endpoint). This is used when Graph sends a lifecycle
+    notification indicating the subscription needs reauthorization.
+
+    .PARAMETER SubscriptionId
+    The Graph subscription id.
+
+    .OUTPUTS
+    System.Object
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -642,6 +900,23 @@ function Invoke-GraphSubscriptionReauthorize {
 }
 
 function Set-GraphSubscriptionExpiration {
+    <#
+    .SYNOPSIS
+    Renews a Microsoft Graph subscription by updating its expiration date.
+
+    .DESCRIPTION
+    Sends a PATCH to the Graph subscription with a new `expirationDateTime`.
+
+    .PARAMETER SubscriptionId
+    The Graph subscription id.
+
+    .PARAMETER ExpirationDateTime
+    The new expiration date/time as a string (ISO 8601).
+
+    .OUTPUTS
+    System.Object
+    #>
+
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
