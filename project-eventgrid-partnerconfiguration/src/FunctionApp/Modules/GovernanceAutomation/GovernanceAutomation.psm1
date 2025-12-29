@@ -305,11 +305,145 @@ function New-GovernanceWorkItem {
 
     $policy = Get-Policy -PolicyPath $PolicyPath
 
-    $id = if ($EventGridEvent.PSObject.Properties.Name -contains 'id') { [string]$EventGridEvent.id } else { '' }
-    $eventType = if ($EventGridEvent.PSObject.Properties.Name -contains 'eventType') { [string]$EventGridEvent.eventType } elseif ($EventGridEvent.PSObject.Properties.Name -contains 'type') { [string]$EventGridEvent.type } else { '' }
-    $subject = if ($EventGridEvent.PSObject.Properties.Name -contains 'subject') { [string]$EventGridEvent.subject } else { '' }
-    $eventTime = if ($EventGridEvent.PSObject.Properties.Name -contains 'eventTime') { [string]$EventGridEvent.eventTime } elseif ($EventGridEvent.PSObject.Properties.Name -contains 'time') { [string]$EventGridEvent.time } else { '' }
-    $topic = if ($EventGridEvent.PSObject.Properties.Name -contains 'topic') { [string]$EventGridEvent.topic } elseif ($EventGridEvent.PSObject.Properties.Name -contains 'source') { [string]$EventGridEvent.source } else { '' }
+    # Defensive: Event Grid trigger can deliver a batch (array). This function expects a single event.
+    if ($EventGridEvent -is [System.Array]) {
+        if ($EventGridEvent.Count -eq 1) {
+            $EventGridEvent = $EventGridEvent[0]
+        }
+        else {
+            throw "New-GovernanceWorkItem expects a single event object; received an array of $($EventGridEvent.Count)."
+        }
+    }
+
+    function Get-OptionalPropertyValue {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $true)]
+            [AllowNull()]
+            [object]$Object,
+
+            [Parameter(Mandatory = $true)]
+            [ValidateNotNullOrEmpty()]
+            [string]$Name
+        )
+
+        if ($null -eq $Object) {
+            return $null
+        }
+
+        # Handle hashtables/dictionaries.
+        if ($Object -is [System.Collections.IDictionary]) {
+            if ($Object.Contains($Name)) {
+                return $Object[$Name]
+            }
+            return $null
+        }
+
+        # If we got JSON as a string, try to parse it.
+        if ($Object -is [string]) {
+            $text = [string]$Object
+            $trimmed = $text.Trim()
+            if ($trimmed.StartsWith('{') -or $trimmed.StartsWith('[')) {
+                try {
+                    $Object = $trimmed | ConvertFrom-Json -Depth 64
+                }
+                catch {
+                    return $null
+                }
+            }
+            else {
+                return $null
+            }
+        }
+
+        $prop = $Object.PSObject.Properties[$Name]
+        if ($null -eq $prop) {
+            return $null
+        }
+
+        return $prop.Value
+    }
+
+    function ConvertTo-Iso8601UtcString {
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $false)]
+            [AllowNull()]
+            [object]$Value
+        )
+
+        if ($null -eq $Value) {
+            return ''
+        }
+
+        if ($Value -is [datetime]) {
+            return ([datetime]$Value).ToUniversalTime().ToString('o')
+        }
+
+        $text = [string]$Value
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            return ''
+        }
+
+        $parsed = $null
+        if ([datetime]::TryParse($text, [ref]$parsed)) {
+            return $parsed.ToUniversalTime().ToString('o')
+        }
+
+        return $text
+    }
+
+    # Event Grid can deliver in either EventGridSchema or CloudEvents 1.0. Normalize both.
+    # - EventGridSchema: eventType, eventTime, topic
+    # - CloudEvents:     type, time, source
+    $id = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'id')
+    $eventType = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'eventType')
+    if ([string]::IsNullOrWhiteSpace($eventType)) {
+        $eventType = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'type')
+    }
+
+    $subject = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'subject')
+    $eventTimeValue = (Get-OptionalPropertyValue -Object $EventGridEvent -Name 'eventTime')
+    if ($null -eq $eventTimeValue -or ([string]$eventTimeValue).Length -eq 0) {
+        $eventTimeValue = (Get-OptionalPropertyValue -Object $EventGridEvent -Name 'time')
+    }
+    $eventTime = ConvertTo-Iso8601UtcString -Value $eventTimeValue
+
+    $topic = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'topic')
+    if ([string]::IsNullOrWhiteSpace($topic)) {
+        $topic = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'source')
+    }
+
+    # Microsoft Graph partner events (CloudEvents) commonly include details in data.*
+    $data = Get-OptionalPropertyValue -Object $EventGridEvent -Name 'data'
+    $changeType = [string](Get-OptionalPropertyValue -Object $data -Name 'changeType')
+    $resource = [string](Get-OptionalPropertyValue -Object $data -Name 'resource')
+    $tenantId = [string](Get-OptionalPropertyValue -Object $data -Name 'tenantId')
+    $subscriptionId = [string](Get-OptionalPropertyValue -Object $data -Name 'subscriptionId')
+    $subscriptionExpirationValue = (Get-OptionalPropertyValue -Object $data -Name 'subscriptionExpirationDateTime')
+    $subscriptionExpirationDateTime = ConvertTo-Iso8601UtcString -Value $subscriptionExpirationValue
+    $resourceData = Get-OptionalPropertyValue -Object $data -Name 'resourceData'
+    $resourceId = [string](Get-OptionalPropertyValue -Object $resourceData -Name 'id')
+    $organizationId = [string](Get-OptionalPropertyValue -Object $resourceData -Name 'organizationId')
+    $odataType = [string](Get-OptionalPropertyValue -Object $resourceData -Name '@odata.type')
+    $odataId = [string](Get-OptionalPropertyValue -Object $resourceData -Name '@odata.id')
+
+    if ([string]::IsNullOrWhiteSpace($subject)) {
+        if (-not [string]::IsNullOrWhiteSpace($resource)) {
+            $subject = $resource
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($odataId)) {
+            $subject = $odataId
+        }
+    }
+
+    # If tenantId isn't included in data, try to extract it from the CloudEvents source.
+    if ([string]::IsNullOrWhiteSpace($tenantId) -and -not [string]::IsNullOrWhiteSpace($topic)) {
+        $m = [regex]::Match($topic, '/tenants/([0-9a-fA-F-]{36})(/|$)')
+        if ($m.Success) {
+            $tenantId = $m.Groups[1].Value
+        }
+    }
 
     return [pscustomobject]@{
         schemaVersion = 1
@@ -321,11 +455,19 @@ function New-GovernanceWorkItem {
             mode    = $policy.mode
         }
         source        = [pscustomobject]@{
-            id        = $id
-            eventType = $eventType
-            subject   = $subject
-            eventTime = $eventTime
-            topic     = $topic
+            id                             = $id
+            eventType                      = $eventType
+            subject                        = $subject
+            eventTime                      = $eventTime
+            topic                          = $topic
+            changeType                     = $changeType
+            resource                       = $resource
+            resourceId                     = $resourceId
+            tenantId                       = $tenantId
+            organizationId                 = $organizationId
+            subscriptionId                 = $subscriptionId
+            subscriptionExpirationDateTime = $subscriptionExpirationDateTime
+            odataType                      = $odataType
         }
         payload       = [pscustomobject]@{
             event = $EventGridEvent
