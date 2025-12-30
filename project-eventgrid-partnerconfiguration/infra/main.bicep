@@ -225,6 +225,10 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
           value: environment().suffixes.storage
         }
         {
+          name: 'BIRTHRIGHT_MARKER_TTL_HOURS'
+          value: '1'
+        }
+        {
           name: 'WORK_QUEUE_NAME'
           value: workQueueName
         }
