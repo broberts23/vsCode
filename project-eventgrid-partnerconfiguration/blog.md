@@ -1,14 +1,18 @@
-# Entra → Event Grid Partner Events → Azure Functions (PowerShell) for lifecycle-safe Graph subscriptions
+Microsoft Graph change notifications are a great building block, but the “classic” model (hosting a public HTTPS webhook) tends to get uncomfortable fast and won't make you any friends in the Cybersecurity or Networking/Gateway teams to manage the internet-exposed endpoint. 🤣
 
-Microsoft Graph change notifications are a great building block, but the “classic” model (host a public HTTPS webhook) tends to get uncomfortable fast and won't make you any friends in the Cybersecurity or Networking/Gateway teams to manage the internet-exposed endpoint. 🤣
-
-Microsoft Graph also supports delivering these change events _through Azure Event Grid_ (via **Event Grid Partner Events**). Instead of posting directly to your webhook, Graph publishes events into an Event Grid **partner topic** in your Azure subscription. From there, you use a normal Event Grid **event subscription** to route events to whatever you want (in this repo: an Azure Function). You still need to handle at-least-once delivery and subscription lifecycle events, but you get Azure-native routing, filtering, monitoring, and dead-lettering without putting an HTTP endpoint on the public internet.
+Microsoft Graph also supports delivering these change events _through Azure Event Grid_ (via **Event Grid Partner Events**). Instead of posting directly to your webhook, Graph publishes events into an Event Grid **partner topic** in your Azure subscription. From there, you use a normal Event Grid **event subscriptions** to route events to whatever you want 🎉 . You still need to handle at-least-once delivery and subscription lifecycle events, but you get Azure-native routing, filtering, monitoring, and dead-lettering without putting an HTTP endpoint on the public internet.
 
 This project utilizes Microsoft Graph to deliver events into **Azure Event Grid Partner Events**, and from there I route them into **Azure Functions (PowerShell)** with proper buffering, idempotency, dead-lettering, and subscription lifecycle handling.
 
 In this post I detail an identity governance scenario (joiner/mover/leaver-style signals on `users`), but the pattern is useful anywhere you want “near real-time” identity change pipelines: birthright automation, security reactions, audit/enrichment streams into SIEM, or ops workflows that open tickets and notify owners.
 
-Other possible scanarios include:
+A side benefit of this design is that it removes the temptation to “paper over” eventual consistency and transient failures with arbitrary `Start-Sleep` calls and retry loops sprinkled throughout your business logic. Instead of making the application guess when Graph has “settled” (or how long downstream systems need), you let the platform absorb the timing variability: Event Grid provides durable at-least-once delivery, the Function handler turns each event into a queued work item, and workers process asynchronously with explicit retry and dead-letter semantics. If a dependency is temporarily unavailable (Graph throttling, directory propagation delays, downstream API outages), you can retry in a controlled way (with backoff, visibility timeouts, and poison-message handling) without blocking an HTTP request, holding open connections, or burning compute on sleeps.
+
+Because events can be duplicated and delivered out of order, the pipeline also makes idempotency a first-class concern: a stable dedupe key is recorded once, and replays become a no-op instead of “retry storms” that require defensive delays. The result is fewer brittle timing hacks in the app, clearer operational behavior (you can see retries and failures as messages), and a system that degrades predictably when the real world is slow—without turning every caller into a hand-rolled queue processor.
+
+This pattern is particularly well-suited to hybrid identity environments where you're waiting for on-prem changes to sync up to Entra ID via Entra Connect/Cloud Sync. By leveraging Event Grid's reliable delivery and Azure Functions' asynchronous processing, you can effectively manage the inherent delays in synchronization without complicating your application logic.
+
+Other possible scenarios include:
 
 - User risk event processing
 - Privileged role assignment changes
@@ -16,13 +20,15 @@ Other possible scanarios include:
 - Application credential changes
 - And more (whatever Entra publishes through Event Grid partners!)
 
----
+## What about Entra ID Governance Lifecycle Workflows?
 
-## What I end up with after one deploy
+Compared to Entra ID Governance Lifecycle Workflows, this pattern trades “built-in product workflow” for “programmable event pipeline”: the big wins are flexibility (any Graph/API call or downstream integration), near real-time reactions (seconds/minutes instead of scheduled runs), richer idempotency/retry/dead-letter control, and easier extension beyond the lifecycle catalog (tickets, SIEM enrichment, custom audits); the downsides are you own more of the engineering surface area (deployments, monitoring, versioning, security reviews), you must correctly manage and periodically re-validate Graph permissions/consent, and you’re responsible for guardrails and supportability that Lifecycle Workflows provide out of the box (scoping, approvals/notifications, reporting, and “it’s supported by Microsoft” operational expectations).
 
-The promise is simple: I run one deployment script and end up with a working pipeline where Graph events land in my Function App reliablly, with dead-lettering and lifecycle handling.
+## The Demo Environment
 
-Firth the infrastructure is deployed using Bicep templates in `infra/`. The core resources are:
+The promise is simple: I run one deployment script and end up with a working pipeline where Graph events land in my Function App reliably, with dead-lettering and lifecycle handling.
+
+First the infrastructure is deployed using Bicep templates in `infra/`. The core resources are:
 
 - **Azure Function App** (PowerShell) with managed identity
 - **Storage Account** with queues (work items + lifecycle) and table (dedupe keys)
@@ -34,8 +40,6 @@ Next, the deployment scripts in `scripts/` wire everything up. They create and a
 Inside the Function App I treat incoming events as “messages,” not “requests”: I dedupe them using **Table Storage** (Entra ID auth, no keys) and buffer them through **Storage Queues** so downstream workers can run independently. Lifecycle events are handled too: the subscription gets reauthorized and renewed so the demo doesn’t silently die.
 
 Finally, the event subscription is configured with **dead-lettering** to blob storage using a **user-assigned managed identity** (so there are no storage keys sitting in configuration).
-
----
 
 ## A guided tour of the architecture
 
@@ -66,8 +70,6 @@ flowchart LR
   UAMI --> LifeQ
   UAMI --> DL
 ```
-
----
 
 ## Repo map (where to look first)
 
@@ -105,8 +107,6 @@ project-eventgrid-partnerconfiguration
         └── requirements.psd1
 ```
 
----
-
 ## What’s where (and what it does)
 
 ### Infrastructure
@@ -123,7 +123,7 @@ I intentionally split IaC into two stages.
 
 The scripts are the glue that makes this feel like “one command deploy” instead of “seven manual steps.”
 
-`scripts/Deploy-Infrastructure.ps1` is the main entrypoint: it creates/uses the UAMI, assigns Azure RBAC, assigns Graph **application** roles to the managed identity (defaults include `User.ReadWrite.All`, `Directory.Read.All`, and `Group.ReadWrite.All`), deploys `main.bicep`, deploys the function code, bootstraps Graph → Event Grid, activates the partner topic, and then deploys `link.bicep`. It also makes re-runs sane by picking a unique partner topic name when the deterministic name already exists.
+`scripts/Deploy-Infrastructure.ps1` is the main entry point: it creates/uses the UAMI, assigns Azure RBAC, assigns Graph **application** roles to the managed identity (defaults include `User.ReadWrite.All`, `Directory.Read.All`, and `Group.ReadWrite.All`), deploys `main.bicep`, deploys the function code, bootstraps Graph → Event Grid, activates the partner topic, and then deploys `link.bicep`. It also makes re-runs sane by picking a unique partner topic name when the deterministic name already exists.
 
 If you want to focus on individual steps, `scripts/Deploy-FunctionCode.ps1` does the zip deploy for `src/FunctionApp`, `scripts/New-GraphUsersSubscriptionToEventGrid.ps1` creates the Graph subscription (and supports `-UseAzCliGraphToken` so you don’t need the Microsoft Graph PowerShell module), and `scripts/Activate-EventGridPartnerTopic.ps1` flips the partner topic into the active state so events will flow.
 
@@ -181,8 +181,6 @@ The `rules` array is the “if this, then that” part. Each rule has `criteria`
 
 The important part is that this policy file is read in the context of the event pipeline: Graph emits change events, the handler normalizes/dedupes/queues them, and the worker uses `policy.json` to decide what it would do next.
 
----
-
 ## Prerequisites
 
 This is a PowerShell-first repo. I run it with PowerShell 7.4+ and Azure CLI (`az`) authenticated via `az login`. You also need enough Azure permissions to create resources in your target subscription/resource group.
@@ -225,8 +223,6 @@ If the partner topic name already exists, the script automatically chooses a new
 
 Similarly, a new User-Assigned Managed Identity (UAMI) is created by default (each deployment). You can pass in `-BootstrapUserAssignedIdentityName '<name>'` to use an identity from a previous deployment (or one created outside this project).
 
----
-
 ## How I sanity-check it (events + dedupe + lifecycle)
 
 To verify everything is working, create a new user in your Entra tenant. In the `GovernanceEventHandler` invocation logs you should see a received event with CloudEvents fields like `type`, `subject`, and `time`. You should also see a corresponding event in the `BirthrightWorker` logs showing the work item being dequeued with the same `correlationId` and event details.
@@ -253,7 +249,7 @@ If you replay the same event, you should see dedupe kick in. And when Graph send
 
 The two-stage IaC split (`main.bicep` + `link.bicep`) is a useful pattern when working with Event Grid partner topics, because you often need to create the partner topic first (via Graph) before you can attach identities and event subscriptions.
 
-I also like the security posture here. Dead-lettering uses `deadLetterWithResourceIdentity`, so there are no storage keys in app settings. For idempotency I store a hashed dedupe key in Table Storage using Entra auth and treat HTTP 409 as “already processed.” And because Graph partner events arrive as CloudEvents 1.0, I normalize them into a stable work-item shape before queueing.
+I also like the security posture here. Dead-lettering uses `deadLetterWithResourceIdentity`, so there are no storage keys in app settings. For idempotency I store a hashed dedupe key in Table Storage using Entra auth and treat HTTP 409 as “already processed.” And because Graph partner events arrive as CloudEvents 1.0, I normalize them into a stable work-item shape before queuing.
 
 Finally, the lifecycle worker is what makes this demo feel “production-ish”: it reauthorizes and renews subscriptions so the pipeline keeps working across longer-lived test runs.
 
@@ -274,8 +270,6 @@ On the Event Grid side, target validation happens up-front, so the Function need
 Finally, RBAC is non-negotiable for the data plane: use **Storage Queue Data Contributor** for queues, I tried least-privilege roles like `Storage Queue Data Sender` and `Storage Queue Data Processor` but they fell short. Use **Storage Table Data Contributor** for tables, and **Storage Blob Data Contributor** for the dead-letter container.
 
 On the Graph side, group membership writes require group permissions (`GroupMember.ReadWrite.All` or broader). A common failure mode is granting only user permissions (like `User.ReadWrite.All`) and then getting a 403 when trying to add the user to a group.
-
----
 
 ## Conclusion
 
