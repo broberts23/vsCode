@@ -48,7 +48,6 @@ function Get-QueueItemText {
     return $trimmed
 }
 
-$queueItemType = if ($null -eq $QueueItem) { '<null>' } else { $QueueItem.GetType().FullName }
 $queueText = Get-QueueItemText -InputObject $QueueItem
 
 $workItem = $null
@@ -58,8 +57,7 @@ try {
 catch {
     Write-Information -MessageData ([pscustomobject]@{
             message        = 'Queue item was not valid JSON; skipping'
-            queueItemType  = $queueItemType
-            payloadFirstCh = if ([string]::IsNullOrEmpty($queueText)) { '' } else { $queueText.Substring(0, 1) }
+            dequeueCount   = $TriggerMetadata.DequeueCount
         })
     return
 }

@@ -45,7 +45,10 @@ param(
         'GroupMember.ReadWrite.All',
         'Group.ReadWrite.All'
     )]
-    [string[]]$BootstrapGraphAppRoles = @('User.ReadWrite.All')
+    [string[]]$BootstrapGraphAppRoles = @(
+        'User.ReadWrite.All',
+        'Directory.Read.All',
+        'Group.ReadWrite.All')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -413,6 +416,60 @@ function Invoke-AzJson {
     return ($raw | ConvertFrom-Json -Depth 64)
 }
 
+function ConvertFrom-AzJsonOutput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [object]$Raw
+    )
+
+    $rawText = if ($Raw -is [System.Array]) { ($Raw -join "`n") } else { [string]$Raw }
+    $rawText = $rawText.Trim()
+    if ([string]::IsNullOrWhiteSpace($rawText)) {
+        return $null
+    }
+
+    try {
+        return ($rawText | ConvertFrom-Json -Depth 64)
+    }
+    catch {
+        # Fallback: attempt to extract the JSON object if extra text leaked into stdout.
+        $start = $rawText.IndexOf('{')
+        $end = $rawText.LastIndexOf('}')
+        if ($start -ge 0 -and $end -gt $start) {
+            $jsonOnly = $rawText.Substring($start, $end - $start + 1)
+            return ($jsonOnly | ConvertFrom-Json -Depth 64)
+        }
+
+        throw
+    }
+}
+
+function Invoke-AzWithStderrCapture {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$AzParameters
+    )
+
+    $stderrFile = New-TemporaryFile
+    try {
+        $raw = & az $AzParameters 2> $stderrFile
+        $stderr = Get-Content -Path $stderrFile -Raw
+    }
+    finally {
+        Remove-Item -Path $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+
+    return [pscustomobject]@{
+        Raw      = $raw
+        StdErr   = $stderr
+        ExitCode = $LASTEXITCODE
+    }
+}
+
 function Get-OrCreateUserAssignedManagedIdentity {
     [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
     param(
@@ -683,41 +740,15 @@ if (-not [string]::IsNullOrWhiteSpace($FunctionResourceId)) {
     $deploymentAzParameters += @('--parameters', "functionResourceId=$FunctionResourceId")
 }
 
-$stderrFile = New-TemporaryFile
-try {
-    Write-Log -Level Information -Message "Starting az deployment..."
-    $raw = & az $deploymentAzParameters 2> $stderrFile
-    $stderr = Get-Content -Path $stderrFile -Raw
-}
-finally {
-    Remove-Item -Path $stderrFile -Force -ErrorAction SilentlyContinue
-}
-
-if ($LASTEXITCODE -ne 0) {
-    $details = if (-not [string]::IsNullOrWhiteSpace($stderr)) { $stderr } else { ($raw -join "`n") }
+$deployResult = Invoke-AzWithStderrCapture -AzParameters $deploymentAzParameters
+if ($deployResult.ExitCode -ne 0) {
+    $details = if (-not [string]::IsNullOrWhiteSpace($deployResult.StdErr)) { $deployResult.StdErr } else { ($deployResult.Raw -join "`n") }
     throw "Deployment failed: $details"
 }
 
-$rawText = if ($raw -is [System.Array]) { ($raw -join "`n") } else { [string]$raw }
-$rawText = $rawText.Trim()
-if ([string]::IsNullOrWhiteSpace($rawText)) {
-    throw "Deployment succeeded but produced no JSON outputs. stderr: $stderr"
-}
-
-try {
-    $outputs = $rawText | ConvertFrom-Json -Depth 64
-}
-catch {
-    # Fallback: attempt to extract the JSON object if extra text leaked into stdout.
-    $start = $rawText.IndexOf('{')
-    $end = $rawText.LastIndexOf('}')
-    if ($start -ge 0 -and $end -gt $start) {
-        $jsonOnly = $rawText.Substring($start, $end - $start + 1)
-        $outputs = $jsonOnly | ConvertFrom-Json -Depth 64
-    }
-    else {
-        throw
-    }
+$outputs = ConvertFrom-AzJsonOutput -Raw $deployResult.Raw
+if ($null -eq $outputs) {
+    throw "Deployment succeeded but produced no JSON outputs. stderr: $($deployResult.StdErr)"
 }
 
 Write-Log -Level Success -Message "Deployment succeeded: $deploymentName"
@@ -887,40 +918,15 @@ if (-not $SkipGraphBootstrap.IsPresent) {
         '-o', 'json'
     )
 
-    $stderrFileLink = New-TemporaryFile
-    try {
-        $rawLink = & az $deploymentAzParametersLink 2> $stderrFileLink
-        $stderrLink = Get-Content -Path $stderrFileLink -Raw
-    }
-    finally {
-        Remove-Item -Path $stderrFileLink -Force -ErrorAction SilentlyContinue
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        $detailsLink = if (-not [string]::IsNullOrWhiteSpace($stderrLink)) { $stderrLink } else { ($rawLink -join "`n") }
+    $linkResult = Invoke-AzWithStderrCapture -AzParameters $deploymentAzParametersLink
+    if ($linkResult.ExitCode -ne 0) {
+        $detailsLink = if (-not [string]::IsNullOrWhiteSpace($linkResult.StdErr)) { $linkResult.StdErr } else { ($linkResult.Raw -join "`n") }
         throw "Link deployment failed: $detailsLink"
     }
 
-    $rawLinkText = if ($rawLink -is [System.Array]) { ($rawLink -join "`n") } else { [string]$rawLink }
-    $rawLinkText = $rawLinkText.Trim()
-    if ([string]::IsNullOrWhiteSpace($rawLinkText)) {
-        throw "Link deployment succeeded but produced no JSON outputs. stderr: $stderrLink"
-    }
-
-    $outputsLink = $null
-    try {
-        $outputsLink = $rawLinkText | ConvertFrom-Json -Depth 64
-    }
-    catch {
-        $startLink = $rawLinkText.IndexOf('{')
-        $endLink = $rawLinkText.LastIndexOf('}')
-        if ($startLink -ge 0 -and $endLink -gt $startLink) {
-            $jsonOnlyLink = $rawLinkText.Substring($startLink, $endLink - $startLink + 1)
-            $outputsLink = $jsonOnlyLink | ConvertFrom-Json -Depth 64
-        }
-        else {
-            throw
-        }
+    $outputsLink = ConvertFrom-AzJsonOutput -Raw $linkResult.Raw
+    if ($null -eq $outputsLink) {
+        throw "Link deployment succeeded but produced no JSON outputs. stderr: $($linkResult.StdErr)"
     }
 
     if ($null -ne $outputsLink -and $outputsLink.PSObject.Properties.Name -contains 'partnerTopicEventSubscriptionId') {

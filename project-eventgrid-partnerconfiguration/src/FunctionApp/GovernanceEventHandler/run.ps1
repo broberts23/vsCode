@@ -25,13 +25,7 @@ $policyPath = if (-not [string]::IsNullOrWhiteSpace($env:POLICY_PATH)) { $env:PO
 
 # Event Grid trigger can deliver a batch (array) of events.
 # Normalize to an array so we handle both single-event and batched deliveries.
-$events = @()
-if ($EventGridEvent -is [System.Array]) {
-    $events = @($EventGridEvent)
-}
-else {
-    $events = @($EventGridEvent)
-}
+$events = @($EventGridEvent)
 
 $workItemPayloads = @()
 $lifecycleWorkItemPayloads = @()

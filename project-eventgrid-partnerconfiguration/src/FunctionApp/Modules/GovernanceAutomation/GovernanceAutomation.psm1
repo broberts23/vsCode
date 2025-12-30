@@ -1,6 +1,55 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-GovernanceOptionalPropertyValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [object]$Object,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    # Handle hashtables/dictionaries.
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) {
+            return $Object[$Name]
+        }
+        return $null
+    }
+
+    # If we got JSON as a string, try to parse it.
+    if ($Object -is [string]) {
+        $text = [string]$Object
+        $trimmed = $text.Trim()
+        if ($trimmed.StartsWith('{') -or $trimmed.StartsWith('[')) {
+            try {
+                $Object = $trimmed | ConvertFrom-Json -Depth 64
+            }
+            catch {
+                return $null
+            }
+        }
+        else {
+            return $null
+        }
+    }
+
+    $prop = $Object.PSObject.Properties[$Name]
+    if ($null -eq $prop) {
+        return $null
+    }
+
+    return $prop.Value
+}
+
 function Get-FunctionAppRootPath {
     <#
     .SYNOPSIS
@@ -636,55 +685,6 @@ function New-GovernanceWorkItem {
         }
     }
 
-    function Get-OptionalPropertyValue {
-        [CmdletBinding()]
-        param(
-            [Parameter(Mandatory = $true)]
-            [AllowNull()]
-            [object]$Object,
-
-            [Parameter(Mandatory = $true)]
-            [ValidateNotNullOrEmpty()]
-            [string]$Name
-        )
-
-        if ($null -eq $Object) {
-            return $null
-        }
-
-        # Handle hashtables/dictionaries.
-        if ($Object -is [System.Collections.IDictionary]) {
-            if ($Object.Contains($Name)) {
-                return $Object[$Name]
-            }
-            return $null
-        }
-
-        # If we got JSON as a string, try to parse it.
-        if ($Object -is [string]) {
-            $text = [string]$Object
-            $trimmed = $text.Trim()
-            if ($trimmed.StartsWith('{') -or $trimmed.StartsWith('[')) {
-                try {
-                    $Object = $trimmed | ConvertFrom-Json -Depth 64
-                }
-                catch {
-                    return $null
-                }
-            }
-            else {
-                return $null
-            }
-        }
-
-        $prop = $Object.PSObject.Properties[$Name]
-        if ($null -eq $prop) {
-            return $null
-        }
-
-        return $prop.Value
-    }
-
     function ConvertTo-Iso8601UtcString {
         [CmdletBinding()]
         param(
@@ -717,37 +717,37 @@ function New-GovernanceWorkItem {
     # Event Grid can deliver in either EventGridSchema or CloudEvents 1.0. Normalize both.
     # - EventGridSchema: eventType, eventTime, topic
     # - CloudEvents:     type, time, source
-    $id = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'id')
-    $eventType = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'eventType')
+    $id = [string](Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'id')
+    $eventType = [string](Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'eventType')
     if ([string]::IsNullOrWhiteSpace($eventType)) {
-        $eventType = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'type')
+        $eventType = [string](Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'type')
     }
 
-    $subject = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'subject')
-    $eventTimeValue = (Get-OptionalPropertyValue -Object $EventGridEvent -Name 'eventTime')
+    $subject = [string](Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'subject')
+    $eventTimeValue = (Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'eventTime')
     if ($null -eq $eventTimeValue -or ([string]$eventTimeValue).Length -eq 0) {
-        $eventTimeValue = (Get-OptionalPropertyValue -Object $EventGridEvent -Name 'time')
+        $eventTimeValue = (Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'time')
     }
     $eventTime = ConvertTo-Iso8601UtcString -Value $eventTimeValue
 
-    $topic = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'topic')
+    $topic = [string](Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'topic')
     if ([string]::IsNullOrWhiteSpace($topic)) {
-        $topic = [string](Get-OptionalPropertyValue -Object $EventGridEvent -Name 'source')
+        $topic = [string](Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'source')
     }
 
     # Microsoft Graph partner events (CloudEvents) commonly include details in data.*
-    $data = Get-OptionalPropertyValue -Object $EventGridEvent -Name 'data'
-    $changeType = [string](Get-OptionalPropertyValue -Object $data -Name 'changeType')
-    $resource = [string](Get-OptionalPropertyValue -Object $data -Name 'resource')
-    $tenantId = [string](Get-OptionalPropertyValue -Object $data -Name 'tenantId')
-    $subscriptionId = [string](Get-OptionalPropertyValue -Object $data -Name 'subscriptionId')
-    $subscriptionExpirationValue = (Get-OptionalPropertyValue -Object $data -Name 'subscriptionExpirationDateTime')
+    $data = Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'data'
+    $changeType = [string](Get-GovernanceOptionalPropertyValue -Object $data -Name 'changeType')
+    $resource = [string](Get-GovernanceOptionalPropertyValue -Object $data -Name 'resource')
+    $tenantId = [string](Get-GovernanceOptionalPropertyValue -Object $data -Name 'tenantId')
+    $subscriptionId = [string](Get-GovernanceOptionalPropertyValue -Object $data -Name 'subscriptionId')
+    $subscriptionExpirationValue = (Get-GovernanceOptionalPropertyValue -Object $data -Name 'subscriptionExpirationDateTime')
     $subscriptionExpirationDateTime = ConvertTo-Iso8601UtcString -Value $subscriptionExpirationValue
-    $resourceData = Get-OptionalPropertyValue -Object $data -Name 'resourceData'
-    $resourceId = [string](Get-OptionalPropertyValue -Object $resourceData -Name 'id')
-    $organizationId = [string](Get-OptionalPropertyValue -Object $resourceData -Name 'organizationId')
-    $odataType = [string](Get-OptionalPropertyValue -Object $resourceData -Name '@odata.type')
-    $odataId = [string](Get-OptionalPropertyValue -Object $resourceData -Name '@odata.id')
+    $resourceData = Get-GovernanceOptionalPropertyValue -Object $data -Name 'resourceData'
+    $resourceId = [string](Get-GovernanceOptionalPropertyValue -Object $resourceData -Name 'id')
+    $organizationId = [string](Get-GovernanceOptionalPropertyValue -Object $resourceData -Name 'organizationId')
+    $odataType = [string](Get-GovernanceOptionalPropertyValue -Object $resourceData -Name '@odata.type')
+    $odataId = [string](Get-GovernanceOptionalPropertyValue -Object $resourceData -Name '@odata.id')
 
     if ([string]::IsNullOrWhiteSpace($subject)) {
         if (-not [string]::IsNullOrWhiteSpace($resource)) {
@@ -821,55 +821,14 @@ function Get-GraphNotificationItems {
         [object]$EventGridEvent
     )
 
-    function Get-OptionalPropertyValue {
-        [CmdletBinding()]
-        param(
-            [Parameter(Mandatory = $true)]
-            [AllowNull()]
-            [object]$Object,
-
-            [Parameter(Mandatory = $true)]
-            [ValidateNotNullOrEmpty()]
-            [string]$Name
-        )
-
-        if ($null -eq $Object) {
-            return $null
-        }
-
-        # If we got JSON as a string, try to parse it.
-        if ($Object -is [string]) {
-            $text = [string]$Object
-            $trimmed = $text.Trim()
-            if ($trimmed.StartsWith('{') -or $trimmed.StartsWith('[')) {
-                try {
-                    $Object = $trimmed | ConvertFrom-Json -Depth 64
-                }
-                catch {
-                    return $null
-                }
-            }
-            else {
-                return $null
-            }
-        }
-
-        $prop = $Object.PSObject.Properties[$Name]
-        if ($null -eq $prop) {
-            return $null
-        }
-
-        return $prop.Value
-    }
-
     # Graph change notifications (and lifecycle notifications) are typically shaped like:
     #   { "value": [ { ... }, { ... } ] }
     # When delivered through Event Grid Partner Topics, that payload is commonly in EventGridEvent.data
     # but we defensively probe a couple of common wrappers.
-    $data = Get-OptionalPropertyValue -Object $EventGridEvent -Name 'data'
-    $dataData = Get-OptionalPropertyValue -Object $data -Name 'data'
-    $payload = Get-OptionalPropertyValue -Object $EventGridEvent -Name 'payload'
-    $payloadData = Get-OptionalPropertyValue -Object $payload -Name 'data'
+    $data = Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'data'
+    $dataData = Get-GovernanceOptionalPropertyValue -Object $data -Name 'data'
+    $payload = Get-GovernanceOptionalPropertyValue -Object $EventGridEvent -Name 'payload'
+    $payloadData = Get-GovernanceOptionalPropertyValue -Object $payload -Name 'data'
 
     # Also include the event itself as a candidate because some producers send the Graph payload directly.
     $candidates = @(
@@ -885,7 +844,7 @@ function Get-GraphNotificationItems {
             continue
         }
 
-        $value = Get-OptionalPropertyValue -Object $candidate -Name 'value'
+        $value = Get-GovernanceOptionalPropertyValue -Object $candidate -Name 'value'
         if ($null -ne $value) {
             $items = @($value)
             if ($items.Count -gt 0) {
@@ -974,7 +933,12 @@ function Invoke-GraphRequest {
     )
 
     $token = Get-ManagedIdentityAccessToken -Resource 'https://graph.microsoft.com/'
-    $headers = @{ Authorization = "Bearer $token" }
+    $clientRequestId = [Guid]::NewGuid().ToString()
+    $headers = @{
+        Authorization              = "Bearer $token"
+        'client-request-id'        = $clientRequestId
+        'return-client-request-id' = 'true'
+    }
 
     try {
         if ($null -eq $Body) {
@@ -985,15 +949,75 @@ function Invoke-GraphRequest {
         return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers -ContentType 'application/json' -Body $jsonBody
     }
     catch {
-        $response = $_.Exception.Response
+        $ex = $_.Exception
+        $response = $ex.Response
         if ($null -ne $response) {
             $statusCode = [int]$response.StatusCode
-            if ($AllowStatusCodes -contains $statusCode) {
-                return [pscustomobject]@{
-                    StatusCode = $statusCode
-                    Ignored    = $true
+
+            $headers = [ordered]@{}
+            try {
+                foreach ($h in $response.Headers) {
+                    $headers[$h.Key] = ($h.Value -join ',')
                 }
             }
+            catch {
+                # best-effort
+            }
+
+            try {
+                if ($null -ne $response.Content -and $null -ne $response.Content.Headers) {
+                    foreach ($h in $response.Content.Headers) {
+                        $headers[$h.Key] = ($h.Value -join ',')
+                    }
+                }
+            }
+            catch {
+                # best-effort
+            }
+
+            $responseBody = $null
+            try {
+                if ($null -ne $response.Content) {
+                    $responseBody = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                }
+            }
+            catch {
+                $responseBody = $null
+            }
+
+            if ([string]::IsNullOrWhiteSpace([string]$responseBody)) {
+                try {
+                    # PowerShell can store the JSON error payload here.
+                    if ($null -ne $_.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$_.ErrorDetails.Message)) {
+                        $responseBody = [string]$_.ErrorDetails.Message
+                    }
+                }
+                catch {
+                    # best-effort
+                }
+            }
+
+            if ($AllowStatusCodes -contains $statusCode) {
+                return [pscustomobject]@{
+                    StatusCode      = $statusCode
+                    Ignored         = $true
+                    ResponseBody    = $responseBody
+                    ResponseHeaders = $headers
+                }
+            }
+
+            $errObj = [pscustomobject]@{
+                message         = 'Microsoft Graph request failed'
+                method          = $Method
+                uri             = $Uri
+                statusCode      = $statusCode
+                reasonPhrase    = [string]$response.ReasonPhrase
+                responseBody    = $responseBody
+                responseHeaders = $headers
+                clientRequestId = $clientRequestId
+            }
+
+            throw [System.Exception]::new(($errObj | ConvertTo-Json -Depth 12 -Compress), $ex)
         }
 
         throw

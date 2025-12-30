@@ -123,7 +123,7 @@ I intentionally split IaC into two stages.
 
 The scripts are the glue that makes this feel like “one command deploy” instead of “seven manual steps.”
 
-`scripts/Deploy-Infrastructure.ps1` is the main entrypoint: it creates/uses the UAMI, assigns Azure RBAC, assigns Graph app roles (default: `User.Read.All`), deploys `main.bicep`, deploys the function code, bootstraps Graph → Event Grid, activates the partner topic, and then deploys `link.bicep`. It also makes re-runs sane by picking a unique partner topic name when the deterministic name already exists.
+`scripts/Deploy-Infrastructure.ps1` is the main entrypoint: it creates/uses the UAMI, assigns Azure RBAC, assigns Graph **application** roles to the managed identity (defaults include `User.ReadWrite.All`, `Directory.Read.All`, and `Group.ReadWrite.All`), deploys `main.bicep`, deploys the function code, bootstraps Graph → Event Grid, activates the partner topic, and then deploys `link.bicep`. It also makes re-runs sane by picking a unique partner topic name when the deterministic name already exists.
 
 If you want to focus on individual steps, `scripts/Deploy-FunctionCode.ps1` does the zip deploy for `src/FunctionApp`, `scripts/New-GraphUsersSubscriptionToEventGrid.ps1` creates the Graph subscription (and supports `-UseAzCliGraphToken` so you don’t need the Microsoft Graph PowerShell module), and `scripts/Activate-EventGridPartnerTopic.ps1` flips the partner topic into the active state so events will flow.
 
@@ -135,7 +135,9 @@ I treat the Function App as a small event-processing system.
 
 The heavy lifting lives in `src/FunctionApp/Modules/GovernanceAutomation/GovernanceAutomation.psm1`: schema normalization, stable dedupe keys, Table Storage idempotency, and the Graph lifecycle calls (reauthorize + renew).
 
-From there, `src/FunctionApp/SubscriptionLifecycleWorker/run.ps1` processes lifecycle messages and validates `clientState` (via `GRAPH_CLIENT_STATE`) before calling Graph, and `src/FunctionApp/BirthrightWorker/run.ps1` is the demo worker that reads the work items and applies a policy model (intentionally stubbed for mutating actions).
+From there, `src/FunctionApp/SubscriptionLifecycleWorker/run.ps1` processes lifecycle messages and validates `clientState` (via `GRAPH_CLIENT_STATE`) before calling Graph, and `src/FunctionApp/BirthrightWorker/run.ps1` processes work items and applies birthright group assignments for **newly created users**.
+
+Important Graph nuance: for `users` subscriptions, user creation shows up as an **`updated`** notification (Graph does not emit a `created` changeType for user resources). To avoid accidentally touching every user update, the birthright worker gates “new user” using `createdDateTime` proximity to the event time.
 
 The policy itself is in `src/FunctionApp/policy/policy.json`.
 
@@ -149,7 +151,25 @@ There are three main ideas inside the policy:
 
 1. **Birthright assignments**
 
-The `birthrights` block is how I model “when a user appears (or changes), what should they get by default?” In the current file, there’s a sample assignment that matches `userType: "Member"` and would add that user to a set of groups via `addToGroups`. Right now this stays empty and the `BirthrightWorker` keeps actions stubbed, but the shape is there for real use.
+The `birthrights` block is how I model “when a user appears (or changes), what should they get by default?”
+
+In the current policy file, `birthrights.mode` is set to `remediate`, and the default assignment matches `userType: "Member"` and adds the user to a specific Entra security group:
+
+```json
+"birthrights": {
+  "enabled": true,
+  "mode": "remediate",
+  "assignments": [
+    {
+      "name": "Default-Birthright",
+      "when": { "userType": "Member" },
+      "addToGroups": ["928bd0ce-8abc-43dd-94a0-d350fe49e991"]
+    }
+  ]
+}
+```
+
+The `BirthrightWorker` reads this policy and, for newly created users only, calls Microsoft Graph to add the user as a member of each configured group.
 
 2. **Safety rails (break-glass + allow lists)**
 
@@ -169,6 +189,12 @@ This is a PowerShell-first repo. I run it with PowerShell 7.4+ and Azure CLI (`a
 
 On the Entra side, you need permission to create Microsoft Graph subscriptions (delegated), and admin consent permissions to assign Microsoft Graph application roles to the managed identity.
 
+For birthright group assignment (adding users to groups), the managed identity needs (at minimum) a Graph application permission that can add group members:
+
+- `GroupMember.ReadWrite.All` (least-privilege for add/remove members)
+
+This repo’s deployment script uses `Group.ReadWrite.All` by default (broader, but simple) plus user/directory read permissions so the worker can query `createdDateTime` for the new-user gate.
+
 ---
 
 ## The one-command deployment
@@ -186,7 +212,7 @@ What it does (in order):
 
 1. Creates (or reuses) a user-assigned managed identity (UAMI)
 2. Assigns Azure RBAC on the resource group (so the deployment can create resources)
-3. Assigns Graph app roles to that identity (default: `User.Read.All`)
+3. Assigns Graph app roles to that identity (defaults include `User.ReadWrite.All`, `Directory.Read.All`, and `Group.ReadWrite.All`)
 4. Deploys `infra/main.bicep`
 5. Zip deploys the Function code
 6. Creates a Graph subscription that delivers to Event Grid (partner topic)
@@ -204,6 +230,18 @@ Similarly, a new User-Assigned Managed Identity (UAMI) is created by default (ea
 ## How I sanity-check it (events + dedupe + lifecycle)
 
 To verify everything is working, create a new user in your Entra tenant. In the `GovernanceEventHandler` invocation logs you should see a received event with CloudEvents fields like `type`, `subject`, and `time`. You should also see a corresponding event in the `BirthrightWorker` logs showing the work item being dequeued with the same `correlationId` and event details.
+
+For a newly created user (within the configured window), you should see a log like:
+
+```text
+Added newly created user to birthright group
+```
+
+For a normal user update event, you should see a log like:
+
+```text
+User event is not treated as newly created; no birthright changes applied
+```
 
 //insert images of logs here
 
@@ -234,6 +272,8 @@ Re-runs matter a lot for demos: if you re-run Graph bootstrap with the same part
 On the Event Grid side, target validation happens up-front, so the Function needs to exist before creating the event subscription. And in Functions, PowerShell queue triggers can hand payloads in different shapes (string/base64/object), so defensive parsing is worth the effort.
 
 Finally, RBAC is non-negotiable for the data plane: use **Storage Queue Data Contributor** for queues, I tried least-privilege roles like `Storage Queue Data Sender` and `Storage Queue Data Processor` but they fell short. Use **Storage Table Data Contributor** for tables, and **Storage Blob Data Contributor** for the dead-letter container.
+
+On the Graph side, group membership writes require group permissions (`GroupMember.ReadWrite.All` or broader). A common failure mode is granting only user permissions (like `User.ReadWrite.All`) and then getting a 403 when trying to add the user to a group.
 
 ---
 
