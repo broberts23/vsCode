@@ -21,6 +21,8 @@ Access reviews cover principals including **users and service principals**, and 
   - export review history for compliance
 - Keep the automation deterministic and idempotent.
 
+This project assumes the “autopilot” runs as an **Azure Functions** app (Timer trigger for scheduled runs, HTTP trigger for manual runs), using Microsoft Graph to manage Access Reviews.
+
 ## Non-goals
 
 - Replacing human reviewers. This automates orchestration and evidence handling.
@@ -39,39 +41,31 @@ project-access-reviews-autopilot/
 │   ├── reviews.json                   # source-of-truth review definitions
 │   ├── reviewers.json                 # reviewer routing rules (optional)
 │   └── scopes.json                    # what to review (roles/groups/apps)
-├── scripts/
-│   ├── Install-Dependencies.ps1
-│   ├── New-AccessReviewDefinitions.ps1
-│   ├── Start-AccessReviewInstances.ps1
-│   ├── Send-AccessReviewReminders.ps1
-│   ├── Invoke-AccessReviewAutoApply.ps1
-│   ├── Export-AccessReviewHistory.ps1
-│   └── Invoke-AccessReviewDriftReport.ps1
-├── src/
-│   └── AccessReviewsAutopilot/
-│       ├── AccessReviewsAutopilot.psd1
-│       ├── AccessReviewsAutopilot.psm1
-│       ├── Public/
-│       │   ├── Get-AraDesiredState.ps1
-│       │   ├── Get-AraCurrentState.ps1
-│       │   ├── Compare-AraState.ps1
-│       │   ├── Set-AraState.ps1
-│       │   ├── Send-AraReminders.ps1
-│       │   └── Export-AraHistory.ps1
-│       └── Private/
-│           ├── Invoke-Graph.ps1
-│           ├── Normalize-Definition.ps1
-│           └── New-CorrelationKey.ps1
+├── FunctionApp/
+│   ├── host.json
+│   ├── local.settings.json             # local-only (do not commit secrets)
+│   ├── profile.ps1                     # PowerShell worker profile
+│   ├── requirements.psd1               # module dependencies
+│   ├── AccessReviewsAutopilotTimer/
+│   │   ├── function.json               # TimerTrigger schedule
+│   │   └── run.ps1                     # scheduled autopilot run
+│   ├── AccessReviewsAutopilotHttp/
+│   │   ├── function.json               # HttpTrigger (manual run)
+│   │   └── run.ps1
+│   └── Shared/
+│       ├── Invoke-Graph.ps1
+│       ├── Normalize-Definition.ps1
+│       └── New-CorrelationKey.ps1
 ├── infra/
 │   ├── main.bicep                     # optional: storage/logs, function/job runner
 │   └── parameters.dev.json
+├── scripts/
+│   ├── Deploy-Infrastructure.ps1       # provisions infra + function app
+│   └── Deploy-FunctionCode.ps1         # publishes function code
 ├── tests/
 │   └── Unit/
 │       ├── Compare-AraState.Tests.ps1
 │       └── New-CorrelationKey.Tests.ps1
-└── workflows/
-    ├── ci.yml
-    └── scheduled-autopilot.yml         # nightly/weekly orchestration
 ```
 
 ## High-level design
@@ -81,22 +75,27 @@ project-access-reviews-autopilot/
 This project does not replace the Entra Access Reviews feature or the MyAccess decisioning experience. It’s an automation layer that helps you run Access Reviews like a continuous control with code, scheduling, drift detection, and evidence packaging.
 
 - Source of truth
+
   - Entra/MyAccess: reviews are configured primarily via portal workflows.
   - Autopilot: review definitions live as code (for example `config/reviews.json`) so they can be PR-reviewed, versioned, and recreated consistently.
 
 - Provisioning + drift control
+
   - Entra/MyAccess: doesn’t provide a general “desired state vs current state” drift loop across all your review definitions.
   - Autopilot: periodically compares “what should exist” vs “what exists”, reports drift, and can optionally remediate by creating/updating definitions.
 
 - Orchestration at scale (beyond built-in reminders)
+
   - Entra/MyAccess: sends reminders within each review; reviewers act in the portal.
   - Autopilot: orchestrates across many reviews/instances in bulk (for example scheduled runs that ensure required privileged reviews exist and are active).
 
 - Evidence packaging (audit-ready outputs)
+
   - Entra/MyAccess: audit history and exports are available, but evidence collection is usually manual when auditors ask.
   - Autopilot: automatically exports/archives review history (plus run summaries) on a schedule into controlled storage/artifacts.
 
 - Guardrails on automation risk
+
   - Entra/MyAccess: supports applying decisions/recommendations where configured.
   - Autopilot: treats any “auto-apply” as an explicit policy decision (ideally gated/approved) and keeps it off by default.
 
@@ -112,6 +111,7 @@ This project does not replace the Entra Access Reviews feature or the MyAccess d
   - `description` metadata block (JSON)
 
 The automation must be able to run repeatedly without creating duplicates:
+
 - if a definition exists → update it
 - if it doesn’t exist → create it
 
@@ -123,6 +123,11 @@ The automation must be able to run repeatedly without creating duplicates:
    - send reminders (`sendReminder`)
    - optionally accept/apply recommendations where your governance policy allows
    - generate audit artifacts (history exports)
+
+In an Azure Functions deployment this loop typically runs from:
+
+- a **Timer trigger** for scheduled orchestration
+- an **HTTP trigger** for manual/operational runs (for example, “run now” or “export evidence now”)
 
 ### Recommended operating model
 
@@ -136,6 +141,7 @@ The automation must be able to run repeatedly without creating duplicates:
 ### Graph API usage
 
 The access reviews API provides endpoints to:
+
 - create/update/delete review definitions
 - list instances
 - send reminders
@@ -147,9 +153,11 @@ The access reviews API provides endpoints to:
 Start with `v1.0` endpoints where possible.
 
 References:
+
 - Access reviews API overview: https://learn.microsoft.com/en-us/graph/api/resources/accessreviewsv2-overview?view=graph-rest-1.0
 
 PowerShell auth + raw calls:
+
 - Connect-MgGraph: https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0
 - Invoke-MgGraphRequest: https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/invoke-mggraphrequest?view=graph-powershell-1.0
 
@@ -157,15 +165,18 @@ PowerShell auth + raw calls:
 
 Access reviews require tenant licensing and appropriate permissions.
 At a minimum, expect:
+
 - Graph application permission in the Access Reviews space (for example `AccessReview.ReadWrite.All` for create/update/delete).
 - If using delegated auth for operators, Entra directory roles may be required (per the API docs).
 
 See “Role and application permission authorization checks”:
+
 - https://learn.microsoft.com/en-us/graph/api/resources/accessreviewsv2-overview?view=graph-rest-1.0#role-and-application-permission-authorization-checks
 
 ### Evidence and audit artifacts
 
 Outputs (recommended):
+
 - JSON summary per run (counts, review IDs, status)
 - exported access review history download URIs
 - optional storage of exported CSV/JSON in blob storage
@@ -179,10 +190,10 @@ Outputs (recommended):
 ## Local dev loop
 
 Typical commands:
-- `pwsh ./scripts/Install-Dependencies.ps1`
-- `pwsh ./scripts/New-AccessReviewDefinitions.ps1 -ConfigPath ./config/reviews.json`
-- `pwsh ./scripts/Send-AccessReviewReminders.ps1`
-- `pwsh ./scripts/Export-AccessReviewHistory.ps1 -OutputFolder ./out`
+
+- `pwsh ./scripts/Deploy-Infrastructure.ps1`
+- `pwsh ./scripts/Deploy-FunctionCode.ps1`
+- `func start`
 
 ## Security notes
 
