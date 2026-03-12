@@ -1,0 +1,27 @@
+{
+    "displayName": "Teams external access (federation) guardrail",
+    "description": "Detects drift in Microsoft Teams federation (external access) settings.",
+    "status": "active",
+    "mode": "monitorOnly",
+    "monitorRunFrequencyInHours": 6,
+    "baseline": {
+        "displayName": "Teams federation baseline",
+        "description": "Desired external access policy (allowlist / safe defaults).",
+        "resources": [
+            {
+                "displayName": "Teams federation configuration",
+                "resourceType": "microsoft.teams.federationConfiguration",
+                "properties": {
+                    "AllowFederatedUsers": true,
+                    "AllowTeamsConsumer": false,
+                    "AllowPublicUsers": false,
+                    "AllowedDomains": [
+                        "partner1.example",
+                        "partner2.example"
+                    ],
+                    "BlockedDomains": []
+                }
+            }
+        ]
+    }
+}

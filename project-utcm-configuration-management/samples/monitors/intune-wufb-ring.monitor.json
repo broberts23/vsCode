@@ -1,0 +1,26 @@
+{
+    "displayName": "Intune WUfB ring guardrail",
+    "description": "Detects drift in Windows Update for Business ring settings (deferrals/deadlines/pause flags).",
+    "status": "active",
+    "mode": "monitorOnly",
+    "monitorRunFrequencyInHours": 6,
+    "baseline": {
+        "displayName": "Intune WUfB ring baseline",
+        "description": "Desired update ring posture.",
+        "resources": [
+            {
+                "displayName": "WUfB ring (Windows 10/11)",
+                "resourceType": "microsoft.intune.windowsUpdateForBusinessRingUpdateProfileWindows10",
+                "properties": {
+                    "AllowWindows11Upgrade": true,
+                    "AutomaticUpdateMode": "autoInstallAtMaintenanceTime",
+                    "FeatureUpdatesPaused": false,
+                    "QualityUpdatesPaused": false,
+                    "DeadlineForFeatureUpdatesInDays": 7,
+                    "DeadlineForQualityUpdatesInDays": 3,
+                    "UpdateNotificationLevel": "defaultNotifications"
+                }
+            }
+        ]
+    }
+}

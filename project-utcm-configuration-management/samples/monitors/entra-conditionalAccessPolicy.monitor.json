@@ -1,0 +1,22 @@
+{
+    "displayName": "Entra Conditional Access guardrail",
+    "description": "Detects drift in a critical Conditional Access policy (for example: policy disabled during an incident and never re-enabled).",
+    "status": "active",
+    "mode": "monitorOnly",
+    "monitorRunFrequencyInHours": 6,
+    "baseline": {
+        "displayName": "Conditional Access baseline",
+        "description": "Desired Conditional Access posture.",
+        "resources": [
+            {
+                "displayName": "Conditional Access policy: require MFA for admin portals",
+                "resourceType": "microsoft.entra.conditionalaccesspolicy",
+                "properties": {
+                    "DisplayName": "CA - Require MFA for Admin Portals",
+                    "State": "enabled",
+                    "Ensure": "Present"
+                }
+            }
+        ]
+    }
+}
