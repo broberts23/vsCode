@@ -400,7 +400,7 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = if (deployDomainC
   tags: tags
   properties: {
     hardwareProfile: {
-      vmSize: 'Standard_D2s_v3'
+      vmSize: 'Standard_D2ads_v5' // AMD-based VM with Spot pricing capability, suitable for domain controller workloads
     }
     // Enable Spot pricing for cost savings
     priority: 'Spot'

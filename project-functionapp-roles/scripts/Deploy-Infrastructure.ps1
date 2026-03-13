@@ -102,6 +102,7 @@ function Test-AzureConnection {
 }
 
 function New-ResourceGroupIfNotExists {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [string]$Name,
         [string]$Location
@@ -122,6 +123,7 @@ function New-ResourceGroupIfNotExists {
 }
 
 function Invoke-BicepDeployment {
+    [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [string]$ResourceGroupName,
         [string]$TemplateFile,

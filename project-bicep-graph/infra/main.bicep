@@ -34,7 +34,7 @@ module appInfra 'modules/appInfra.bicep' = {
     clientId: identity.outputs.appId
   }
 }
-    // clientId is now passed as identity.outputs.appId
+// clientId is now passed as identity.outputs.appId
 
 // Placeholder outputs aggregating modules.
 output appId string = identity.outputs.appId

@@ -68,30 +68,30 @@ The core of the VM definition in `infra/main.bicep` looks like this:
 
 ```bicep
 resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = if (deployDomainController) {
-	name: dcVmName
-	location: location
-	tags: tags
-	properties: {
-		hardwareProfile: {
-			vmSize: 'Standard_D2s_v3'
-		}
-		priority: 'Spot'
-		evictionPolicy: 'Deallocate'
-		billingProfile: {
-			maxPrice: -1
-		}
-		osProfile: {
-			computerName: take(dcVmName, 15)
-			adminUsername: vmAdminUsername
-			adminPassword: vmAdminPassword
-			windowsConfiguration: {
-				enableAutomaticUpdates: true
-				provisionVMAgent: true
-				timeZone: 'UTC'
-			}
-		}
-		// ... storageProfile, networkProfile, diagnosticsProfile ...
-	}
+ name: dcVmName
+ location: location
+ tags: tags
+ properties: {
+  hardwareProfile: {
+   vmSize: 'Standard_D2s_v3'
+  }
+  priority: 'Spot'
+  evictionPolicy: 'Deallocate'
+  billingProfile: {
+   maxPrice: -1
+  }
+  osProfile: {
+   computerName: take(dcVmName, 15)
+   adminUsername: vmAdminUsername
+   adminPassword: vmAdminPassword
+   windowsConfiguration: {
+    enableAutomaticUpdates: true
+    provisionVMAgent: true
+    timeZone: 'UTC'
+   }
+  }
+  // ... storageProfile, networkProfile, diagnosticsProfile ...
+ }
 }
 ```
 
@@ -114,8 +114,8 @@ Every parameter—domain name, NetBIOS name, admin credentials—can be set at d
 
 If you want to go deeper on Bicep itself, the official docs are here:
 
-- Azure Bicep overview: https://learn.microsoft.com/azure/azure-resource-manager/bicep/overview
-- Bicep deployment with CLI/PowerShell: https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-cli
+- Azure Bicep overview: <https://learn.microsoft.com/azure/azure-resource-manager/bicep/overview>
+- Bicep deployment with CLI/PowerShell: <https://learn.microsoft.com/azure/azure-resource-manager/bicep/deploy-cli>
 
 ## Orchestration: Deploy-Complete.ps1, the Maestro
 
@@ -137,11 +137,11 @@ The real fun starts when you enable the domain controller flag. The script wires
 
 ```powershell
 $deployment = New-AzResourceGroupDeployment @{
-	ResourceGroupName     = $ResourceGroupName
-	TemplateFile          = $bicepFile
-	TemplateParameterFile = $parametersFile
-	vmAdminPassword       = $VmAdminPassword
-	serviceAccountPassword = $ServiceAccountPassword
+ ResourceGroupName     = $ResourceGroupName
+ TemplateFile          = $bicepFile
+ TemplateParameterFile = $parametersFile
+ vmAdminPassword       = $VmAdminPassword
+ serviceAccountPassword = $ServiceAccountPassword
 }
 ```
 
@@ -153,20 +153,20 @@ $plainPassword   = [System.Net.NetworkCredential]::new('', $VmAdminPassword).Pas
 $passwordBase64  = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($plainPassword))
 
 $null = Invoke-AzVMRunCommand -AsJob `
-	-ResourceGroupName $ResourceGroupName `
-	-VMName            $VmName `
-	-CommandId         'RunPowerShellScript' `
-	-ScriptString      $bootstrapScript `
-	-Parameter         @{
-		DomainName                  = $DomainName
-		DomainNetBiosName           = $DomainNetBiosName
-		SafeModeAdminPasswordBase64 = $passwordBase64
-	}
+ -ResourceGroupName $ResourceGroupName `
+ -VMName            $VmName `
+ -CommandId         'RunPowerShellScript' `
+ -ScriptString      $bootstrapScript `
+ -Parameter         @{
+  DomainName                  = $DomainName
+  DomainNetBiosName           = $DomainNetBiosName
+  SafeModeAdminPasswordBase64 = $passwordBase64
+ }
 ```
 
 The important detail here is the **Base64 encoding** of the Safe Mode password. Passing `SecureString` values across the Run Command boundary can lead to mangled data; by converting to UTF‑8 bytes, then to Base64, then reversing that inside the VM, I keep the password intact without logging it or exposing it in plain text outside controlled boundaries.
 
-Azure Run Command docs if you want to explore this pattern yourself: https://learn.microsoft.com/azure/virtual-machines/run-command
+Azure Run Command docs if you want to explore this pattern yourself: <https://learn.microsoft.com/azure/virtual-machines/run-command>
 
 ## The Heartbeat: Domain Controller Promotion
 
@@ -186,7 +186,7 @@ $passwordPlain = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64Str
 $passwordSec   = ConvertTo-SecureString -String $passwordPlain -AsPlainText -Force
 
 Install-ADDSForest -DomainName '$DomainName' -DomainNetbiosName '$DomainNetBiosName' `
-	-SafeModeAdministratorPassword $passwordSec -Force:$true -NoRebootOnCompletion:$false
+ -SafeModeAdministratorPassword $passwordSec -Force:$true -NoRebootOnCompletion:$false
 
 Stop-Transcript
 '@
@@ -200,7 +200,7 @@ Two key design choices here:
 1. The promotion runs in a **detached Windows PowerShell 5.1 process**. That means when the VM reboots, Azure Run Command doesn’t get “stuck” waiting on a process that no longer exists.
 2. The Safe Mode password is reconstructed from Base64 and converted to `SecureString` **inside** the VM, which avoids all the strange quoting and whitespace issues you get when trying to pass complex strings across layers.
 
-If you’re curious about the cmdlet doing the heavy lifting, `Install-ADDSForest` is documented here: https://learn.microsoft.com/powershell/module/addsdeployment/install-addsforest
+If you’re curious about the cmdlet doing the heavy lifting, `Install-ADDSForest` is documented here: <https://learn.microsoft.com/powershell/module/addsdeployment/install-addsforest>
 
 ## Detecting the Reboot: Smarter Than PowerState
 
@@ -215,24 +215,24 @@ $bootResult     = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -V
 $initialBootTime = [DateTime]::Parse(($bootResult.Value[0].Message).Trim())
 
 while ($elapsed -lt $timeout) {
-	$currentBootResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $bootTimeScript -ErrorAction SilentlyContinue
+ $currentBootResult = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VmName -CommandId 'RunPowerShellScript' -ScriptString $bootTimeScript -ErrorAction SilentlyContinue
 
-	if (-not $currentBootResult) {
-		$rebootWindowObserved = $true
-	}
-	else {
-		$currentBootTime = [DateTime]::Parse(($currentBootResult.Value[0].Message).Trim())
+ if (-not $currentBootResult) {
+  $rebootWindowObserved = $true
+ }
+ else {
+  $currentBootTime = [DateTime]::Parse(($currentBootResult.Value[0].Message).Trim())
 
-		if ($initialBootTime -and $currentBootTime -and ($currentBootTime -ne $initialBootTime)) {
-			$rebootDetected = $true
-		}
-		elseif ($rebootWindowObserved -and $currentBootTime) {
-			$rebootDetected = $true
-		}
-	}
+  if ($initialBootTime -and $currentBootTime -and ($currentBootTime -ne $initialBootTime)) {
+   $rebootDetected = $true
+  }
+  elseif ($rebootWindowObserved -and $currentBootTime) {
+   $rebootDetected = $true
+  }
+ }
 
-	if ($rebootDetected) { break }
-	Start-Sleep -Seconds $checkInterval
+ if ($rebootDetected) { break }
+ Start-Sleep -Seconds $checkInterval
 }
 ```
 
@@ -259,15 +259,15 @@ The heart of the service account creation looks like this:
 $serviceAccountPasswordSecure = ConvertTo-SecureString -String $ServiceAccountPassword -AsPlainText -Force
 
 $serviceAccountParams = @{
-	Name                 = $ServiceAccountName
-	SamAccountName       = $ServiceAccountName
-	UserPrincipalName    = "$ServiceAccountName@$DomainName"
-	AccountPassword      = $serviceAccountPasswordSecure
-	Enabled              = $true
-	PasswordNeverExpires = $true
-	CannotChangePassword = $true
-	Path                 = $ouPath
-	Description          = 'Service account for Azure Function App password reset operations'
+ Name                 = $ServiceAccountName
+ SamAccountName       = $ServiceAccountName
+ UserPrincipalName    = "$ServiceAccountName@$DomainName"
+ AccountPassword      = $serviceAccountPasswordSecure
+ Enabled              = $true
+ PasswordNeverExpires = $true
+ CannotChangePassword = $true
+ Path                 = $ouPath
+ Description          = 'Service account for Azure Function App password reset operations'
 }
 
 New-ADUser @serviceAccountParams
@@ -303,28 +303,31 @@ LDAP over SSL (port 636) isn’t something you “turn on” with a checkbox. On
 Here’s the pattern that ended up being reliable and repeatable:
 
 1. **Generate a self-signed LDAPS certificate during deployment**
-	- `Deploy-Complete.ps1` generates a cert using OpenSSL with the right constraints:
-	  - `extendedKeyUsage = serverAuth`
-	  - SANs for the DC FQDN (and a wildcard for the domain)
-	- It exports two forms:
-	  - a **PFX** (private key included) for the domain controller
-	  - a **DER `.cer`** (public key only) that’s easy for clients to parse
 
-2. **Install the PFX on the domain controller**
-	- `Configure-ADPostPromotion.ps1` imports the PFX into `Cert:\LocalMachine\My`.
-	- It performs basic sanity checks (private key present + “Server Authentication” EKU) and then does a quick `Test-NetConnection localhost -Port 636` to see if LDAPS is listening.
+- `Deploy-Complete.ps1` generates a cert using OpenSSL with the right constraints:
+  - `extendedKeyUsage = serverAuth`
+  - SANs for the DC FQDN (and a wildcard for the domain)
+- It exports two forms:
+  - a **PFX** (private key included) for the domain controller
+  - a **DER `.cer`** (public key only) that’s easy for clients to parse
 
-3. **Publish the public cert for the client to pin**
-	- The public `.cer` is stored in Key Vault as `LDAPS-Certificate-CER`.
-	- The Function App retrieves this value at runtime and uses it for **strict certificate pinning + hostname validation**.
+1. **Install the PFX on the domain controller**
+
+- `Configure-ADPostPromotion.ps1` imports the PFX into `Cert:\LocalMachine\My`.
+- It performs basic sanity checks (private key present + “Server Authentication” EKU) and then does a quick `Test-NetConnection localhost -Port 636` to see if LDAPS is listening.
+
+1. **Publish the public cert for the client to pin**
+
+- The public `.cer` is stored in Key Vault as `LDAPS-Certificate-CER`.
+- The Function App retrieves this value at runtime and uses it for **strict certificate pinning + hostname validation**.
 
 That last step is the key architectural shift: rather than trying to “teach” the Function App host to trust a private PKI (which is often blocked in sandboxed hosting), the function validates the server cert directly during the LDAPS handshake. No hostname bypass, no trust-store hacks—just strict TLS with a pinned identity.
 
 If you want to see the building blocks behind these cmdlets, the official docs are a great reference:
 
-- `New-ADUser`: https://learn.microsoft.com/powershell/module/activedirectory/new-aduser
-- `New-ADOrganizationalUnit`: https://learn.microsoft.com/powershell/module/activedirectory/new-adorganizationalunit
-- `Set-ADAccountPassword`: https://learn.microsoft.com/powershell/module/activedirectory/set-adaccountpassword
+- `New-ADUser`: <https://learn.microsoft.com/powershell/module/activedirectory/new-aduser>
+- `New-ADOrganizationalUnit`: <https://learn.microsoft.com/powershell/module/activedirectory/new-adorganizationalunit>
+- `Set-ADAccountPassword`: <https://learn.microsoft.com/powershell/module/activedirectory/set-adaccountpassword>
 
 ## Lessons Learned (and a Few Battle Scars)
 
@@ -364,28 +367,28 @@ If you want to explore or reuse this setup, here’s the key structure of the re
 
 ```text
 project-functionapp-roles/
-	FunctionApp/                  # Deployable function app code (ready to deploy as-is)
-		ResetUserPassword/          # Password reset function endpoint
-		host.json
-		profile.ps1
-		requirements.psd1
-	infra/
-		main.bicep                  # All Azure resources, including the domain controller VM
+ FunctionApp/                  # Deployable function app code (ready to deploy as-is)
+  ResetUserPassword/          # Password reset function endpoint
+  host.json
+  profile.ps1
+  requirements.psd1
+ infra/
+  main.bicep                  # All Azure resources, including the domain controller VM
         parameters.dev.json         # Parameter file for deployments
-	scripts/
-		Deploy-Complete.ps1         # Orchestrates deployment, promotion, and post-config
-		Deploy-FunctionApp.ps1      # Deploys the function app code
-		Bootstrap-ADDSDomain.ps1    # Runs inside the VM to install AD DS and promote to DC
-		Configure-ADPostPromotion.ps1 # Creates OU, service account, and test users
-	tests/                        # Pester tests for the function app
+ scripts/
+  Deploy-Complete.ps1         # Orchestrates deployment, promotion, and post-config
+  Deploy-FunctionApp.ps1      # Deploys the function app code
+  Bootstrap-ADDSDomain.ps1    # Runs inside the VM to install AD DS and promote to DC
+  Configure-ADPostPromotion.ps1 # Creates OU, service account, and test users
+ tests/                        # Pester tests for the function app
 ```
 
 You can clone the repo, tweak the parameters, and use it as your own disposable AD lab.
 
 Azure PowerShell docs for some of the commands used here:
 
-- `New-AzResourceGroupDeployment`: https://learn.microsoft.com/powershell/module/az.resources/new-azresourcegroupdeployment
-- `Get-AzVM` and `Invoke-AzVMRunCommand`: https://learn.microsoft.com/powershell/module/az.compute/invoke-azvmruncommand
+- `New-AzResourceGroupDeployment`: <https://learn.microsoft.com/powershell/module/az.resources/new-azresourcegroupdeployment>
+- `Get-AzVM` and `Invoke-AzVMRunCommand`: <https://learn.microsoft.com/powershell/module/az.compute/invoke-azvmruncommand>
 
 ## Tearing It All Down
 
@@ -403,7 +406,7 @@ At the end of the day, this whole setup is about confidence. I can spin up a ful
 
 If you want to follow along or adapt it for your own scenarios, all of the code in this post lives in my GitHub repository:
 
-- GitHub repo: https://github.com/broberts23/vsCode/project-functionapp-roles
+- GitHub repo: <https://github.com/broberts23/vsCode/project-functionapp-roles>
 
 Clone it, customize the parameters, and you’ve got your own disposable AD playground ready for experiments, demos, and (in future posts) the password reset API that sits on top of it.
 

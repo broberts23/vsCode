@@ -136,7 +136,7 @@ function Test-Prerequisites {
 
     # Check Bicep CLI
     try {
-        $null = bicep --version
+        $null = az bicep --version
         Write-Log "Bicep CLI found" -Level Success
     }
     catch {
