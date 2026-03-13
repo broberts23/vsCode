@@ -1,5 +1,6 @@
 .github/agents/beastMode3.1.agent.md
 *.env
+*.png
 *.sln
 **/project-workload-identity/scripts/out
 project-bicep-graph/src/WebApi/obj
