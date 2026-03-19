@@ -11,7 +11,7 @@ This post assumes that fundamental hybrid infrastructure is already established.
 Below are practical reasons why organizations utilize this conversion pattern:
 
 - **Legacy application authorization:** On-premises applications that rely on LDAP queries or Kerberos tokens require security groups to remain in AD DS.
-- **Modernizing access governance:** By changing the group's source of authority to Entra, administrators can utilize Entra ID Governance (like access packages and access reviews) and self-service management, which are difficult or impossible to perform efficiently in AD DS.
+- **Modernizing access governance:** By changing the group's source of authority to Entra, administrators can utilize Entra ID Governance like access packages, access reviews and self-service management, which are difficult or impossible to perform efficiently in AD DS.
 - **Shifting the management plane:** Rebuilding permission models across legacy applications is often not feasible. By transitioning group SOA to the cloud and mirroring the result backward, Entra becomes the control plane, while AD functions merely as a projection layer.
 
 It is important to note that this is not a dual-write sync. Once a group's source of authority is moved to the cloud, any direct modifications to the on-premises AD group are treated as temporary and overwritten during the next provisioning cycle.

@@ -4,7 +4,7 @@ Guardrails-as-code for **Microsoft Entra Conditional Access for workload identit
 
 This specifically showcases **Conditional Access for workload identities** and (optionally) **service principal risk** conditions.
 
-- Reference: https://learn.microsoft.com/en-us/entra/identity/conditional-access/workload-identity
+- Reference: <https://learn.microsoft.com/en-us/entra/identity/conditional-access/workload-identity>
 
 ## Goals
 
@@ -82,29 +82,29 @@ Typical validation stages:
 - Validate `policies/guardrails.json` structure, required fields, and supported workload identity CA properties.
 - Normalize and validate deterministic keys (`policyKey`) and naming conventions.
 
-2. **Safety lint rules** (fail fast)
+1. **Safety lint rules** (fail fast)
 
 - Block overly broad targeting (for example: “all service principals” unless explicitly allowed).
 - Flag risky exclusions/allowlists.
 - Require at least one “escape hatch” operational plan (break-glass runbook link / disable procedure).
 - Require `report-only` for new or materially-changed policies unless explicitly overridden.
 
-3. **Coverage checks for targeted workloads**
+1. **Coverage checks for targeted workloads**
 
 - Ensure each in-scope service principal (or “workload tier”) is covered by at least one guardrail policy.
 - Ensure each policy’s include/exclude lists resolve to valid service principal IDs.
 
-4. **Dry-run against a non-production tenant (optional but recommended)**
+1. **Dry-run against a non-production tenant (optional but recommended)**
 
 - Fetch current state from a dev/test tenant.
 - Compute the diff that would be applied.
 - Enforce guardrails like “no deletes by default” and “destructive changes require allowlist”.
 
-5. Integrate with sign-in simulation (optional)
+1. Integrate with sign-in simulation (optional)
 
 - Build a small harness that simulates sign-in attempts using different client types and signals to validate the effect of a policy before applying it.
 
-6. Tests and CI
+1. Tests and CI
    - Unit tests for the validator and integration tests that assert the scripts can fetch policy state and detect changes.
 
 These checks are designed to run both locally (`./scripts`) and in a pipeline (`workflows/ci.yml`), so policy changes get reviewed like code.
@@ -145,8 +145,8 @@ Recommended approach:
 
 Microsoft Learn:
 
-- Connect-MgGraph: https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0
-- Invoke-MgGraphRequest: https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/invoke-mggraphrequest?view=graph-powershell-1.0
+- Connect-MgGraph: <https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0>
+- Invoke-MgGraphRequest: <https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/invoke-mggraphrequest?view=graph-powershell-1.0>
 
 ### Identity + permissions
 
@@ -173,7 +173,7 @@ Your `policies/guardrails.json` typically expresses:
 
 See the workload identity Conditional Access reference JSON:
 
-- https://learn.microsoft.com/en-us/entra/identity/conditional-access/workload-identity#microsoft-graph
+- <https://learn.microsoft.com/en-us/entra/identity/conditional-access/workload-identity#microsoft-graph>
 
 ## Local dev loop
 

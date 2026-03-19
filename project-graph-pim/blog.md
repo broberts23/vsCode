@@ -6,6 +6,8 @@ Graph PowerShell is one of the most convenient ways to work with Microsoft Graph
 
 If you've ever run `Connect-MgGraph`, signed in successfully, and still hit "Insufficient privileges", you're in good company. The missing piece is usually that delegated permissions are not just about "your user" or "the cmdlet" - they're about the combination of:
 
+> [Screenshot placeholder: PowerShell terminal showing a bright red "Insufficient privileges" error after a Connect-MgGraph attempt. This validates the reader's pain point immediately.]
+
 - the **client application** you're signing in with (for Graph PowerShell default sign-in, "Microsoft Graph Command Line Tools"), and
 - the **user** who signed in.
 
@@ -23,7 +25,7 @@ That means a user with **no Entra ID admin roles** can still perform tenant-wide
 - Graph doesn't require an admin role for that specific operation, and
 - your tenant policies don't block it.
 
-For example, if an admin grants admin consent for `User.Read.All` and/or `Group.Read.All` to Microsoft Graph Command Line Tools, a standard user can request those scopes and enumerate users/groups. This allows any employee to download your entire corporate directory (names, emails, job titles) for phishing reconnaissance, which is normally blocked for standard users in many organizations.
+For example, if an admin grants admin consent for `User.Read.All` and/or `Group.Read.All` to Microsoft Graph Command Line Tools, a standard user can request those scopes and enumerate users/groups. This allows any employee to download your entire corporate directory (names, emails, job titles) for phishing reconnaissance, which is normally blocked for standard users in many enterprise organizations.
 
 ```powershell
 Connect-MgGraph -Scopes "User.Read.All","Group.Read.All"
@@ -50,6 +52,8 @@ Delegated permissions are always "app + user". That's not a philosophical point 
 ### Why the client app name matters ("Microsoft Graph Command Line Tools")
 
 When you run `Connect-MgGraph`, you're not just "signing into Graph". You're signing into a client application that requests Microsoft Graph scopes on your behalf.
+
+> [Screenshot placeholder: The Entra admin center 'Enterprise applications' blade showing 'All applications' filtered to 'Microsoft Graph Command Line Tools' to visualize the client app object.]
 
 So when you grant/admin-consent delegated permissions, you're granting them to **Microsoft Graph Command Line Tools** (the Enterprise application / service principal in your tenant). If you grant permissions to some *other* app registration, but still authenticate with the Command Line Tools app, nothing changes for your `Connect-MgGraph` session.
 
@@ -92,6 +96,8 @@ This is why two people can run the same cmdlet with the same `-Scopes` list and 
 ## Consent: user consent vs admin consent
 
 Consent answers a simple question: "Is this client application allowed to have this scope in this tenant?"
+
+> [Screenshot placeholder: A side-by-side comparison of the 'Permissions requested' OAuth prompt shown to a standard user vs the 'Admin consent requested' prompt shown for high-privilege scopes. Highlights the difference between the two flows.]
 
 In most tenants:
 
@@ -231,7 +237,7 @@ High-level steps:
 2. Open **Enterprise applications**.
 3. Find and open **Microsoft Graph Command Line Tools**.
 4. Open the permissions/consent page (**Permissions** or **Security > Permissions**).
-5. Add/select the delegated permission(s) you need (example: `User.ReadWrite.All`, `Group.ReadWrite.All`).
+5. Review the permissions the app is requesting, then grant admin consent if appropriate (example: `User.ReadWrite.All`, `Group.ReadWrite.All`).
 6. Choose **Grant admin consent** for your tenant (if required).
 
 > [Screenshot placeholder: Microsoft Graph Command Line Tools - Permissions page]

@@ -6,7 +6,7 @@ Source: [Configure Microsoft Entra for increased security](https://learn.microso
 
 ## Project Structure
 
-```
+```text
 project-workload-identity/
 ├── scripts/
 │   ├── Install-Dependencies.ps1       # Install required PowerShell modules
@@ -73,6 +73,7 @@ $triage.Distribution.ByRiskLevel | Format-Table
 ## Scan Outputs
 
 **Artifacts** (JSON/CSV in `./out/`)
+
 - `credential-inventory.json/csv` — credential details, expiry, risk scores
 - `privileged-roles.json/csv` — directory role assignments
 - `high-privilege-app-permissions.json/csv` — dangerous app permissions
@@ -88,11 +89,12 @@ $triage.Distribution.ByRiskLevel | Format-Table
 Invoke-Pester -Path ./tests/Unit/
 ```
 
-Pester docs: https://learn.microsoft.com/powershell/scripting/testing/overview?view=powershell-7.4
+Pester docs: <https://learn.microsoft.com/powershell/scripting/testing/overview?view=powershell-7.4>
 
 ## CI/CD Setup
 
 For GitHub Actions integration, see [TROUBLESHOOTING-CI.md](TROUBLESHOOTING-CI.md) for complete setup instructions including:
+
 - Granting Graph application permissions to service principal
 - Configuring federated credentials for OIDC authentication
 - Common authentication errors and solutions

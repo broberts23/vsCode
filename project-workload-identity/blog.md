@@ -18,7 +18,7 @@ If you're following Microsoft's guidance on [protecting identities and secrets](
 
 - **Microsoft Entra ID P2 or Microsoft Entra ID Governance** — Required to access Identity Protection risk detections for workload identities (the `risky-service-principals.json` and `risky-service-principal-triage.json` artifacts). Basic risk visibility (limited reporting details) is available without premium licenses, but full risk details and risk-based actions require a premium subscription.
 
-- **Microsoft Entra Workload Identities Premium** — Required to create or modify Conditional Access policies scoped to service principals, to use risk-based Conditional Access conditions for workload identities, and to conduct access reviews of service principals in Privileged Identity Management. You can view, start a trial, and acquire licenses at https://portal.azure.com/#view/Microsoft_Azure_ManagedServiceIdentity/WorkloadIdentitiesBlade.
+- **Microsoft Entra Workload Identities Premium** — Required to create or modify Conditional Access policies scoped to service principals, to use risk-based Conditional Access conditions for workload identities, and to conduct access reviews of service principals in Privileged Identity Management. You can view, start a trial, and acquire licenses at <https://portal.azure.com/#view/Microsoft_Azure_ManagedServiceIdentity/WorkloadIdentitiesBlade>.
 
 - **Access Reviews for service principals** — Requires both Workload Identities Premium and an ID Governance or ID P2 license.
 
@@ -26,9 +26,9 @@ The core scanning and reporting functionality—credential inventory, privileged
 
 For more information, see:
 
-- Microsoft Entra Workload ID licensing: https://www.microsoft.com/security/business/identity-access/microsoft-entra-workload-identities
-- Microsoft Entra ID Governance licensing: https://learn.microsoft.com/en-us/entra/id-governance/licensing-fundamentals
-- Conditional Access for workload identities: https://learn.microsoft.com/en-us/entra/identity/conditional-access/workload-identity
+- Microsoft Entra Workload ID licensing: <https://www.microsoft.com/security/business/identity-access/microsoft-entra-workload-identities>
+- Microsoft Entra ID Governance licensing: <https://learn.microsoft.com/en-us/entra/id-governance/licensing-fundamentals>
+- Conditional Access for workload identities: <https://learn.microsoft.com/en-us/entra/identity/conditional-access/workload-identity>
 
 ## What This Toolkit Does
 
@@ -114,7 +114,7 @@ The heavy lifting happens in a handful of cmdlets that map directly to Microsoft
 
 **`Get-WiTenantConsentSettings`** fetches the authorization policy (`Get-MgPolicyAuthorizationPolicy`) and extracts the consent knobs: whether users can consent to apps, whether admin consent workflows are enabled, who can create apps, and whether email verification is required. This is the posture that controls how workload identities proliferate in your tenant.
 
-**Classification & Attributes:** Beyond discovery, you can map discovered apps to custom security attributes (e.g., `RiskTier`, `RemediationPhase`, `DataSensitivity`) using Microsoft Graph PowerShell. Custom security attributes in Entra ID enable filtered views and targeted policy scope—for example, applying stricter Conditional Access policies to apps tagged with `DataSensitivity=High` or tracking migration progress with `RemediationPhase=InProgress`. While the toolkit doesn't automatically assign these attributes, the credential inventory and high-privilege permissions data provide the inputs for classification decisions. See https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/custom-security-attributes-apps for implementation guidance.
+**Classification & Attributes:** Beyond discovery, you can map discovered apps to custom security attributes (e.g., `RiskTier`, `RemediationPhase`, `DataSensitivity`) using Microsoft Graph PowerShell. Custom security attributes in Entra ID enable filtered views and targeted policy scope—for example, applying stricter Conditional Access policies to apps tagged with `DataSensitivity=High` or tracking migration progress with `RemediationPhase=InProgress`. While the toolkit doesn't automatically assign these attributes, the credential inventory and high-privilege permissions data provide the inputs for classification decisions. See <https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/custom-security-attributes-apps> for implementation guidance.
 
 **`Get-WiBetaRiskyServicePrincipal`** and **`Get-WiBetaRiskyServicePrincipalHistory`** hit the Identity Protection beta endpoints to pull risky workload identities. These are service principals that Microsoft's risk detection systems have flagged—maybe they authenticated from an anonymous IP, or their credentials showed up in a breach, or there was anomalous sign-in behavior. The triage report (`Get-WiRiskyServicePrincipalTriageReport`) aggregates the distribution by risk level and risk state so you can see at a glance how many are at risk vs. confirmed compromised vs. dismissed.
 
@@ -130,7 +130,7 @@ Once you've identified problems, the toolkit provides helpers to fix them:
 
 All of these require elevated permissions: `Application.ReadWrite.All` for credential changes, `IdentityRiskyServicePrincipal.ReadWrite.All` plus the Security Administrator role for risk actions. The module won't prompt you for consent on the fly—you need to authenticate with those scopes upfront.
 
-**Post-remediation governance:** After addressing immediate risks, seed Privileged Identity Management (PIM) recurring access reviews from the `privileged-roles.json` and `high-privilege-app-permissions.json` artifacts. Access reviews for service principals require Workload Identities Premium plus ID Governance licensing. Generate a CSV of candidate service principals with their role assignments, last sign-in dates, and permission counts, then import that scope into PIM to establish quarterly or semi-annual entitlement hygiene reviews. This closes the loop from discovery → remediation → ongoing governance. See https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-create-roles-and-resource-roles-review for setup guidance.
+**Post-remediation governance:** After addressing immediate risks, seed Privileged Identity Management (PIM) recurring access reviews from the `privileged-roles.json` and `high-privilege-app-permissions.json` artifacts. Access reviews for service principals require Workload Identities Premium plus ID Governance licensing. Generate a CSV of candidate service principals with their role assignments, last sign-in dates, and permission counts, then import that scope into PIM to establish quarterly or semi-annual entitlement hygiene reviews. This closes the loop from discovery → remediation → ongoing governance. See <https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-create-roles-and-resource-roles-review> for setup guidance.
 
 ## Running It Yourself
 
@@ -339,22 +339,22 @@ A few things to keep in mind as you use this toolkit:
 
 PowerShell / Testing:
 
-- Pester overview: https://learn.microsoft.com/powershell/scripting/testing/overview?view=powershell-7.4
+- Pester overview: <https://learn.microsoft.com/powershell/scripting/testing/overview?view=powershell-7.4>
 
 Graph SDK (v1.0):
 
-- Connect-MgGraph: https://learn.microsoft.com/powershell/microsoftgraph/authentication/connect-mggraph?view=graph-powershell-1.0
-- Get-MgApplication: https://learn.microsoft.com/powershell/module/microsoft.graph.applications/get-mgapplication?view=graph-powershell-1.0
-- New-MgApplicationFederatedIdentityCredential: https://learn.microsoft.com/powershell/module/microsoft.graph.applications/new-mgapplicationfederatedidentitycredential?view=graph-powershell-1.0
-- Add-MgApplicationKey: https://learn.microsoft.com/powershell/module/microsoft.graph.applications/add-mgapplicationkey?view=graph-powershell-1.0
-- Get-MgPolicyAuthorizationPolicy: https://learn.microsoft.com/powershell/module/microsoft.graph.identity.signins/get-mgpolicyauthorizationpolicy?view=graph-powershell-1.0
+- Connect-MgGraph: <https://learn.microsoft.com/powershell/microsoftgraph/authentication/connect-mggraph?view=graph-powershell-1.0>
+- Get-MgApplication: <https://learn.microsoft.com/powershell/module/microsoft.graph.applications/get-mgapplication?view=graph-powershell-1.0>
+- New-MgApplicationFederatedIdentityCredential: <https://learn.microsoft.com/powershell/module/microsoft.graph.applications/new-mgapplicationfederatedidentitycredential?view=graph-powershell-1.0>
+- Add-MgApplicationKey: <https://learn.microsoft.com/powershell/module/microsoft.graph.applications/add-mgapplicationkey?view=graph-powershell-1.0>
+- Get-MgPolicyAuthorizationPolicy: <https://learn.microsoft.com/powershell/module/microsoft.graph.identity.signins/get-mgpolicyauthorizationpolicy?view=graph-powershell-1.0>
 
 Graph Beta (Risky Workload Identities):
 
-- List risky SPs: https://learn.microsoft.com/en-us/graph/api/identityprotectionroot-list-riskyserviceprincipals?view=graph-rest-beta
-- Risk history: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-list-history?view=graph-rest-beta
-- Confirm compromised: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-confirmcompromised?view=graph-rest-beta
-- Dismiss risk: https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-dismiss?view=graph-rest-beta
+- List risky SPs: <https://learn.microsoft.com/en-us/graph/api/identityprotectionroot-list-riskyserviceprincipals?view=graph-rest-beta>
+- Risk history: <https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-list-history?view=graph-rest-beta>
+- Confirm compromised: <https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-confirmcompromised?view=graph-rest-beta>
+- Dismiss risk: <https://learn.microsoft.com/en-us/graph/api/riskyserviceprincipal-dismiss?view=graph-rest-beta>
 
 ## Where to Go From Here
 
