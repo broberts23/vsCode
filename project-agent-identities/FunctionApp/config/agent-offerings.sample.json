@@ -1,0 +1,133 @@
+{
+  "version": "2026-03-28",
+  "offerings": [
+    {
+      "offeringId": "service-desk-mail-triage",
+      "displayName": "Service Desk Mail Triage Agent",
+      "description": "Creates a governed support operations agent with bounded mail, calendar, and Teams access.",
+      "blueprint": {
+        "displayName": "AVM Service Desk Blueprint",
+        "description": "Blueprint for support agents provisioned by the Agent Vending Machine.",
+        "verifiedPublisher": "Contoso IT",
+        "requiresAccessAgentScope": true,
+        "credentialStrategy": "ManagedIdentityFederatedCredential",
+        "credentialSource": "FunctionAppManagedIdentity",
+        "optionalClaims": [
+          "idtyp"
+        ]
+      },
+      "authorization": {
+        "entraRolesAllowed": [
+          "Directory Readers"
+        ],
+        "graphDelegatedPermissions": [
+          "Mail.Read",
+          "Files.Read",
+          "User.Read"
+        ],
+        "graphApplicationPermissions": [
+          "User.Read.All"
+        ],
+        "blockedPermissionReference": "https://learn.microsoft.com/en-us/entra/agent-id/identity-professional/authorization-agent-id#microsoft-graph-permissions-for-agent-ids"
+      },
+      "accessPackage": {
+        "catalogDisplayName": "Agent Vending Machine Catalog",
+        "catalogIsPrivileged": true,
+        "displayName": "AP - Service Desk Mail Triage",
+        "assignmentMode": "SponsorApproval",
+        "assignmentPolicyDisplayName": "Agent identities - sponsor approved",
+        "resources": {
+          "groups": [
+            "Support Operations Agents"
+          ],
+          "entraRoles": [
+            "Directory Readers"
+          ],
+          "apiPermissions": [
+            "User.Read.All"
+          ]
+        },
+        "lifecycle": {
+          "durationInDays": 30,
+          "allowExtension": true,
+          "requireApprovalForExtension": true
+        }
+      },
+      "agentUser": {
+        "enabledByDefault": true,
+        "licenseRequired": true,
+        "workIqTools": [
+          "Work IQ Mail",
+          "Work IQ Calendar",
+          "Work IQ Teams",
+          "Work IQ User"
+        ],
+        "scenarios": [
+          "Round-the-clock support mailbox triage",
+          "Recurring incident channel coordination"
+        ]
+      }
+    },
+    {
+      "offeringId": "project-coordinator",
+      "displayName": "Project Coordinator Agent",
+      "description": "Creates a project coordination agent with optional user-shaped collaboration capabilities.",
+      "blueprint": {
+        "displayName": "AVM Project Coordinator Blueprint",
+        "description": "Blueprint for recurring project coordination agents.",
+        "verifiedPublisher": "Contoso PMO",
+        "requiresAccessAgentScope": true,
+        "credentialStrategy": "ManagedIdentityFederatedCredential",
+        "credentialSource": "FunctionAppManagedIdentity",
+        "optionalClaims": [
+          "idtyp"
+        ]
+      },
+      "authorization": {
+        "entraRolesAllowed": [
+          "Directory Readers"
+        ],
+        "graphDelegatedPermissions": [
+          "Calendars.ReadWrite",
+          "Files.Read",
+          "User.Read"
+        ],
+        "graphApplicationPermissions": [],
+        "blockedPermissionReference": "https://learn.microsoft.com/en-us/entra/agent-id/identity-professional/authorization-agent-id#microsoft-graph-permissions-for-agent-ids"
+      },
+      "accessPackage": {
+        "catalogDisplayName": "Agent Vending Machine Catalog",
+        "catalogIsPrivileged": false,
+        "displayName": "AP - Project Coordinator",
+        "assignmentMode": "AdminDirectAssignment",
+        "assignmentPolicyDisplayName": "Agent identities - direct assignment",
+        "resources": {
+          "groups": [
+            "Project Coordination Agents"
+          ],
+          "entraRoles": [],
+          "apiPermissions": []
+        },
+        "lifecycle": {
+          "durationInDays": 14,
+          "allowExtension": true,
+          "requireApprovalForExtension": false
+        }
+      },
+      "agentUser": {
+        "enabledByDefault": true,
+        "licenseRequired": true,
+        "workIqTools": [
+          "Work IQ Calendar",
+          "Work IQ Teams",
+          "Work IQ SharePoint",
+          "Work IQ User"
+        ],
+        "scenarios": [
+          "Planning meeting coordination",
+          "Action item follow-up across Teams and SharePoint"
+        ]
+      }
+    }
+  ]
+}

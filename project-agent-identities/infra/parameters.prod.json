@@ -1,0 +1,38 @@
+{
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "deploymentEnvironment": {
+      "value": "prod"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "baseName": {
+      "value": "agentvend"
+    },
+    "tenantId": {
+      "value": "00000000-0000-0000-0000-000000000000"
+    },
+    "easyAuthClientId": {
+      "value": "00000000-0000-0000-0000-000000000000"
+    },
+    "requiredAdminRole": {
+      "value": "Agent.Vending.Admin"
+    },
+    "graphTenantId": {
+      "value": "contoso.onmicrosoft.com"
+    },
+    "executionMode": {
+      "value": "DryRun"
+    },
+    "offerCatalogPath": {
+      "value": "config/agent-offerings.sample.json"
+    },
+    "defaultAgentSponsorObjectIds": {
+      "value": ""
+    },
+    "defaultAgentOwnerObjectIds": {
+      "value": ""
+    }
+  }
+}
