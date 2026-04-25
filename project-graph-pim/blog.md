@@ -6,7 +6,7 @@ Graph PowerShell is one of the most convenient ways to work with Microsoft Graph
 
 If you've ever run `Connect-MgGraph`, signed in successfully, and still hit "Insufficient privileges", you're in good company. The missing piece is usually that delegated permissions are not just about "your user" or "the cmdlet" - they're about the combination of:
 
-> [Screenshot placeholder: PowerShell terminal showing a bright red "Insufficient privileges" error after a Connect-MgGraph attempt. This validates the reader's pain point immediately.]
+> [Screenshot placeholder: PowerShell terminal showing a bright red "Insufficient privileges" error after a Connect-MgGraph attempt.]
 
 - the **client application** you're signing in with (for Graph PowerShell default sign-in, "Microsoft Graph Command Line Tools"), and
 - the **user** who signed in.
@@ -97,7 +97,7 @@ This is why two people can run the same cmdlet with the same `-Scopes` list and 
 
 Consent answers a simple question: "Is this client application allowed to have this scope in this tenant?"
 
-> [Screenshot placeholder: A side-by-side comparison of the 'Permissions requested' OAuth prompt shown to a standard user vs the 'Admin consent requested' prompt shown for high-privilege scopes. Highlights the difference between the two flows.]
+> [Screenshot placeholder: the 'Admin consent requested' prompt shown for high-privilege scopes.]
 
 In most tenants:
 
@@ -133,18 +133,18 @@ Think of it like two separate gates you have to pass through:
 
 So yes: assigning **User Administrator** might be necessary for certain user-management operations, but it is not sufficient. If your token only has `User.Read` (the default in many examples), Graph will still block write operations because the scope isn't there.
 
-### Scenario: `Directory.ReadWrite.All` is admin-consented, but the user is only "User Administrator"
+### Scenario: `Directory.ReadWrite.All` is admin-consented, but the user has no admin roles. Can they create a group?
 
 This scenario shows why admin consent and role assignment are separate controls.
 
 Setup:
 
 - An admin has granted **admin consent** for `Directory.ReadWrite.All` to **Microsoft Graph Command Line Tools**.
-- The user is assigned the **User Administrator** Entra role.
+- The user has no admin roles assigned.
 
 #### What still trips people up (and how to verify it)
 
-Even with admin consent in place, the user still has to **request** the scope at sign-in time. If they run `Connect-MgGraph` without `-Scopes`, they may not get `Directory.ReadWrite.All` in their token.
+Even with admin consent in place, the user still needs that delegated permission to be available in the client app + user context. In practice, once broad delegated scopes have already been consented to Microsoft Graph Command Line Tools, later `Connect-MgGraph` sessions can continue to surface those previously granted scopes in the session context, even if you specify a narrower `-Scopes` list or omit `-Scopes` entirely.
 
 ```powershell
 Disconnect-MgGraph
@@ -166,8 +166,8 @@ With `Directory.ReadWrite.All` in the token, Graph has the scope it needs for a 
 > [Screenshot placeholder: `Get-MgContext` showing `Directory.ReadWrite.All`]
 >
 > [Screenshot placeholder: Tenant setting restricting group creation (if applicable)]
-
-If you want to make this section very real in the post, you can show a "known good" group create call right after you connect:
+>
+> [Screenshot placeholder: failing `New-MgGroup` command due to policy restriction, even with `Directory.ReadWrite.All` in the token]
 
 ```powershell
 # Security group example
@@ -186,7 +186,7 @@ So the pattern to remember is: admin consent + a tenant-wide scope can reduce "m
 
 ## How to secure Microsoft Graph Command Line Tools (step-by-step)
 
-### Step 0 (recommended): Restrict who can sign into the app
+### Step 0: Restrict who can sign into the app
 
 Before you add more delegated permissions to Microsoft Graph Command Line Tools, decide who is allowed to authenticate with it. This is the difference between "admin-consenting a tool for the admin team" and "admin-consenting a tool for the whole tenant".
 
@@ -199,8 +199,6 @@ When **Assignment required?** is enabled, only assigned users/groups can access 
 
 > [Screenshot placeholder: Microsoft Graph Command Line Tools - Properties - "Assignment required"]
 >
-> [Screenshot placeholder: Microsoft Graph Command Line Tools - Users and groups assignments]
->
 > [Screenshot placeholder: Conditional Access policy targeting Microsoft Graph Command Line Tools]
 
 Suggested implementation steps:
@@ -210,6 +208,8 @@ Suggested implementation steps:
    - Set **Assignment required?** to **Yes**.
    - Assign the `GraphCommandLineTools-Allowed` group under **Users and groups**.
 3. Create a Conditional Access policy targeting **Microsoft Graph Command Line Tools** that requires MFA (and, ideally, compliant/managed devices).
+
+This scenario would also be a great candidate for an Entra Access Review to ensure the right users maintain access over time, or a PIM-enabled group for just-in-time access.
 
 If you skip this step and you admin-consent tenant-wide delegated scopes, you're relying on "whoever can run PowerShell" as an access control boundary.
 
@@ -226,10 +226,6 @@ If the sign-in succeeds and `Get-MgContext` shows `User.ReadWrite.All`, great. I
 ### Step 2: Review/grant consent to Microsoft Graph Command Line Tools (Entra admin center)
 
 You do this in the Entra admin center by granting the delegated permissions to the **Enterprise application** named "Microsoft Graph Command Line Tools".
-
-> [Screenshot placeholder: Entra admin center - Home]
->
-> [Screenshot placeholder: Enterprise applications - search "Microsoft Graph Command Line Tools"]
 
 High-level steps:
 
@@ -285,6 +281,31 @@ Hardening moves:
 > [Screenshot placeholder: Consent and permissions - User consent settings]
 >
 > [Screenshot placeholder: Consent and permissions - Admin consent workflow settings]
+
+## An alternate approach: Why a dedicated Graph PowerShell client is safer
+
+The safest pattern is usually not "admin-consent less to Microsoft Graph Command Line Tools." It's "stop using the shared client for privileged work."
+
+Instead, create your own Entra app registration for Graph PowerShell sign-in and use that client ID with `Connect-MgGraph`. That gives you a separate enterprise application with its own consent history, Conditional Access targeting, sign-in logs, and assignment controls.
+
+Why this matters:
+
+- **Permission isolation:** high-privilege delegated scopes are granted to *your* admin-only Graph client, not to the shared Microsoft Graph Command Line Tools app.
+- **Access control:** you can set **Assignment required? = Yes** and only assign a small admin group to the enterprise application.
+- **Cleaner governance:** reviews become easier because the app exists for one purpose instead of being a catch-all client used by anyone running Graph PowerShell.
+- **Safer experimentation:** if you need to test risky scopes like `Directory.ReadWrite.All`, you can do it in an isolated client without expanding the blast radius for every allowed user of the default app.
+
+In practice, this means an ordinary user can keep using the default Graph PowerShell client for low-risk tasks, while privileged administrators use a separate dedicated client for elevated operations.
+
+Conceptually, the flow looks like this:
+
+```powershell
+Connect-MgGraph -ClientId "<admin-graph-client-app-id>" -TenantId "<tenant-id>"
+```
+
+At that point, the delegated token is being issued to *your* client application instead of Microsoft Graph Command Line Tools. So if `Directory.ReadWrite.All` is admin-consented to that dedicated client, only users who are allowed to use that client can request it.
+
+This doesn't remove the need for Entra roles. Graph still evaluates both the token scopes and the signed-in user's privileges. What it does remove is the unnecessary exposure that comes from attaching powerful delegated permissions to a broadly available shared client.
 
 ### Example: why `New-MgGroupMemberByRef` is a good canary
 
