@@ -1,0 +1,1019 @@
+[
+  {
+    "id": "user-member-001",
+    "user_principal_name": "member001@contosolab.onmicrosoft.com",
+    "display_name": "Member User 001",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Identity Administrator",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-access-reviewers"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-002",
+    "user_principal_name": "member002@contosolab.onmicrosoft.com",
+    "display_name": "Member User 002",
+    "user_type": "Member",
+    "department": "Governance",
+    "job_title": "Security Analyst",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-pim-admins",
+      "group-access-reviewers"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-003",
+    "user_principal_name": "member003@contosolab.onmicrosoft.com",
+    "display_name": "Member User 003",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Governance Analyst",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-access-reviewers"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-004",
+    "user_principal_name": "member004@contosolab.onmicrosoft.com",
+    "display_name": "Member User 004",
+    "user_type": "Member",
+    "department": "Human Resources",
+    "job_title": "Finance Analyst",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-access-reviewers"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-005",
+    "user_principal_name": "member005@contosolab.onmicrosoft.com",
+    "display_name": "Member User 005",
+    "user_type": "Member",
+    "department": "Security Operations",
+    "job_title": "Project Manager",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-pim-admins"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-006",
+    "user_principal_name": "member006@contosolab.onmicrosoft.com",
+    "display_name": "Member User 006",
+    "user_type": "Member",
+    "department": "Engineering",
+    "job_title": "Support Engineer",
+    "manager_id": "user-member-001",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-007",
+    "user_principal_name": "member007@contosolab.onmicrosoft.com",
+    "display_name": "Member User 007",
+    "user_type": "Member",
+    "department": "Sales",
+    "job_title": "Cloud Engineer",
+    "manager_id": "user-member-002",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-008",
+    "user_principal_name": "member008@contosolab.onmicrosoft.com",
+    "display_name": "Member User 008",
+    "user_type": "Member",
+    "department": "Customer Success",
+    "job_title": "HR Specialist",
+    "manager_id": "user-member-003",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-009",
+    "user_principal_name": "member009@contosolab.onmicrosoft.com",
+    "display_name": "Member User 009",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Identity Administrator",
+    "manager_id": "user-member-004",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-010",
+    "user_principal_name": "member010@contosolab.onmicrosoft.com",
+    "display_name": "Member User 010",
+    "user_type": "Member",
+    "department": "Governance",
+    "job_title": "Security Analyst",
+    "manager_id": "user-member-005",
+    "group_ids": [
+      "group-finance-approvers"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-011",
+    "user_principal_name": "member011@contosolab.onmicrosoft.com",
+    "display_name": "Member User 011",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Governance Analyst",
+    "manager_id": "user-member-006",
+    "group_ids": [
+      "group-finance-app-users"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-012",
+    "user_principal_name": "member012@contosolab.onmicrosoft.com",
+    "display_name": "Member User 012",
+    "user_type": "Member",
+    "department": "Human Resources",
+    "job_title": "Finance Analyst",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-finance-app-users"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-013",
+    "user_principal_name": "member013@contosolab.onmicrosoft.com",
+    "display_name": "Member User 013",
+    "user_type": "Member",
+    "department": "Security Operations",
+    "job_title": "Project Manager",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-finance-app-users"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-014",
+    "user_principal_name": "member014@contosolab.onmicrosoft.com",
+    "display_name": "Member User 014",
+    "user_type": "Member",
+    "department": "Engineering",
+    "job_title": "Support Engineer",
+    "manager_id": "user-member-003",
+    "group_ids": [
+      "group-finance-app-users"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-015",
+    "user_principal_name": "member015@contosolab.onmicrosoft.com",
+    "display_name": "Member User 015",
+    "user_type": "Member",
+    "department": "Sales",
+    "job_title": "Cloud Engineer",
+    "manager_id": "user-member-004",
+    "group_ids": [
+      "group-finance-approvers"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-016",
+    "user_principal_name": "member016@contosolab.onmicrosoft.com",
+    "display_name": "Member User 016",
+    "user_type": "Member",
+    "department": "Customer Success",
+    "job_title": "HR Specialist",
+    "manager_id": "user-member-005",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-017",
+    "user_principal_name": "member017@contosolab.onmicrosoft.com",
+    "display_name": "Member User 017",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Identity Administrator",
+    "manager_id": "user-member-006",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-018",
+    "user_principal_name": "member018@contosolab.onmicrosoft.com",
+    "display_name": "Member User 018",
+    "user_type": "Member",
+    "department": "Governance",
+    "job_title": "Security Analyst",
+    "manager_id": "user-member-001",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-019",
+    "user_principal_name": "member019@contosolab.onmicrosoft.com",
+    "display_name": "Member User 019",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Governance Analyst",
+    "manager_id": "user-member-002",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-020",
+    "user_principal_name": "member020@contosolab.onmicrosoft.com",
+    "display_name": "Member User 020",
+    "user_type": "Member",
+    "department": "Human Resources",
+    "job_title": "Finance Analyst",
+    "manager_id": "user-member-003",
+    "group_ids": [
+      "group-security-ops"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-021",
+    "user_principal_name": "member021@contosolab.onmicrosoft.com",
+    "display_name": "Member User 021",
+    "user_type": "Member",
+    "department": "Security Operations",
+    "job_title": "Project Manager",
+    "manager_id": "user-member-004",
+    "group_ids": [
+      "group-security-ops"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-022",
+    "user_principal_name": "member022@contosolab.onmicrosoft.com",
+    "display_name": "Member User 022",
+    "user_type": "Member",
+    "department": "Engineering",
+    "job_title": "Support Engineer",
+    "manager_id": "user-member-005",
+    "group_ids": [
+      "group-security-ops"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-023",
+    "user_principal_name": "member023@contosolab.onmicrosoft.com",
+    "display_name": "Member User 023",
+    "user_type": "Member",
+    "department": "Sales",
+    "job_title": "Cloud Engineer",
+    "manager_id": "user-member-006",
+    "group_ids": [
+      "group-security-ops"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-024",
+    "user_principal_name": "member024@contosolab.onmicrosoft.com",
+    "display_name": "Member User 024",
+    "user_type": "Member",
+    "department": "Customer Success",
+    "job_title": "HR Specialist",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-helpdesk-tier2"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-025",
+    "user_principal_name": "member025@contosolab.onmicrosoft.com",
+    "display_name": "Member User 025",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Identity Administrator",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-helpdesk-tier2"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-026",
+    "user_principal_name": "member026@contosolab.onmicrosoft.com",
+    "display_name": "Member User 026",
+    "user_type": "Member",
+    "department": "Governance",
+    "job_title": "Security Analyst",
+    "manager_id": "user-member-003",
+    "group_ids": [
+      "group-helpdesk-tier2"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-027",
+    "user_principal_name": "member027@contosolab.onmicrosoft.com",
+    "display_name": "Member User 027",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Governance Analyst",
+    "manager_id": "user-member-004",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-028",
+    "user_principal_name": "member028@contosolab.onmicrosoft.com",
+    "display_name": "Member User 028",
+    "user_type": "Member",
+    "department": "Human Resources",
+    "job_title": "Finance Analyst",
+    "manager_id": "user-member-005",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-029",
+    "user_principal_name": "member029@contosolab.onmicrosoft.com",
+    "display_name": "Member User 029",
+    "user_type": "Member",
+    "department": "Security Operations",
+    "job_title": "Project Manager",
+    "manager_id": "user-member-006",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-030",
+    "user_principal_name": "member030@contosolab.onmicrosoft.com",
+    "display_name": "Member User 030",
+    "user_type": "Member",
+    "department": "Engineering",
+    "job_title": "Support Engineer",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-sales-crm-users"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-031",
+    "user_principal_name": "member031@contosolab.onmicrosoft.com",
+    "display_name": "Member User 031",
+    "user_type": "Member",
+    "department": "Sales",
+    "job_title": "Cloud Engineer",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-sales-crm-users"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-032",
+    "user_principal_name": "member032@contosolab.onmicrosoft.com",
+    "display_name": "Member User 032",
+    "user_type": "Member",
+    "department": "Customer Success",
+    "job_title": "HR Specialist",
+    "manager_id": "user-member-003",
+    "group_ids": [
+      "group-sales-crm-users"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-033",
+    "user_principal_name": "member033@contosolab.onmicrosoft.com",
+    "display_name": "Member User 033",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Identity Administrator",
+    "manager_id": "user-member-004",
+    "group_ids": [
+      "group-sales-crm-users"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-034",
+    "user_principal_name": "member034@contosolab.onmicrosoft.com",
+    "display_name": "Member User 034",
+    "user_type": "Member",
+    "department": "Governance",
+    "job_title": "Security Analyst",
+    "manager_id": "user-member-005",
+    "group_ids": [
+      "group-sales-crm-users"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-035",
+    "user_principal_name": "member035@contosolab.onmicrosoft.com",
+    "display_name": "Member User 035",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Governance Analyst",
+    "manager_id": "user-member-006",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-036",
+    "user_principal_name": "member036@contosolab.onmicrosoft.com",
+    "display_name": "Member User 036",
+    "user_type": "Member",
+    "department": "Human Resources",
+    "job_title": "Finance Analyst",
+    "manager_id": "user-member-001",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-037",
+    "user_principal_name": "member037@contosolab.onmicrosoft.com",
+    "display_name": "Member User 037",
+    "user_type": "Member",
+    "department": "Security Operations",
+    "job_title": "Project Manager",
+    "manager_id": "user-member-002",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-038",
+    "user_principal_name": "member038@contosolab.onmicrosoft.com",
+    "display_name": "Member User 038",
+    "user_type": "Member",
+    "department": "Engineering",
+    "job_title": "Support Engineer",
+    "manager_id": "user-member-003",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-039",
+    "user_principal_name": "member039@contosolab.onmicrosoft.com",
+    "display_name": "Member User 039",
+    "user_type": "Member",
+    "department": "Sales",
+    "job_title": "Cloud Engineer",
+    "manager_id": "user-member-004",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-040",
+    "user_principal_name": "member040@contosolab.onmicrosoft.com",
+    "display_name": "Member User 040",
+    "user_type": "Member",
+    "department": "Customer Success",
+    "job_title": "HR Specialist",
+    "manager_id": "user-member-005",
+    "group_ids": [
+      "group-engineering-prod-readers"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-041",
+    "user_principal_name": "member041@contosolab.onmicrosoft.com",
+    "display_name": "Member User 041",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Identity Administrator",
+    "manager_id": "user-member-006",
+    "group_ids": [
+      "group-engineering-prod-readers"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-042",
+    "user_principal_name": "member042@contosolab.onmicrosoft.com",
+    "display_name": "Member User 042",
+    "user_type": "Member",
+    "department": "Governance",
+    "job_title": "Security Analyst",
+    "manager_id": "user-member-001",
+    "group_ids": [
+      "group-engineering-prod-readers"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-043",
+    "user_principal_name": "member043@contosolab.onmicrosoft.com",
+    "display_name": "Member User 043",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Governance Analyst",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-engineering-prod-readers"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-044",
+    "user_principal_name": "member044@contosolab.onmicrosoft.com",
+    "display_name": "Member User 044",
+    "user_type": "Member",
+    "department": "Human Resources",
+    "job_title": "Finance Analyst",
+    "manager_id": "user-member-003",
+    "group_ids": [
+      "group-engineering-prod-contributors"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-045",
+    "user_principal_name": "member045@contosolab.onmicrosoft.com",
+    "display_name": "Member User 045",
+    "user_type": "Member",
+    "department": "Security Operations",
+    "job_title": "Project Manager",
+    "manager_id": "user-member-004",
+    "group_ids": [
+      "group-engineering-prod-contributors"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-046",
+    "user_principal_name": "member046@contosolab.onmicrosoft.com",
+    "display_name": "Member User 046",
+    "user_type": "Member",
+    "department": "Engineering",
+    "job_title": "Support Engineer",
+    "manager_id": "user-member-005",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-047",
+    "user_principal_name": "member047@contosolab.onmicrosoft.com",
+    "display_name": "Member User 047",
+    "user_type": "Member",
+    "department": "Sales",
+    "job_title": "Cloud Engineer",
+    "manager_id": "user-member-006",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-048",
+    "user_principal_name": "member048@contosolab.onmicrosoft.com",
+    "display_name": "Member User 048",
+    "user_type": "Member",
+    "department": "Customer Success",
+    "job_title": "HR Specialist",
+    "manager_id": "user-member-001",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-049",
+    "user_principal_name": "member049@contosolab.onmicrosoft.com",
+    "display_name": "Member User 049",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Identity Administrator",
+    "manager_id": "user-member-002",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-050",
+    "user_principal_name": "member050@contosolab.onmicrosoft.com",
+    "display_name": "Member User 050",
+    "user_type": "Member",
+    "department": "Governance",
+    "job_title": "Security Analyst",
+    "manager_id": "user-member-003",
+    "group_ids": [
+      "group-hr-confidential"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-051",
+    "user_principal_name": "member051@contosolab.onmicrosoft.com",
+    "display_name": "Member User 051",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Governance Analyst",
+    "manager_id": "user-member-004",
+    "group_ids": [
+      "group-hr-confidential"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-052",
+    "user_principal_name": "member052@contosolab.onmicrosoft.com",
+    "display_name": "Member User 052",
+    "user_type": "Member",
+    "department": "Human Resources",
+    "job_title": "Finance Analyst",
+    "manager_id": "user-member-005",
+    "group_ids": [],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-053",
+    "user_principal_name": "member053@contosolab.onmicrosoft.com",
+    "display_name": "Member User 053",
+    "user_type": "Member",
+    "department": "Security Operations",
+    "job_title": "Project Manager",
+    "manager_id": "user-member-006",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-member-054",
+    "user_principal_name": "member054@contosolab.onmicrosoft.com",
+    "display_name": "Member User 054",
+    "user_type": "Member",
+    "department": "Engineering",
+    "job_title": "Support Engineer",
+    "manager_id": "user-member-001",
+    "group_ids": [],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-001",
+    "user_principal_name": "guest001_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 001",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab",
+      "group-contractors"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-002",
+    "user_principal_name": "guest002_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 002",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab",
+      "group-contractors"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-003",
+    "user_principal_name": "guest003_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 003",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab",
+      "group-contractors"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-004",
+    "user_principal_name": "guest004_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 004",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-pim-admins",
+      "group-b2b-collab",
+      "group-contractors"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-005",
+    "user_principal_name": "guest005_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 005",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab",
+      "group-contractors"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-006",
+    "user_principal_name": "guest006_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 006",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-007",
+    "user_principal_name": "guest007_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 007",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-008",
+    "user_principal_name": "guest008_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 008",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-009",
+    "user_principal_name": "guest009_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 009",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-010",
+    "user_principal_name": "guest010_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 010",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-011",
+    "user_principal_name": "guest011_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 011",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "user-guest-012",
+    "user_principal_name": "guest012_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Guest User 012",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "External Consultant",
+    "manager_id": "user-member-002",
+    "group_ids": [
+      "group-b2b-collab"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  }
+]

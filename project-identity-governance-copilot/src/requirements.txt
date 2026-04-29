@@ -1,0 +1,11 @@
+# Azure AD / managed identity authentication helpers.
+azure-identity>=1.25.3
+
+# Azure AI Search management, document upload, and query clients.
+azure-search-documents>=11.6.0
+
+# Azure OpenAI client package. Even though the package is named `openai`, it can target Azure OpenAI.
+openai>=2.32.0
+
+# Test framework roughly comparable to a lightweight Pester setup for Python.
+pytest>=9.0.3

@@ -1,0 +1,56 @@
+[
+  {
+    "id": "review-guest-access-q2",
+    "name": "Guest Access Q2 Review",
+    "target_group_id": "group-b2b-collab",
+    "reviewer_ids": [
+      "user-kim-hall"
+    ],
+    "reviewed_principal_ids": [
+      "user-jordan-guest",
+      "user-riley-guest"
+    ],
+    "status": "inProgress",
+    "due_utc": "2026-05-05T23:59:59Z",
+    "decisions": [
+      {
+        "principal_id": "user-jordan-guest",
+        "decision": "NotReviewed"
+      },
+      {
+        "principal_id": "user-riley-guest",
+        "decision": "Approve"
+      }
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "review-privileged-membership-apr",
+    "name": "Privileged Membership April Review",
+    "target_group_id": "group-pim-admins",
+    "reviewer_ids": [
+      "user-sam-reed"
+    ],
+    "reviewed_principal_ids": [
+      "user-alex-wilson",
+      "user-jordan-guest"
+    ],
+    "status": "overdue",
+    "due_utc": "2026-04-20T23:59:59Z",
+    "decisions": [
+      {
+        "principal_id": "user-alex-wilson",
+        "decision": "Approve"
+      },
+      {
+        "principal_id": "user-jordan-guest",
+        "decision": "NotReviewed"
+      }
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  }
+]

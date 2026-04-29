@@ -1,0 +1,330 @@
+[
+  {
+    "id": "incident-impossible-travel-001",
+    "title": "Impossible travel followed by privileged role activation",
+    "severity": "high",
+    "status": "active",
+    "principal_id": "user-member-002",
+    "occurred_utc": "2026-04-26T08:14:00Z",
+    "signals": [
+      "impossibleTravel",
+      "pimActivation",
+      "newCountry"
+    ],
+    "evidence_ids": [
+      "evidence-signin-001",
+      "evidence-note-001"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-guest-privilege-001",
+    "title": "Guest account discovered in privileged admin group",
+    "severity": "high",
+    "status": "investigating",
+    "principal_id": "user-guest-004",
+    "occurred_utc": "2026-04-25T16:32:00Z",
+    "signals": [
+      "guestPrivilegedMembership",
+      "accessReviewOverdue"
+    ],
+    "evidence_ids": [
+      "evidence-group-001",
+      "evidence-policy-001"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-terminated-user-001",
+    "title": "Terminated user still enabled in finance application group",
+    "severity": "medium",
+    "status": "active",
+    "principal_id": "user-member-013",
+    "occurred_utc": "2026-04-26T09:05:00Z",
+    "signals": [
+      "hrTermination",
+      "staleAccess"
+    ],
+    "evidence_ids": [
+      "evidence-hr-001",
+      "evidence-group-002"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-001",
+    "title": "Noisy incident scenario 001",
+    "severity": "low",
+    "status": "active",
+    "principal_id": "user-member-010",
+    "occurred_utc": "2026-04-19T10:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-011"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-002",
+    "title": "Noisy incident scenario 002",
+    "severity": "medium",
+    "status": "active",
+    "principal_id": "user-member-011",
+    "occurred_utc": "2026-04-20T12:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-012"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-003",
+    "title": "Noisy incident scenario 003",
+    "severity": "low",
+    "status": "investigating",
+    "principal_id": "user-member-012",
+    "occurred_utc": "2026-04-21T14:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-013"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-004",
+    "title": "Noisy incident scenario 004",
+    "severity": "medium",
+    "status": "active",
+    "principal_id": "user-member-013",
+    "occurred_utc": "2026-04-22T16:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-014"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-005",
+    "title": "Noisy incident scenario 005",
+    "severity": "high",
+    "status": "active",
+    "principal_id": "user-member-014",
+    "occurred_utc": "2026-04-23T08:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-015"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-006",
+    "title": "Noisy incident scenario 006",
+    "severity": "medium",
+    "status": "investigating",
+    "principal_id": "user-member-015",
+    "occurred_utc": "2026-04-24T10:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-016"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-007",
+    "title": "Noisy incident scenario 007",
+    "severity": "low",
+    "status": "active",
+    "principal_id": "user-member-016",
+    "occurred_utc": "2026-04-25T12:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-017"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-008",
+    "title": "Noisy incident scenario 008",
+    "severity": "medium",
+    "status": "active",
+    "principal_id": "user-member-017",
+    "occurred_utc": "2026-04-26T14:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-018"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-009",
+    "title": "Noisy incident scenario 009",
+    "severity": "low",
+    "status": "investigating",
+    "principal_id": "user-member-018",
+    "occurred_utc": "2026-04-18T16:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-019"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-010",
+    "title": "Noisy incident scenario 010",
+    "severity": "high",
+    "status": "active",
+    "principal_id": "user-member-019",
+    "occurred_utc": "2026-04-19T08:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-020"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-011",
+    "title": "Noisy incident scenario 011",
+    "severity": "low",
+    "status": "active",
+    "principal_id": "user-member-020",
+    "occurred_utc": "2026-04-20T10:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-021"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-012",
+    "title": "Noisy incident scenario 012",
+    "severity": "medium",
+    "status": "investigating",
+    "principal_id": "user-member-021",
+    "occurred_utc": "2026-04-21T12:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-022"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-013",
+    "title": "Noisy incident scenario 013",
+    "severity": "low",
+    "status": "active",
+    "principal_id": "user-member-022",
+    "occurred_utc": "2026-04-22T14:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-023"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-014",
+    "title": "Noisy incident scenario 014",
+    "severity": "medium",
+    "status": "active",
+    "principal_id": "user-member-023",
+    "occurred_utc": "2026-04-23T16:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-024"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "incident-noisy-015",
+    "title": "Noisy incident scenario 015",
+    "severity": "high",
+    "status": "investigating",
+    "principal_id": "user-member-024",
+    "occurred_utc": "2026-04-24T08:12:00Z",
+    "signals": [
+      "anomalousSignIn",
+      "conditionalAccessChallenge"
+    ],
+    "evidence_ids": [
+      "evidence-signin-025"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "id": "eval-noisy-governance-001",
+    "lab": "core-1",
+    "prompt": "Which guest accounts remain in privileged or overdue review scenarios?",
+    "expected_fact_ids": [
+      "user-guest-004",
+      "review-privileged-membership-apr"
+    ]
+  },
+  {
+    "id": "eval-noisy-ops-001",
+    "lab": "core-2",
+    "prompt": "Which approval requests are still pending for risky identity changes?",
+    "expected_fact_ids": [
+      "approval-remove-guest-001",
+      "approval-noisy-003"
+    ]
+  },
+  {
+    "id": "eval-noisy-triage-001",
+    "lab": "core-3",
+    "prompt": "Summarize the highest severity incident and cite the supporting evidence.",
+    "expected_fact_ids": [
+      "incident-impossible-travel-001",
+      "evidence-signin-001",
+      "evidence-note-001"
+    ]
+  }
+]

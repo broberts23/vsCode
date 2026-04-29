@@ -1,0 +1,29 @@
+[
+  {
+    "id": "eval-governance-001",
+    "lab": "core-1",
+    "prompt": "Which guest users still require access review attention?",
+    "expected_fact_ids": [
+      "review-guest-access-q2",
+      "user-jordan-guest"
+    ]
+  },
+  {
+    "id": "eval-ops-001",
+    "lab": "core-2",
+    "prompt": "What approval is currently pending for a privileged access cleanup action?",
+    "expected_fact_ids": [
+      "approval-remove-guest-001"
+    ]
+  },
+  {
+    "id": "eval-triage-001",
+    "lab": "core-3",
+    "prompt": "Summarize the highest-severity incident and cite the main evidence.",
+    "expected_fact_ids": [
+      "incident-impossible-travel-001",
+      "evidence-signin-001",
+      "evidence-note-001"
+    ]
+  }
+]

@@ -1,0 +1,81 @@
+[
+  {
+    "id": "group-pim-admins",
+    "display_name": "PIM Administrators",
+    "group_type": "Security",
+    "classification": "Privileged",
+    "owner_ids": [
+      "user-sam-reed"
+    ],
+    "member_ids": [
+      "user-alex-wilson",
+      "user-jordan-guest"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "group-access-reviewers",
+    "display_name": "Access Reviewers",
+    "group_type": "Security",
+    "classification": "Internal",
+    "owner_ids": [
+      "user-sam-reed"
+    ],
+    "member_ids": [
+      "user-sam-reed",
+      "user-alex-wilson",
+      "user-kim-hall"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "group-b2b-collab",
+    "display_name": "B2B Collaboration Guests",
+    "group_type": "Microsoft365",
+    "classification": "External",
+    "owner_ids": [
+      "user-kim-hall"
+    ],
+    "member_ids": [
+      "user-jordan-guest",
+      "user-riley-guest"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "group-finance-app-users",
+    "display_name": "Finance App Users",
+    "group_type": "Security",
+    "classification": "Business",
+    "owner_ids": [
+      "user-maya-chen"
+    ],
+    "member_ids": [
+      "user-chris-ng"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "group-finance-approvers",
+    "display_name": "Finance Approvers",
+    "group_type": "Security",
+    "classification": "Business",
+    "owner_ids": [
+      "user-sam-reed"
+    ],
+    "member_ids": [
+      "user-maya-chen"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  }
+]

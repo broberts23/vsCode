@@ -1,0 +1,98 @@
+[
+  {
+    "id": "role-global-admin-001",
+    "role_definition": "Global Administrator",
+    "principal_id": "user-member-002",
+    "assignment_type": "Eligible",
+    "scope": "/",
+    "start_utc": "2026-04-01T00:00:00Z",
+    "end_utc": "2026-07-01T00:00:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "role-priv-role-admin-001",
+    "role_definition": "Privileged Role Administrator",
+    "principal_id": "user-member-001",
+    "assignment_type": "Active",
+    "scope": "/",
+    "start_utc": "2025-12-01T00:00:00Z",
+    "end_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "role-groups-admin-001",
+    "role_definition": "Groups Administrator",
+    "principal_id": "user-guest-004",
+    "assignment_type": "Active",
+    "scope": "/",
+    "start_utc": "2026-04-10T00:00:00Z",
+    "end_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "role-user-admin-001",
+    "role_definition": "User Administrator",
+    "principal_id": "user-member-024",
+    "assignment_type": "Active",
+    "scope": "/",
+    "start_utc": "2026-02-12T00:00:00Z",
+    "end_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "role-security-reader-001",
+    "role_definition": "Security Reader",
+    "principal_id": "user-member-020",
+    "assignment_type": "Active",
+    "scope": "/",
+    "start_utc": "2026-01-15T00:00:00Z",
+    "end_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "role-sharepoint-admin-001",
+    "role_definition": "SharePoint Administrator",
+    "principal_id": "user-member-030",
+    "assignment_type": "Eligible",
+    "scope": "/",
+    "start_utc": "2026-03-01T00:00:00Z",
+    "end_utc": "2026-09-01T00:00:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "role-billing-admin-001",
+    "role_definition": "Billing Administrator",
+    "principal_id": "user-member-010",
+    "assignment_type": "Active",
+    "scope": "/",
+    "start_utc": "2025-11-01T00:00:00Z",
+    "end_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "role-exchange-admin-001",
+    "role_definition": "Exchange Administrator",
+    "principal_id": "user-member-003",
+    "assignment_type": "Eligible",
+    "scope": "/",
+    "start_utc": "2026-04-04T00:00:00Z",
+    "end_utc": "2026-08-30T00:00:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  }
+]

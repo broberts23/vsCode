@@ -1,0 +1,110 @@
+[
+  {
+    "id": "review-guest-access-q2",
+    "name": "Guest Access Q2 Review",
+    "target_group_id": "group-b2b-collab",
+    "reviewer_ids": [
+      "user-member-003"
+    ],
+    "reviewed_principal_ids": [
+      "user-guest-001",
+      "user-guest-002",
+      "user-guest-003",
+      "user-guest-004",
+      "user-guest-005",
+      "user-guest-006",
+      "user-guest-007",
+      "user-guest-008",
+      "user-guest-009",
+      "user-guest-010",
+      "user-guest-011",
+      "user-guest-012"
+    ],
+    "status": "inProgress",
+    "due_utc": "2026-05-05T23:59:59Z",
+    "decisions": [
+      {
+        "principal_id": "user-guest-004",
+        "decision": "NotReviewed"
+      },
+      {
+        "principal_id": "user-guest-008",
+        "decision": "Deny"
+      }
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "review-privileged-membership-apr",
+    "name": "Privileged Membership April Review",
+    "target_group_id": "group-pim-admins",
+    "reviewer_ids": [
+      "user-member-001"
+    ],
+    "reviewed_principal_ids": [
+      "user-member-002",
+      "user-member-005",
+      "user-guest-004"
+    ],
+    "status": "overdue",
+    "due_utc": "2026-04-20T23:59:59Z",
+    "decisions": [
+      {
+        "principal_id": "user-member-002",
+        "decision": "Approve"
+      },
+      {
+        "principal_id": "user-guest-004",
+        "decision": "NotReviewed"
+      }
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "review-finance-access-may",
+    "name": "Finance Access May Review",
+    "target_group_id": "group-finance-app-users",
+    "reviewer_ids": [
+      "user-member-010"
+    ],
+    "reviewed_principal_ids": [
+      "user-member-011",
+      "user-member-012",
+      "user-member-013",
+      "user-member-014"
+    ],
+    "status": "inProgress",
+    "due_utc": "2026-05-09T23:59:59Z",
+    "decisions": [
+      {
+        "principal_id": "user-member-014",
+        "decision": "Approve"
+      }
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "review-prod-contrib-q2",
+    "name": "Production Contributor Q2 Review",
+    "target_group_id": "group-engineering-prod-contributors",
+    "reviewer_ids": [
+      "user-member-040"
+    ],
+    "reviewed_principal_ids": [
+      "user-member-044",
+      "user-member-045"
+    ],
+    "status": "inProgress",
+    "due_utc": "2026-05-12T23:59:59Z",
+    "decisions": [],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  }
+]

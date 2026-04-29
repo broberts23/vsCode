@@ -1,0 +1,35 @@
+[
+  {
+    "id": "approval-disable-user-001",
+    "request_type": "DisableUser",
+    "target_principal_id": "user-chris-ng",
+    "requested_by_id": "user-alex-wilson",
+    "approver_ids": [
+      "user-sam-reed"
+    ],
+    "status": "approved",
+    "justification": "Confirmed termination from HR seed event hr-leaver-001.",
+    "requested_utc": "2026-04-26T09:00:00Z",
+    "resolved_utc": "2026-04-26T09:15:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "approval-remove-guest-001",
+    "request_type": "RemoveGroupMember",
+    "target_principal_id": "user-jordan-guest",
+    "target_group_id": "group-pim-admins",
+    "requested_by_id": "user-kim-hall",
+    "approver_ids": [
+      "user-sam-reed"
+    ],
+    "status": "pending",
+    "justification": "Guest account is still present in a privileged group after overdue access review.",
+    "requested_utc": "2026-04-27T08:30:00Z",
+    "resolved_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  }
+]

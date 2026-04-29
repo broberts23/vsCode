@@ -1,0 +1,205 @@
+[
+  {
+    "id": "approval-disable-user-001",
+    "request_type": "DisableUser",
+    "target_principal_id": "user-member-013",
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "approved",
+    "justification": "Confirmed termination from HR event.",
+    "requested_utc": "2026-04-26T09:00:00Z",
+    "resolved_utc": "2026-04-26T09:15:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-remove-guest-001",
+    "request_type": "RemoveGroupMember",
+    "target_principal_id": "user-guest-004",
+    "target_group_id": "group-pim-admins",
+    "requested_by_id": "user-member-003",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "pending",
+    "justification": "Guest account is still present in a privileged group after overdue review.",
+    "requested_utc": "2026-04-27T08:30:00Z",
+    "resolved_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-001",
+    "request_type": "DisableUser",
+    "target_principal_id": "user-member-022",
+    "target_group_id": null,
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "approved",
+    "justification": "Noisy approval workflow 001 generated for testing.",
+    "requested_utc": "2026-04-19T10:00:00Z",
+    "resolved_utc": "2026-04-19T10:25:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-002",
+    "request_type": "RemoveGroupMember",
+    "target_principal_id": "user-member-023",
+    "target_group_id": "group-contractors",
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "approved",
+    "justification": "Noisy approval workflow 002 generated for testing.",
+    "requested_utc": "2026-04-20T10:00:00Z",
+    "resolved_utc": "2026-04-20T10:25:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-003",
+    "request_type": "DisableUser",
+    "target_principal_id": "user-member-024",
+    "target_group_id": null,
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "pending",
+    "justification": "Noisy approval workflow 003 generated for testing.",
+    "requested_utc": "2026-04-21T10:00:00Z",
+    "resolved_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-004",
+    "request_type": "RemoveGroupMember",
+    "target_principal_id": "user-member-025",
+    "target_group_id": "group-contractors",
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "approved",
+    "justification": "Noisy approval workflow 004 generated for testing.",
+    "requested_utc": "2026-04-22T10:00:00Z",
+    "resolved_utc": "2026-04-22T10:25:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-005",
+    "request_type": "DisableUser",
+    "target_principal_id": "user-member-026",
+    "target_group_id": null,
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "approved",
+    "justification": "Noisy approval workflow 005 generated for testing.",
+    "requested_utc": "2026-04-23T10:00:00Z",
+    "resolved_utc": "2026-04-23T10:25:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-006",
+    "request_type": "RemoveGroupMember",
+    "target_principal_id": "user-member-027",
+    "target_group_id": "group-contractors",
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "pending",
+    "justification": "Noisy approval workflow 006 generated for testing.",
+    "requested_utc": "2026-04-24T10:00:00Z",
+    "resolved_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-007",
+    "request_type": "DisableUser",
+    "target_principal_id": "user-member-028",
+    "target_group_id": null,
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "approved",
+    "justification": "Noisy approval workflow 007 generated for testing.",
+    "requested_utc": "2026-04-25T10:00:00Z",
+    "resolved_utc": "2026-04-25T10:25:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-008",
+    "request_type": "RemoveGroupMember",
+    "target_principal_id": "user-member-029",
+    "target_group_id": "group-contractors",
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "approved",
+    "justification": "Noisy approval workflow 008 generated for testing.",
+    "requested_utc": "2026-04-26T10:00:00Z",
+    "resolved_utc": "2026-04-26T10:25:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-009",
+    "request_type": "DisableUser",
+    "target_principal_id": "user-member-030",
+    "target_group_id": null,
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "pending",
+    "justification": "Noisy approval workflow 009 generated for testing.",
+    "requested_utc": "2026-04-18T10:00:00Z",
+    "resolved_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "approval-noisy-010",
+    "request_type": "RemoveGroupMember",
+    "target_principal_id": "user-member-031",
+    "target_group_id": "group-contractors",
+    "requested_by_id": "user-member-002",
+    "approver_ids": [
+      "user-member-001"
+    ],
+    "status": "approved",
+    "justification": "Noisy approval workflow 010 generated for testing.",
+    "requested_utc": "2026-04-19T10:00:00Z",
+    "resolved_utc": "2026-04-19T10:25:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  }
+]

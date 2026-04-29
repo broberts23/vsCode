@@ -1,0 +1,117 @@
+[
+  {
+    "id": "user-sam-reed",
+    "user_principal_name": "sam.reed@contosolab.onmicrosoft.com",
+    "display_name": "Sam Reed",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Director of Identity Security",
+    "manager_id": null,
+    "group_ids": [
+      "group-pim-admins",
+      "group-access-reviewers"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "user-alex-wilson",
+    "user_principal_name": "alex.wilson@contosolab.onmicrosoft.com",
+    "display_name": "Alex Wilson",
+    "user_type": "Member",
+    "department": "Identity Operations",
+    "job_title": "Identity Administrator",
+    "manager_id": "user-sam-reed",
+    "group_ids": [
+      "group-pim-admins",
+      "group-access-reviewers"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "user-kim-hall",
+    "user_principal_name": "kim.hall@contosolab.onmicrosoft.com",
+    "display_name": "Kim Hall",
+    "user_type": "Member",
+    "department": "Governance",
+    "job_title": "Access Review Manager",
+    "manager_id": "user-sam-reed",
+    "group_ids": [
+      "group-access-reviewers"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "user-chris-ng",
+    "user_principal_name": "chris.ng@contosolab.onmicrosoft.com",
+    "display_name": "Chris Ng",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Finance Analyst",
+    "manager_id": "user-maya-chen",
+    "group_ids": [
+      "group-finance-app-users"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "user-maya-chen",
+    "user_principal_name": "maya.chen@contosolab.onmicrosoft.com",
+    "display_name": "Maya Chen",
+    "user_type": "Member",
+    "department": "Finance",
+    "job_title": "Finance Manager",
+    "manager_id": "user-sam-reed",
+    "group_ids": [
+      "group-finance-approvers"
+    ],
+    "risk_state": "low",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "user-jordan-guest",
+    "user_principal_name": "jordan.guest_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Jordan Guest",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "Vendor Consultant",
+    "manager_id": "user-kim-hall",
+    "group_ids": [
+      "group-b2b-collab",
+      "group-pim-admins"
+    ],
+    "risk_state": "high",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "user-riley-guest",
+    "user_principal_name": "riley.guest_external#EXT#@contosolab.onmicrosoft.com",
+    "display_name": "Riley Guest",
+    "user_type": "Guest",
+    "department": "Partner",
+    "job_title": "Support Engineer",
+    "manager_id": "user-kim-hall",
+    "group_ids": [
+      "group-b2b-collab"
+    ],
+    "risk_state": "medium",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  }
+]

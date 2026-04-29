@@ -1,0 +1,38 @@
+[
+  {
+    "id": "role-global-admin-alex",
+    "role_definition": "Global Administrator",
+    "principal_id": "user-alex-wilson",
+    "assignment_type": "Eligible",
+    "scope": "/",
+    "start_utc": "2026-04-01T00:00:00Z",
+    "end_utc": "2026-06-30T00:00:00Z",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "role-priv-role-admin-sam",
+    "role_definition": "Privileged Role Administrator",
+    "principal_id": "user-sam-reed",
+    "assignment_type": "Active",
+    "scope": "/",
+    "start_utc": "2025-12-01T00:00:00Z",
+    "end_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "role-groups-admin-jordan",
+    "role_definition": "Groups Administrator",
+    "principal_id": "user-jordan-guest",
+    "assignment_type": "Active",
+    "scope": "/",
+    "start_utc": "2026-04-10T00:00:00Z",
+    "end_utc": null,
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  }
+]

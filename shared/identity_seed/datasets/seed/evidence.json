@@ -1,0 +1,68 @@
+[
+  {
+    "id": "evidence-signin-001",
+    "evidence_type": "signinLog",
+    "title": "Suspicious sign-in with impossible travel",
+    "principal_id": "user-alex-wilson",
+    "uri": "seed://evidence/signin-001.json",
+    "summary": "Two sign-ins occurred within 11 minutes from London and Singapore.",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "evidence-note-001",
+    "evidence_type": "analystNote",
+    "title": "Analyst note on PIM activation timing",
+    "principal_id": "user-alex-wilson",
+    "uri": "seed://evidence/note-001.md",
+    "summary": "PIM elevation occurred four minutes after the suspicious sign-in.",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "evidence-group-001",
+    "evidence_type": "groupSnapshot",
+    "title": "Privileged group membership snapshot",
+    "principal_id": "user-jordan-guest",
+    "uri": "seed://evidence/group-001.json",
+    "summary": "Guest user Jordan Guest is a member of PIM Administrators.",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "evidence-policy-001",
+    "evidence_type": "policyExcerpt",
+    "title": "External users in privileged groups policy",
+    "principal_id": null,
+    "uri": "seed://evidence/policy-001.md",
+    "summary": "Guests must not retain standing membership in privileged administrative groups.",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "evidence-hr-001",
+    "evidence_type": "hrEvent",
+    "title": "HR termination record",
+    "principal_id": "user-chris-ng",
+    "uri": "seed://evidence/hr-001.json",
+    "summary": "HR marked Chris Ng as terminated on 2026-04-26.",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "evidence-group-002",
+    "evidence_type": "groupSnapshot",
+    "title": "Finance app access group snapshot",
+    "principal_id": "user-chris-ng",
+    "uri": "seed://evidence/group-002.json",
+    "summary": "Chris Ng remained a member of Finance App Users after termination.",
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  }
+]

@@ -1,0 +1,220 @@
+[
+  {
+    "id": "group-pim-admins",
+    "display_name": "PIM Administrators",
+    "group_type": "Security",
+    "classification": "Privileged",
+    "owner_ids": [
+      "user-member-001"
+    ],
+    "member_ids": [
+      "user-member-002",
+      "user-member-005",
+      "user-guest-004"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-access-reviewers",
+    "display_name": "Access Reviewers",
+    "group_type": "Security",
+    "classification": "Internal",
+    "owner_ids": [
+      "user-member-001"
+    ],
+    "member_ids": [
+      "user-member-001",
+      "user-member-002",
+      "user-member-003",
+      "user-member-004"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-b2b-collab",
+    "display_name": "B2B Collaboration Guests",
+    "group_type": "Microsoft365",
+    "classification": "External",
+    "owner_ids": [
+      "user-member-003"
+    ],
+    "member_ids": [
+      "user-guest-001",
+      "user-guest-002",
+      "user-guest-003",
+      "user-guest-004",
+      "user-guest-005",
+      "user-guest-006",
+      "user-guest-007",
+      "user-guest-008",
+      "user-guest-009",
+      "user-guest-010",
+      "user-guest-011",
+      "user-guest-012"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-finance-app-users",
+    "display_name": "Finance App Users",
+    "group_type": "Security",
+    "classification": "Business",
+    "owner_ids": [
+      "user-member-010"
+    ],
+    "member_ids": [
+      "user-member-011",
+      "user-member-012",
+      "user-member-013",
+      "user-member-014"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-finance-approvers",
+    "display_name": "Finance Approvers",
+    "group_type": "Security",
+    "classification": "Business",
+    "owner_ids": [
+      "user-member-010"
+    ],
+    "member_ids": [
+      "user-member-010",
+      "user-member-015"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-security-ops",
+    "display_name": "Security Operations",
+    "group_type": "Security",
+    "classification": "Sensitive",
+    "owner_ids": [
+      "user-member-020"
+    ],
+    "member_ids": [
+      "user-member-020",
+      "user-member-021",
+      "user-member-022",
+      "user-member-023"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-helpdesk-tier2",
+    "display_name": "Helpdesk Tier 2",
+    "group_type": "Security",
+    "classification": "Internal",
+    "owner_ids": [
+      "user-member-024"
+    ],
+    "member_ids": [
+      "user-member-024",
+      "user-member-025",
+      "user-member-026"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-sales-crm-users",
+    "display_name": "Sales CRM Users",
+    "group_type": "Security",
+    "classification": "Business",
+    "owner_ids": [
+      "user-member-030"
+    ],
+    "member_ids": [
+      "user-member-030",
+      "user-member-031",
+      "user-member-032",
+      "user-member-033",
+      "user-member-034"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-engineering-prod-readers",
+    "display_name": "Engineering Production Readers",
+    "group_type": "Security",
+    "classification": "Sensitive",
+    "owner_ids": [
+      "user-member-040"
+    ],
+    "member_ids": [
+      "user-member-040",
+      "user-member-041",
+      "user-member-042",
+      "user-member-043"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-engineering-prod-contributors",
+    "display_name": "Engineering Production Contributors",
+    "group_type": "Security",
+    "classification": "HighlySensitive",
+    "owner_ids": [
+      "user-member-040"
+    ],
+    "member_ids": [
+      "user-member-044",
+      "user-member-045"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-hr-confidential",
+    "display_name": "HR Confidential",
+    "group_type": "Security",
+    "classification": "Sensitive",
+    "owner_ids": [
+      "user-member-050"
+    ],
+    "member_ids": [
+      "user-member-050",
+      "user-member-051"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  },
+  {
+    "id": "group-contractors",
+    "display_name": "Contractors",
+    "group_type": "Security",
+    "classification": "External",
+    "owner_ids": [
+      "user-member-002"
+    ],
+    "member_ids": [
+      "user-guest-001",
+      "user-guest-002",
+      "user-guest-003",
+      "user-guest-004",
+      "user-guest-005"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v2-noisy",
+    "last_updated_utc": "2026-04-27T18:00:00Z"
+  }
+]

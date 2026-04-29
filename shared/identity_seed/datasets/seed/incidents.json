@@ -1,0 +1,60 @@
+[
+  {
+    "id": "incident-impossible-travel-001",
+    "title": "Impossible travel followed by privileged role activation",
+    "severity": "high",
+    "status": "active",
+    "principal_id": "user-alex-wilson",
+    "occurred_utc": "2026-04-26T08:14:00Z",
+    "signals": [
+      "impossibleTravel",
+      "pimActivation",
+      "newCountry"
+    ],
+    "evidence_ids": [
+      "evidence-signin-001",
+      "evidence-note-001"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "incident-guest-privilege-001",
+    "title": "Guest account discovered in privileged admin group",
+    "severity": "high",
+    "status": "investigating",
+    "principal_id": "user-jordan-guest",
+    "occurred_utc": "2026-04-25T16:32:00Z",
+    "signals": [
+      "guestPrivilegedMembership",
+      "accessReviewOverdue"
+    ],
+    "evidence_ids": [
+      "evidence-group-001",
+      "evidence-policy-001"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  },
+  {
+    "id": "incident-terminated-user-001",
+    "title": "Terminated user still enabled in finance application group",
+    "severity": "medium",
+    "status": "active",
+    "principal_id": "user-chris-ng",
+    "occurred_utc": "2026-04-26T09:05:00Z",
+    "signals": [
+      "hrTermination",
+      "staleAccess"
+    ],
+    "evidence_ids": [
+      "evidence-hr-001",
+      "evidence-group-002"
+    ],
+    "source": "seed",
+    "seed_version": "2026-04-v1",
+    "last_updated_utc": "2026-04-27T12:00:00Z"
+  }
+]
