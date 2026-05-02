@@ -7,11 +7,15 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$FunctionAppName,
 
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ResourceGroupName,
+
     [Parameter()]
     [string]$SourcePath,
 
     [Parameter()]
-    [bool]$RunTests = $true
+    [switch]$SkipTests
 )
 
 Set-StrictMode -Version Latest
@@ -41,24 +45,38 @@ if (-not $SourcePath) {
     $SourcePath = Join-Path $projectRoot 'FunctionApp'
 }
 
-if ($RunTests) {
+$publishCommand = Get-Command -Name Publish-AzWebApp -ErrorAction SilentlyContinue
+if (-not $publishCommand) {
+    throw 'Publish-AzWebApp is required to publish the Function App. Install or import the Az.Websites module.'
+}
+
+if (-not $SkipTests) {
     $testsPath = Join-Path $projectRoot 'tests'
     if (Test-Path $testsPath) {
         Invoke-ProjectTests -TestsPath $testsPath
     }
 }
 
-$funcCommand = Get-Command -Name func -ErrorAction SilentlyContinue
-if (-not $funcCommand) {
-    throw 'Azure Functions Core Tools (`func`) is required to publish the Function App.'
+$items = Get-ChildItem -Path $SourcePath -Force
+if (-not $items) {
+    throw "Function app source path is empty: $SourcePath"
 }
 
-Push-Location $SourcePath
+$zipPath = Join-Path ([System.IO.Path]::GetTempPath()) ("functionapp-{0}.zip" -f (Get-Date -Format 'yyyyMMddHHmmss'))
 try {
-    if ($PSCmdlet.ShouldProcess($FunctionAppName, 'Publish Function App code')) {
-        & $funcCommand.Source azure functionapp publish $FunctionAppName --powershell
+    $itemPaths = $items | Select-Object -ExpandProperty FullName
+    Compress-Archive -Path $itemPaths -DestinationPath $zipPath -CompressionLevel Optimal
+
+    if (-not (Test-Path $zipPath)) {
+        throw "Failed to create deployment package at: $zipPath"
+    }
+
+    if ($PSCmdlet.ShouldProcess($FunctionAppName, 'Publish Function App code with zipdeploy')) {
+        Publish-AzWebApp -ResourceGroupName $ResourceGroupName -Name $FunctionAppName -ArchivePath $zipPath -ErrorAction Stop | Out-Null
     }
 }
 finally {
-    Pop-Location
+    if (Test-Path $zipPath) {
+        Remove-Item -Path $zipPath -Force
+    }
 }

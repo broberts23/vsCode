@@ -165,7 +165,7 @@ What that invocation expects:
 
 - `tenantId` and `clientId` are supplied either in the parameter file or on the command line and point to the API app registration that Easy Auth should trust
 - the caller has permission to deploy Azure resources, execute VM Run Command, and write secrets into the project Key Vault
-- Azure Functions Core Tools is installed if `-PublishFunctionApp` is used
+- Az PowerShell with `Publish-AzWebApp` available is installed if `-PublishFunctionApp` is used
 - the passwords meet Windows and domain policy requirements
 
 If you do not want to pass secure strings on the command line, you can place real values in the parameter file and call:

@@ -40,12 +40,6 @@ function Write-Log {
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $logMessage = "[$timestamp] [$Level] $Message"
 
-    switch ($Level) {
-        'Information' { Write-Information -MessageData $logMessage -InformationAction Continue }
-        'Warning' { Write-Warning -Message $Message }
-        'Error' { Write-Error -Message $Message }
-    }
-
     try {
         Add-Content -Path $script:logFile -Value $logMessage -ErrorAction SilentlyContinue
     }
@@ -83,6 +77,7 @@ try {
     if (-not $featureResult.Success) {
         throw 'Failed to install AD-Domain-Services feature'
     }
+    Write-Log 'AD-Domain-Services installed successfully'
 
     $isDC = $false
     try {
@@ -95,7 +90,7 @@ try {
     if ($isDC) {
         Write-Log 'Server is already a domain controller; skipping promotion' -Level Warning
     }
-    elseif ($PSCmdlet.ShouldProcess($DomainName, 'Promote server to domain controller')) {
+    else {
         foreach ($path in @($databasePath, $logPath, $sysvolPath)) {
             try {
                 if (-not (Test-Path $path)) {
@@ -193,9 +188,14 @@ Stop-Transcript | Out-Null
     }
 
     Write-Log 'AD DS bootstrap completed successfully (promotion phase only)'
+    Write-Log "Domain: $DomainName"
+    Write-Log "Log file: $logFile"
+    Write-Log 'Next: Run Configure-ADPostPromotion.ps1 for directory provisioning.'
 }
 catch {
     Write-Log "AD DS bootstrap failed: $($_.Exception.Message)" -Level Error
+    Write-Log "Exception details: $($_.Exception | Out-String)" -Level Error
     Write-Log "Stack trace: $($_.ScriptStackTrace)" -Level Error
+    Write-Log "Log file: $logFile" -Level Error
     throw
 }

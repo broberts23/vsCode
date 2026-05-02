@@ -28,6 +28,14 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
+    [string]$DeploymentPrincipalObjectId,
+
+    [Parameter()]
+    [ValidateSet('User', 'ServicePrincipal', 'Group')]
+    [string]$DeploymentPrincipalType,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
     [string]$VmAdminUsername,
 
     [Parameter()]
@@ -41,7 +49,10 @@ param(
     [securestring]$ServiceAccountPassword,
 
     [Parameter()]
-    [switch]$PublishFunctionApp
+    [switch]$PublishFunctionApp,
+
+    [Parameter()]
+    [switch]$SkipFunctionAppTests
 )
 
 Set-StrictMode -Version Latest
@@ -84,6 +95,57 @@ function ConvertTo-PlainText {
     )
 
     return [System.Net.NetworkCredential]::new('', $SecureString).Password
+}
+
+function ConvertFrom-Base64Url {
+    [CmdletBinding()]
+    [OutputType([byte[]])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Value
+    )
+
+    $normalized = $Value.Replace('-', '+').Replace('_', '/')
+    switch ($normalized.Length % 4) {
+        2 { $normalized += '==' }
+        3 { $normalized += '=' }
+    }
+
+    return [Convert]::FromBase64String($normalized)
+}
+
+function Get-CurrentDeploymentPrincipal {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+
+    $secureToken = (Get-AzAccessToken -ResourceUrl 'https://management.azure.com/').Token
+    $token = ConvertTo-PlainText -SecureString $secureToken
+    $tokenParts = $token.Split('.')
+    if ($tokenParts.Length -lt 2) {
+        throw 'Unable to parse the current Azure access token.'
+    }
+
+    $payloadJson = [System.Text.Encoding]::UTF8.GetString((ConvertFrom-Base64Url -Value $tokenParts[1]))
+    $payload = $payloadJson | ConvertFrom-Json -ErrorAction Stop
+    $objectId = [string]$payload.oid
+    if ([string]::IsNullOrWhiteSpace($objectId)) {
+        throw 'Unable to determine the current deployment principal object ID from the Azure access token.'
+    }
+
+    $principalType = if ([string]$payload.idtyp -eq 'app') {
+        'ServicePrincipal'
+    }
+    else {
+        'User'
+    }
+
+    return [pscustomobject]@{
+        ObjectId      = $objectId
+        PrincipalType = $principalType
+        AppId         = [string]$payload.appid
+    }
 }
 
 function Test-IsPlaceholderValue {
@@ -249,9 +311,9 @@ function Invoke-VmRunCommand {
 
     $invokeParameters = @{
         ResourceGroupName = $ResourceGroupName
-        VMName = $VmName
-        CommandId = 'RunPowerShellScript'
-        ScriptString = $ScriptString
+        VMName            = $VmName
+        CommandId         = 'RunPowerShellScript'
+        ScriptString      = $ScriptString
     }
 
     if ($Parameters.Count -gt 0) {
@@ -457,8 +519,8 @@ function Invoke-DomainControllerPromotion {
         $passwordBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((ConvertTo-PlainText -SecureString $VmAdminPassword)))
 
         $null = Invoke-VmRunCommand -ResourceGroupName $ResourceGroupName -VmName $VmName -ScriptString $bootstrapScript -Parameters @{
-            DomainName = $DomainName
-            DomainNetBiosName = $DomainNetBiosName
+            DomainName                  = $DomainName
+            DomainNetBiosName           = $DomainNetBiosName
             SafeModeAdminPasswordBase64 = $passwordBase64
         } -AsJob
 
@@ -493,8 +555,8 @@ function Invoke-DomainControllerPostConfig {
 
         $postConfigScript = Get-Content (Join-Path $script:ScriptDirectory 'Configure-ADPostPromotion.ps1') -Raw
         $result = Invoke-VmRunCommand -ResourceGroupName $ResourceGroupName -VmName $VmName -ScriptString $postConfigScript -Parameters @{
-            DomainName = $DomainName
-            ServiceAccountName = $ServiceAccountName
+            DomainName             = $DomainName
+            ServiceAccountName     = $ServiceAccountName
             ServiceAccountPassword = (ConvertTo-PlainText -SecureString $ServiceAccountPassword)
         }
 
@@ -533,10 +595,10 @@ function Invoke-ManagementVmDomainJoin {
 
         $joinScript = Get-Content (Join-Path $script:ScriptDirectory 'Join-ManagementVmToDomain.ps1') -Raw
         $null = Invoke-VmRunCommand -ResourceGroupName $ResourceGroupName -VmName $VmName -ScriptString $joinScript -Parameters @{
-            DomainName = $DomainName
+            DomainName         = $DomainName
             DomainJoinUsername = $DomainJoinUsername
             DomainJoinPassword = (ConvertTo-PlainText -SecureString $DomainJoinPassword)
-            DnsServer = $DnsServer
+            DnsServer          = $DnsServer
         } -AsJob
 
         Write-Log 'Domain join command submitted as a background job.' -Level Success
@@ -570,6 +632,47 @@ function ConvertFrom-RunCommandJson {
     return $trimmed.Substring($startIndex, ($endIndex - $startIndex + 1)) | ConvertFrom-Json -ErrorAction Stop
 }
 
+function Set-KeyVaultSecretWithRetry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$VaultName,
+
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [securestring]$SecretValue,
+
+        [Parameter()]
+        [int]$TimeoutSeconds = 600,
+
+        [Parameter()]
+        [int]$RetryIntervalSeconds = 15
+    )
+
+    $elapsed = 0
+    while ($true) {
+        try {
+            return Set-AzKeyVaultSecret -VaultName $VaultName -Name $Name -SecretValue $SecretValue -ErrorAction Stop
+        }
+        catch {
+            $message = $_.Exception.Message
+            if ($message -notmatch 'Forbidden|not authorized|setSecret/action') {
+                throw
+            }
+
+            if ($elapsed -ge $TimeoutSeconds) {
+                throw "Timed out waiting for Key Vault RBAC propagation to allow secret writes on vault '$VaultName'."
+            }
+
+            Write-Log "Waiting for Key Vault RBAC propagation before setting secret '$Name' on vault '$VaultName'..." -Level Warning
+            Start-Sleep -Seconds $RetryIntervalSeconds
+            $elapsed += $RetryIntervalSeconds
+        }
+    }
+}
+
 function Invoke-ManagementVmWinRmConfiguration {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -594,7 +697,7 @@ function Invoke-ManagementVmWinRmConfiguration {
 
         $message = Get-RunCommandMessage -RunCommandResult $result
         $certificateInfo = ConvertFrom-RunCommandJson -Message $message
-        $secret = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name 'JUMPBOX-WINRM-CERT-CER' -SecretValue (ConvertTo-SecureString -String $certificateInfo.CertificateBase64 -AsPlainText -Force)
+        $secret = Set-KeyVaultSecretWithRetry -VaultName $KeyVaultName -Name 'JUMPBOX-WINRM-CERT-CER' -SecretValue (ConvertTo-SecureString -String $certificateInfo.CertificateBase64 -AsPlainText -Force)
 
         Write-Log "Stored WinRM HTTPS certificate in Key Vault secret '$($secret.Name)'." -Level Success
         return $certificateInfo
@@ -608,6 +711,11 @@ try {
         throw 'Connect-AzAccount before running this script.'
     }
 
+    $currentDeploymentPrincipal = Get-CurrentDeploymentPrincipal
+    $deploymentPrincipalObjectIdToUse = if ([string]::IsNullOrWhiteSpace($DeploymentPrincipalObjectId)) { $currentDeploymentPrincipal.ObjectId } else { $DeploymentPrincipalObjectId }
+    $deploymentPrincipalTypeToUse = if ([string]::IsNullOrWhiteSpace($DeploymentPrincipalType)) { $currentDeploymentPrincipal.PrincipalType } else { $DeploymentPrincipalType }
+    Write-Log "Using deployment principal object ID '$deploymentPrincipalObjectIdToUse' with principal type '$deploymentPrincipalTypeToUse' for Key Vault Administrator assignment."
+
     $resolvedParameterFile = if ($ParameterFile) { $ParameterFile } else { Join-Path $script:InfraDirectory "parameters.$Environment.json" }
     $parameterObject = Get-ParameterFileObject -ResolvedParameterFile $resolvedParameterFile
 
@@ -620,20 +728,22 @@ try {
     $domainNetBiosName = [string](Get-ParameterFileValue -ParameterObject $parameterObject -Name 'domainNetBiosName' -DefaultValue 'CONTOSO')
 
     $parameterOverrides = @{
-        tenantId = $tenantIdToUse
-        clientId = $clientIdToUse
-        vmAdminUsername = $vmAdminUsernameToUse
-        vmAdminPassword = (ConvertTo-PlainText -SecureString $vmAdminPasswordToUse)
-        serviceAccountPassword = (ConvertTo-PlainText -SecureString $serviceAccountPasswordToUse)
+        tenantId                    = $tenantIdToUse
+        clientId                    = $clientIdToUse
+        deploymentPrincipalObjectId = $deploymentPrincipalObjectIdToUse
+        deploymentPrincipalType     = $deploymentPrincipalTypeToUse
+        vmAdminUsername             = $vmAdminUsernameToUse
+        vmAdminPassword             = (ConvertTo-PlainText -SecureString $vmAdminPasswordToUse)
+        serviceAccountPassword      = (ConvertTo-PlainText -SecureString $serviceAccountPasswordToUse)
     }
 
     $deployInfrastructureParameters = @{
-        Environment = $Environment
-        ResourceGroupName = $ResourceGroupName
-        Location = $Location
-        ParameterFile = $resolvedParameterFile
+        Environment        = $Environment
+        ResourceGroupName  = $ResourceGroupName
+        Location           = $Location
+        ParameterFile      = $resolvedParameterFile
         ParameterOverrides = $parameterOverrides
-        PassThru = $true
+        PassThru           = $true
     }
 
     $deployment = & (Join-Path $script:ScriptDirectory 'Deploy-Infrastructure.ps1') @deployInfrastructureParameters
@@ -657,7 +767,7 @@ try {
     $null = Invoke-ManagementVmWinRmConfiguration -ResourceGroupName $ResourceGroupName -VmName $managementVmName -ComputerFqdn $managementVmFqdn -KeyVaultName $keyVaultName
 
     if ($PublishFunctionApp) {
-        & (Join-Path $script:ScriptDirectory 'Deploy-FunctionApp.ps1') -FunctionAppName $functionAppName
+        & (Join-Path $script:ScriptDirectory 'Deploy-FunctionApp.ps1') -FunctionAppName $functionAppName -ResourceGroupName $ResourceGroupName -SkipTests:$SkipFunctionAppTests
     }
 
     Write-Log 'Complete jumpbox deployment finished.' -Level Success

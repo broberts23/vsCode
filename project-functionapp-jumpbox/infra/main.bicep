@@ -37,6 +37,17 @@ param vmAdminPassword string
 @secure()
 param serviceAccountPassword string
 
+@description('Optional object ID of the deployment principal that should receive Key Vault Administrator on the vault')
+param deploymentPrincipalObjectId string = ''
+
+@description('Principal type for the deployment principal role assignment')
+@allowed([
+  'User'
+  'ServicePrincipal'
+  'Group'
+])
+param deploymentPrincipalType string = 'User'
+
 @description('Active Directory domain name')
 param domainName string = 'contoso.local'
 
@@ -93,7 +104,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2025-06-01' = {
+resource storageAccount 'Microsoft.Storage/storageAccounts@2025-08-01' = {
   name: storageAccountName
   location: location
   tags: tags
@@ -166,7 +177,7 @@ resource vmAdminSecret 'Microsoft.KeyVault/vaults/secrets@2025-05-01' = {
   }
 }
 
-resource nsg 'Microsoft.Network/networkSecurityGroups@2025-01-01' = {
+resource nsg 'Microsoft.Network/networkSecurityGroups@2025-05-01' = {
   name: nsgName
   location: location
   tags: tags
@@ -224,7 +235,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2025-01-01' = {
   }
 }
 
-resource vnet 'Microsoft.Network/virtualNetworks@2025-01-01' = {
+resource vnet 'Microsoft.Network/virtualNetworks@2025-05-01' = {
   name: vnetName
   location: location
   tags: tags
@@ -271,7 +282,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2025-01-01' = {
   }
 }
 
-resource dcPublicIp 'Microsoft.Network/publicIPAddresses@2025-01-01' = {
+resource dcPublicIp 'Microsoft.Network/publicIPAddresses@2025-05-01' = {
   name: dcPublicIpName
   location: location
   tags: tags
@@ -286,7 +297,7 @@ resource dcPublicIp 'Microsoft.Network/publicIPAddresses@2025-01-01' = {
   }
 }
 
-resource managementPublicIp 'Microsoft.Network/publicIPAddresses@2025-01-01' = {
+resource managementPublicIp 'Microsoft.Network/publicIPAddresses@2025-05-01' = {
   name: managementPublicIpName
   location: location
   tags: tags
@@ -301,7 +312,7 @@ resource managementPublicIp 'Microsoft.Network/publicIPAddresses@2025-01-01' = {
   }
 }
 
-resource dcNic 'Microsoft.Network/networkInterfaces@2025-01-01' = {
+resource dcNic 'Microsoft.Network/networkInterfaces@2025-05-01' = {
   name: dcNicName
   location: location
   tags: tags
@@ -324,7 +335,7 @@ resource dcNic 'Microsoft.Network/networkInterfaces@2025-01-01' = {
   }
 }
 
-resource managementNic 'Microsoft.Network/networkInterfaces@2025-01-01' = {
+resource managementNic 'Microsoft.Network/networkInterfaces@2025-05-01' = {
   name: managementNicName
   location: location
   tags: tags
@@ -625,9 +636,25 @@ resource keyVaultRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04
   name: guid(keyVault.id, functionApp.id, 'Key Vault Secrets User')
   scope: keyVault
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '4633458b-17de-408a-b874-0445c86b69e6'
+    )
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
+  }
+}
+
+resource deploymentPrincipalKeyVaultAdminRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deploymentPrincipalObjectId)) {
+  name: guid(keyVault.id, deploymentPrincipalObjectId, 'Key Vault Administrator')
+  scope: keyVault
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '00482a5a-887f-4fb3-b363-3b7fe8e74483'
+    )
+    principalId: deploymentPrincipalObjectId
+    principalType: deploymentPrincipalType
   }
 }
 
