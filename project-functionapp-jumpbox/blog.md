@@ -1,32 +1,36 @@
 # Using A Domain-Joined Jumpbox VM For Legacy PowerShell From Azure Functions
 
+## Introduction and Use Cases
+
 Some automation problems are not really Azure Functions problems. They are dependency-bound Windows administration problems.
 
-If the command you need depends on the `ActiveDirectory` module, Exchange remoting, RSAT, or a domain-joined Windows machine, pushing that directly into an Azure Function usually creates a brittle design. The cleaner boundary is to let the function authenticate, authorize, validate the request, and then hand off execution to a domain-joined management VM that is built for those legacy dependencies.
+As organizations move their identity and access lifecycle to the cloud, building automation around legacy on-premises services becomes a challenge. A common scenario is automating mailbox creation or adjusting Active Directory attributes. While direct LDAP from an Azure Function via VNet integration is possible, it often falls short in complex environments. Direct LDAP forces you to manage raw directory schema changes, lacks the safety nets built into native cmdlets, and offers no support for specialized tools like the Exchange Management Tools.
 
-## The Pattern
+Exchange, for instance, requires full PowerShell snap-ins or modules that are tightly coupled to a traditional Windows Server environment. Similarly, some organizations prefer not to expose their Domain Controllers directly to application subnets via LDAP, preferring instead a controlled, auditable jumpbox that intermediates these privileged actions.
 
-The function app stays lean:
+By using a domain-joined management VM as a jumpbox, organizations can execute legacy commands—such as Active Directory cmdlets and Exchange administrative tasks—securely from a modern Serverless frontend, without compromising the integrity of the network or struggling with direct LDAP complexities.
 
-- PowerShell 7.4
-- Easy Auth for token validation
-- Key Vault via managed identity
-- VNet-integrated networking
+## The Architecture: Function App Meets Management VM
+
+The cleaner boundary is to let the Azure Function handle authentication, authorization, and request validation, and then hand off execution to a domain-joined management VM built specifically for these legacy dependencies.
+
+The function app stays lean and modern:
+
+- **PowerShell 7.4 runtime**
+- **Easy Auth for zero-code token validation**: Rather than writing custom JWT parsing logic in your script, Azure App Service Authentication is wired directly to an Entra ID App Registration. It automatically intercepts unauthenticated traffic and returns a `401 Unauthorized` at the edge before the PowerShell function is even initialized. This ensures only trusted, authenticated identities can attempt to trigger highly privileged AD or Exchange commands.
+- **Key Vault integration via managed identity** (using native App Service References)
+- **VNet-integrated networking** to safely reach the internal VM
 
 The management VM carries the legacy burden:
 
-- domain joined
-- RSAT installed
-- Exchange or other legacy admin tools installed
-- WinRM Basic enabled only over HTTPS
+- **Domain joined for Kerberos Authentication**: This enables the VM to leverage native Kerberos authentication for downstream connections. This is a lifesaver for scenarios like on-premises mailbox migrations where security teams rightly block Basic WinRM access to the Exchange servers' `/PowerShell` endpoints. The Azure Function securely connects to the isolated Jumpbox, and the Jumpbox can seamlessly use Kerberos to act against the backend Exchange environment or other domain resources.
+- **RSAT (Remote Server Administration Tools)** installed natively.
+- **Exchange Management Tools** (or other legacy admin prerequisites) installed locally.
+- **WinRM Basic enabled**: Strictly locked down over HTTPS and firewalled to the VNet. This provides a secure, certificate-pinned bridge from the cloud without exposing your actual Domain Controllers or Exchange servers to edge traffic.
 
-That split matters because it keeps the function host modern and disposable while still giving you a controlled place to run older commands.
+### Executing the Remote Script Block
 
-## How The Remote Script Block Runs
-
-The function receives a request body that includes script text and optional arguments. Inside the function, that payload is passed to `Invoke-Command -AsJob` against the management VM.
-
-Conceptually, the flow looks like this:
+The function receives a request payload containing script text and optional arguments. Inside the function, that payload is passed via `Invoke-Command -AsJob` to the management VM.
 
 ```powershell
 $invokeParameters = @{
@@ -41,45 +45,44 @@ $invokeParameters = @{
 }
 
 $job = Invoke-Command @invokeParameters
-
 $result = Receive-Job -Job $job -Wait -AutoRemoveJob
 ```
 
-The important point is where the script block is created and executed: on the remote machine. That means the code runs in the context that actually has the AD or Exchange tooling available. The output is serialized back over PowerShell remoting and returned by the function.
+The script block executes natively on the remote Windows machine, in a context that has the Active Directory and Exchange tooling readily available. The results are serialized back over PowerShell remoting to the function. (For a production service, this free-form script execution should be replaced with a strict allow-list of parameterized, approved operations).
 
-For a blog demo, free-form script text makes the execution boundary easy to show. For a production service, replace that with an allow list of approved operations.
+### Seeing It In Action
 
-## How HTTPS Validation Works
+<!-- [Placeholder: Screenshot of the Azure Portal showing the Function App and Management VM architecture] -->
 
-The awkward part of WinRM over HTTPS in a function app is certificate trust. You often do not want to write certificates into the worker's machine store, and you may be using a self-signed or lab-issued certificate anyway.
+To call the Azure Function, you send an HTTP POST request with a JSON payload containing the script and any required arguments. Here is an example of retrieving an Active Directory user via the jumpbox:
 
-This scaffold handles that explicitly:
+```powershell
+$uri = "https://<your-function-app>.azurewebsites.net/api/InvokeLegacyCommand"
+$body = @{
+    scriptText = "Get-ADUser -Identity `$args[0] -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName"
+    arguments  = @("jdoe")
+} | ConvertTo-Json
 
-1. The function loads the expected certificate from Key Vault.
-2. Before creating the PSSession, it opens a TLS connection to `managementvm.contoso.local:5986`.
-3. It inspects the remote certificate.
-4. It checks that the thumbprint matches the pinned certificate from Key Vault.
-5. It checks that the certificate identity matches the configured hostname.
+Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType "application/json"
+```
 
-Only after that preflight passes does the function create the remoting session.
+<!-- [Placeholder: Screenshot of Postman or PowerShell console showing the successful JSON response returning the AD user object] -->
 
-That is why the blog can honestly say TLS validation still happens. The trust decision is just explicit and application-managed instead of delegated to the operating system trust store.
+### Explicit TLS Validation and Secure Remoting
 
-## Why Basic Auth Is Still Defensible Here
+The tricky part of WinRM over HTTPS from an Azure Function is certificate trust. Writing lab-issued or self-signed certificates into the shared worker's machine store is messy.
 
-Normally, Basic authentication is the wrong direction. In this narrow case it can be acceptable because:
+This scaffold handles trust explicitly at the application layer:
 
-- it is used only on a private network path
-- it is bound to HTTPS only
-- the credential is stored in Key Vault
-- the function authenticates callers before remoting begins
+1. The function securely loads the expected certificate from Key Vault using native App Settings references.
+2. Before creating the PSSession, it opens a raw TLS connection to the management VM (e.g., `managementvm.contoso.local:5986`).
+3. It inspects the remote certificate for a thumbprint match and verifies the DNS identity against the configured hostname.
+4. Only after this preflight passes does it establish the remoting session.
 
-The point is not that Basic is modern. The point is that it remains compatible with older remoting patterns while the TLS layer protects the credential on the wire.
+This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. Furthermore, while Basic Auth is typically discouraged, it is defensible here because it operates strictly over a private VNet on an HTTPS-encrypted channel, with credentials securely retrieved from Key Vault just-in-time.
 
-## Where To Take The Scaffold Next
+## Conclusion
 
-- Replace free-form script blocks with named operations.
-- Add a second management VM and pick from a pool for resilience.
-- Add JEA endpoints instead of broad remoting rights.
-- Publish the jumpbox certificate or issuing CA through a stricter rotation workflow.
-- Add integration tests that validate the TLS preflight and remoting handshake.
+Creating a bridge between modern serverless architectures and legacy on-premises tooling doesn't require compromising on security or maintainability. By offloading the heavy lifting of Exchange Management Tools or Active Directory RSAT to a dedicated jumpbox VM, your Azure Functions remain lightweight, secure, and easily updatable.
+
+This pattern allows you to bypass the pitfalls of direct LDAP while preserving the usability of native PowerShell cmdlets. To take this scaffold even further for production, consider replacing the flexible script evaluation with JEA (Just Enough Administration) endpoints, adding a secondary VM for high availability, and implementing automated certificate rotation.

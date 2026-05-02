@@ -200,41 +200,6 @@ function Test-WinRmTlsPinning {
     }
 }
 
-function New-ValidatedLegacyPSSession {
-    [CmdletBinding()]
-    [OutputType([System.Management.Automation.Runspaces.PSSession])]
-    param(
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]$ComputerName,
-
-        [Parameter(Mandatory)]
-        [ValidateNotNull()]
-        [pscredential]$Credential,
-
-        [Parameter(Mandatory)]
-        [ValidateNotNull()]
-        [X509Certificate2]$ExpectedCertificate,
-
-        [Parameter()]
-        [ValidateRange(1, 65535)]
-        [int]$Port = 5986
-    )
-
-    $null = Test-WinRmTlsPinning -ComputerName $ComputerName -ExpectedCertificate $ExpectedCertificate -Port $Port
-    $sessionOption = New-PSSessionOption -SkipCACheck
-    $sessionParameters = @{ 
-        ComputerName   = $ComputerName
-        UseSSL         = $true
-        Port           = $Port
-        Authentication = 'Basic'
-        Credential     = $Credential
-        SessionOption  = $sessionOption
-    }
-
-    return New-PSSession @sessionParameters
-}
-
 function Invoke-LegacyRemoteScriptBlock {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -389,7 +354,6 @@ Export-ModuleMember -Function @(
     'Normalize-CertificateThumbprint',
     'Test-CertificateDnsName',
     'Test-WinRmTlsPinning',
-    'New-ValidatedLegacyPSSession',
     'Invoke-LegacyRemoteScriptBlock',
     'Get-ClientPrincipal',
     'Test-RoleClaim'
