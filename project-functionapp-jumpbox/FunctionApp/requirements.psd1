@@ -1,0 +1,3 @@
+@{
+    # No gallery dependencies yet.
+}

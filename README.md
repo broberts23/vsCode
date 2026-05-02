@@ -10,6 +10,7 @@ This repository contains several self-contained sample and utility projects focu
 - `project-entitlement-management/`: Samples and tooling related to Microsoft Entra entitlement management and access packages, aimed at automating governance scenarios.
 - `project-eventgrid-partnerconfiguration/`: Receives Microsoft Graph change notifications via Azure Event Grid (partner events) and processes them with an Azure Function App (PowerShell), including queue buffering, idempotency/deduping, and subscription lifecycle handling.
 - `project-functionapp-roles/`: Azure Functions + Easy Auth + Key Vault + LDAPS pattern for securely resetting on-prem AD passwords from a VNet-integrated Function App.
+- `project-functionapp-jumpbox/`: Azure Functions + domain-joined management VM pattern for executing legacy AD and Exchange PowerShell remotely over WinRM HTTPS when those modules cannot run inside the function host.
 - `project-github-runner/`: Complete pattern for running ephemeral self-hosted GitHub Actions runners on Azure Container Apps jobs, with Bicep templates, runner image, KEDA scaling, and bootstrap workflows.
 - `project-identity-governance-dashboard/`: Dashboard-focused project that surfaces identity governance signals (such as access reviews, assignments, and risky users) using Azure and Microsoft Graph.
 - `project-jit-pim/`: Just-in-time Privileged Identity Management automation using Bicep and PowerShell, including sample workflows and tests for activating and auditing PIM assignments.

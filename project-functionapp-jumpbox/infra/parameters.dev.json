@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "dev"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "baseName": {
+      "value": "legacyjump"
+    },
+    "tenantId": {
+      "value": "YOUR_TENANT_ID_HERE"
+    },
+    "clientId": {
+      "value": "YOUR_APP_ID_HERE"
+    },
+    "requiredRole": {
+      "value": "Role.LegacyCommand.Invoke"
+    },
+    "vmAdminUsername": {
+      "value": "azureadmin"
+    },
+    "vmAdminPassword": {
+      "value": "REPLACE_WITH_SECURE_PASSWORD"
+    },
+    "serviceAccountPassword": {
+      "value": "REPLACE_WITH_SERVICE_ACCOUNT_PASSWORD"
+    },
+    "domainName": {
+      "value": "contoso.local"
+    },
+    "domainNetBiosName": {
+      "value": "CONTOSO"
+    }
+  }
+}
