@@ -41,24 +41,24 @@ $certificate = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object { $_.Sub
 
 if (-not $certificate) {
     $certificateParameters = @{
-        DnsName = $ComputerFqdn
+        DnsName           = $ComputerFqdn
         CertStoreLocation = 'Cert:\LocalMachine\My'
-        FriendlyName = 'WinRM HTTPS Listener'
-        KeyAlgorithm = 'RSA'
-        KeyLength = 2048
-        HashAlgorithm = 'SHA256'
-        NotAfter = (Get-Date).AddYears(2)
+        FriendlyName      = 'WinRM HTTPS Listener'
+        KeyAlgorithm      = 'RSA'
+        KeyLength         = 2048
+        HashAlgorithm     = 'SHA256'
+        NotAfter          = (Get-Date).AddYears(2)
     }
     $certificate = New-SelfSignedCertificate @certificateParameters
 }
 
 if (-not $existingListener -and $PSCmdlet.ShouldProcess($ComputerFqdn, 'Create WinRM HTTPS listener')) {
     $listenerParameters = @{
-        Path = 'WSMan:\localhost\Listener'
-        Transport = 'HTTPS'
-        Address = '*'
+        Path                  = 'WSMan:\localhost\Listener'
+        Transport             = 'HTTPS'
+        Address               = '*'
         CertificateThumbPrint = $certificate.Thumbprint
-        Force = $true
+        Force                 = $true
     }
     New-Item @listenerParameters | Out-Null
 }
@@ -66,11 +66,11 @@ if (-not $existingListener -and $PSCmdlet.ShouldProcess($ComputerFqdn, 'Create W
 Enable-NetFirewallRule -DisplayGroup 'Windows Remote Management' | Out-Null
 $firewallParameters = @{
     DisplayName = 'Allow WinRM HTTPS 5986'
-    Direction = 'Inbound'
-    Action = 'Allow'
-    Protocol = 'TCP'
-    LocalPort = 5986
-    Profile = 'Any'
+    Direction   = 'Inbound'
+    Action      = 'Allow'
+    Protocol    = 'TCP'
+    LocalPort   = 5986
+    Profile     = 'Any'
     ErrorAction = 'SilentlyContinue'
 }
 New-NetFirewallRule @firewallParameters | Out-Null
@@ -79,8 +79,8 @@ Restart-Service -Name WinRM
 
 $cerBytes = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
 $result = [pscustomobject]@{
-    ComputerFqdn = $ComputerFqdn
-    Thumbprint = $certificate.Thumbprint
+    ComputerFqdn      = $ComputerFqdn
+    Thumbprint        = $certificate.Thumbprint
     CertificateBase64 = [Convert]::ToBase64String($cerBytes)
 }
 

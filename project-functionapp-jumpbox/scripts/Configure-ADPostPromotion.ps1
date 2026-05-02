@@ -50,11 +50,11 @@ $existingUser = Get-ADUser -Filter "SamAccountName -eq '$ServiceAccountName'" -E
 
 if (-not $existingUser -and $PSCmdlet.ShouldProcess($ServiceAccountName, 'Create remoting service account')) {
     $newUserParameters = @{
-        Name = $ServiceAccountName
-        SamAccountName = $ServiceAccountName
-        UserPrincipalName = "$ServiceAccountName@$DomainName"
-        AccountPassword = $securePassword
-        Enabled = $true
+        Name                 = $ServiceAccountName
+        SamAccountName       = $ServiceAccountName
+        UserPrincipalName    = "$ServiceAccountName@$DomainName"
+        AccountPassword      = $securePassword
+        Enabled              = $true
         PasswordNeverExpires = $true
     }
     New-ADUser @newUserParameters

@@ -53,10 +53,10 @@ tests/
 ## Prerequisites
 
 - Azure subscription rights to create resources in a resource group.
-- PowerShell 7.4+: https://learn.microsoft.com/powershell/scripting/install/installing-powershell
-- Az modules (deployment scripts): https://learn.microsoft.com/powershell/azure/overview?view=azps-latest
+- PowerShell 7.4+: <https://learn.microsoft.com/powershell/scripting/install/installing-powershell>
+- Az modules (deployment scripts): <https://learn.microsoft.com/powershell/azure/overview?view=azps-latest>
   - `Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force`
-- Bicep CLI: https://learn.microsoft.com/azure/azure-resource-manager/bicep/install
+- Bicep CLI: <https://learn.microsoft.com/azure/azure-resource-manager/bicep/install>
 - Optional: Microsoft Graph PowerShell (for app registration scripts)
   - `Install-Module -Name Microsoft.Graph -Scope CurrentUser -Repository PSGallery -Force`
 - Optional: Pester (tests)

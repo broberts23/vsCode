@@ -44,11 +44,13 @@ param domainName string = 'contoso.local'
 param domainNetBiosName string = 'CONTOSO'
 
 var uniqueSuffix = uniqueString(resourceGroup().id, baseName)
-var storagePrefix = take(replace(baseName, '-', ''), 10)
+var compactBaseName = toLower(replace(baseName, '-', ''))
+var storagePrefix = take(compactBaseName, 10)
+var keyVaultPrefix = take(compactBaseName, 8)
 var functionAppName = '${baseName}-func-${environment}-${uniqueSuffix}'
 var appServicePlanName = '${baseName}-asp-${environment}-${uniqueSuffix}'
 var storageAccountName = toLower('${storagePrefix}st${environment}${take(uniqueSuffix, 8)}')
-var keyVaultName = '${baseName}-kv-${environment}-${take(uniqueSuffix, 8)}'
+var keyVaultName = toLower('${keyVaultPrefix}kv${environment}${take(uniqueSuffix, 8)}')
 var logAnalyticsName = '${baseName}-log-${environment}-${uniqueSuffix}'
 var appInsightsName = '${baseName}-ai-${environment}-${uniqueSuffix}'
 var vnetName = '${baseName}-vnet-${environment}-${uniqueSuffix}'
@@ -351,12 +353,7 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = {
   tags: tags
   properties: {
     hardwareProfile: {
-      vmSize: 'Standard_D2ads_v5'
-    }
-    priority: 'Spot'
-    evictionPolicy: 'Deallocate'
-    billingProfile: {
-      maxPrice: -1
+      vmSize: 'Standard_D2ads_v6'
     }
     osProfile: {
       computerName: take(dcVmName, 15)
@@ -372,7 +369,7 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = {
       imageReference: {
         publisher: 'MicrosoftWindowsServer'
         offer: 'WindowsServer'
-        sku: '2022-datacenter'
+        sku: '2022-datacenter-g2'
         version: 'latest'
       }
       osDisk: {
@@ -420,7 +417,7 @@ resource managementVm 'Microsoft.Compute/virtualMachines@2025-04-01' = {
   tags: tags
   properties: {
     hardwareProfile: {
-      vmSize: 'Standard_D2ads_v5'
+      vmSize: 'Standard_D2ads_v6'
     }
     priority: 'Spot'
     evictionPolicy: 'Deallocate'
@@ -441,7 +438,7 @@ resource managementVm 'Microsoft.Compute/virtualMachines@2025-04-01' = {
       imageReference: {
         publisher: 'MicrosoftWindowsServer'
         offer: 'WindowsServer'
-        sku: '2022-datacenter'
+        sku: '2022-datacenter-g2'
         version: 'latest'
       }
       osDisk: {

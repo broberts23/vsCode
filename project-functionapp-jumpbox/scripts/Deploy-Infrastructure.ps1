@@ -13,7 +13,7 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$Location = 'eastus',
+    [string]$Location,
 
     [Parameter()]
     [string]$ParameterFile,
@@ -28,12 +28,50 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-TemplateParameterObject {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$FilePath,
+
+        [Parameter()]
+        [hashtable]$Overrides
+    )
+
+    $parameterFileContent = Get-Content -Path $FilePath -Raw | ConvertFrom-Json -AsHashtable
+    $resolvedParameters = @{}
+
+    foreach ($parameterName in $parameterFileContent.parameters.Keys) {
+        $resolvedParameters[$parameterName] = $parameterFileContent.parameters[$parameterName].value
+    }
+
+    if ($Overrides) {
+        foreach ($parameterName in $Overrides.Keys) {
+            $resolvedParameters[$parameterName] = $Overrides[$parameterName]
+        }
+    }
+
+    return $resolvedParameters
+}
+
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $infraPath = Join-Path $projectRoot 'infra'
 $templateFile = Join-Path $infraPath 'main.bicep'
 
 if (-not $ParameterFile) {
     $ParameterFile = Join-Path $infraPath "parameters.$Environment.json"
+}
+
+$effectiveParameterOverrides = @{}
+if ($ParameterOverrides) {
+    foreach ($parameterName in $ParameterOverrides.Keys) {
+        $effectiveParameterOverrides[$parameterName] = $ParameterOverrides[$parameterName]
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($Location)) {
+    $effectiveParameterOverrides.location = $Location
 }
 
 if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
@@ -57,16 +95,13 @@ $deploymentName = "legacyjump-$Environment-$(Get-Date -Format 'yyyyMMdd-HHmmss')
 
 if ($PSCmdlet.ShouldProcess($ResourceGroupName, 'Deploy infrastructure')) {
     $deploymentParameters = @{
-        Name = $deploymentName
+        Name              = $deploymentName
         ResourceGroupName = $ResourceGroupName
-        TemplateFile = $templateFile
-        TemplateParameterFile = $ParameterFile
-        Verbose = $VerbosePreference
+        TemplateFile      = $templateFile
+        Verbose           = $VerbosePreference
     }
 
-    if ($ParameterOverrides -and $ParameterOverrides.Count -gt 0) {
-        $deploymentParameters.TemplateParameterObject = $ParameterOverrides
-    }
+    $deploymentParameters.TemplateParameterObject = Get-TemplateParameterObject -FilePath $ParameterFile -Overrides $effectiveParameterOverrides
 
     $deployment = New-AzResourceGroupDeployment @deploymentParameters
 

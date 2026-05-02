@@ -137,6 +137,8 @@ Those two passwords can come from either:
 - the parameter file in `infra/parameters.<environment>.json`
 - explicit command-line parameters to `Deploy-Complete.ps1`
 
+`tenantId` and `clientId` can also come from either the parameter file or explicit command-line parameters. That lets you keep the checked-in parameter file on placeholder values in a public repo.
+
 The exact invocation shape for a real deployment is:
 
 ```powershell
@@ -150,6 +152,8 @@ pwsh ./scripts/Deploy-Complete.ps1 `
   -ResourceGroupName rg-legacyjump-dev `
   -Location eastus `
   -ParameterFile ./infra/parameters.dev.json `
+  -TenantId '<entra-tenant-guid>' `
+  -ClientId '<api-app-registration-client-id>' `
   -VmAdminUsername azureadmin `
   -VmAdminPassword $vmAdminPassword `
   -ServiceAccountName svc-legacyjump `
@@ -159,7 +163,7 @@ pwsh ./scripts/Deploy-Complete.ps1 `
 
 What that invocation expects:
 
-- the `tenantId` and `clientId` in the parameter file already point to the API app registration that Easy Auth should trust
+- `tenantId` and `clientId` are supplied either in the parameter file or on the command line and point to the API app registration that Easy Auth should trust
 - the caller has permission to deploy Azure resources, execute VM Run Command, and write secrets into the project Key Vault
 - Azure Functions Core Tools is installed if `-PublishFunctionApp` is used
 - the passwords meet Windows and domain policy requirements
@@ -176,6 +180,8 @@ pwsh ./scripts/Deploy-Complete.ps1 `
 ```
 
 In that mode, `Deploy-Complete.ps1` will read `vmAdminUsername`, `vmAdminPassword`, and `serviceAccountPassword` from the parameter file and stop if the file still contains placeholder values.
+
+If you keep `tenantId` and `clientId` as placeholders in the parameter file, pass them explicitly to `Deploy-Complete.ps1` with `-TenantId` and `-ClientId`.
 
 ## JUMPBOX-WINRM-CERT-CER Flow
 

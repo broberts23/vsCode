@@ -20,6 +20,14 @@ param(
 
     [Parameter()]
     [ValidateNotNullOrEmpty()]
+    [string]$TenantId,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$ClientId,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
     [string]$VmAdminUsername,
 
     [Parameter()]
@@ -606,10 +614,14 @@ try {
     $vmAdminUsernameToUse = Resolve-PlainParameterValue -ParameterObject $parameterObject -Name 'vmAdminUsername' -ProvidedValue $VmAdminUsername -DefaultValue 'azureadmin'
     $vmAdminPasswordToUse = Resolve-SecureParameterValue -ParameterObject $parameterObject -Name 'vmAdminPassword' -ProvidedValue $VmAdminPassword
     $serviceAccountPasswordToUse = Resolve-SecureParameterValue -ParameterObject $parameterObject -Name 'serviceAccountPassword' -ProvidedValue $ServiceAccountPassword
+    $tenantIdToUse = Resolve-PlainParameterValue -ParameterObject $parameterObject -Name 'tenantId' -ProvidedValue $TenantId
+    $clientIdToUse = Resolve-PlainParameterValue -ParameterObject $parameterObject -Name 'clientId' -ProvidedValue $ClientId
     $domainName = [string](Get-ParameterFileValue -ParameterObject $parameterObject -Name 'domainName' -DefaultValue 'contoso.local')
     $domainNetBiosName = [string](Get-ParameterFileValue -ParameterObject $parameterObject -Name 'domainNetBiosName' -DefaultValue 'CONTOSO')
 
     $parameterOverrides = @{
+        tenantId = $tenantIdToUse
+        clientId = $clientIdToUse
         vmAdminUsername = $vmAdminUsernameToUse
         vmAdminPassword = (ConvertTo-PlainText -SecureString $vmAdminPasswordToUse)
         serviceAccountPassword = (ConvertTo-PlainText -SecureString $serviceAccountPasswordToUse)
