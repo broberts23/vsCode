@@ -1,10 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
 
-using namespace System.Security.Cryptography.X509Certificates
-using namespace System.Net.Security
-using namespace System.Net.Sockets
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -54,7 +50,7 @@ function Get-FunctionJumpboxCredential {
 
 function Get-FunctionJumpboxCertificate {
     [CmdletBinding()]
-    [OutputType([X509Certificate2])]
+    [OutputType([System.Security.Cryptography.X509Certificates.X509Certificate2])]
     param()
 
     if ($script:CachedJumpboxCertificate) {
@@ -62,7 +58,7 @@ function Get-FunctionJumpboxCertificate {
     }
 
     $base64Value = Get-ResolvedAppSettingValue -Name 'WINRM_CERTIFICATE_BASE64'
-    $script:CachedJumpboxCertificate = [X509Certificate2]::new([Convert]::FromBase64String($base64Value))
+    $script:CachedJumpboxCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($base64Value))
     return $script:CachedJumpboxCertificate
 }
 
@@ -84,14 +80,14 @@ function Test-CertificateDnsName {
     param(
         [Parameter(Mandatory)]
         [ValidateNotNull()]
-        [X509Certificate2]$Certificate,
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
 
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
         [string]$ComputerName
     )
 
-    $dnsName = $Certificate.GetNameInfo([X509NameType]::DnsName, $false)
+    $dnsName = $Certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::DnsName, $false)
     if ([string]::IsNullOrWhiteSpace($dnsName)) {
         return $false
     }
@@ -118,24 +114,24 @@ function Get-RemoteTlsCertificateInfo {
     )
 
     $capturedCertificate = $null
-    $capturedPolicyErrors = [SslPolicyErrors]::None
-    $tcpClient = [TcpClient]::new()
+    $capturedPolicyErrors = [System.Net.Security.SslPolicyErrors]::None
+    $tcpClient = [System.Net.Sockets.TcpClient]::new()
 
     try {
         $tcpClient.Connect($ComputerName, $Port)
 
-        $callback = [RemoteCertificateValidationCallback] {
+        $callback = [System.Net.Security.RemoteCertificateValidationCallback] {
             param($sender, $certificate, $chain, $sslPolicyErrors)
 
             if ($certificate) {
-                $script:capturedCertificate = [X509Certificate2]::new($certificate)
+                $script:capturedCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificate)
             }
 
             $script:capturedPolicyErrors = $sslPolicyErrors
             return $true
         }
 
-        $sslStream = [SslStream]::new($tcpClient.GetStream(), $false, $callback)
+        $sslStream = [System.Net.Security.SslStream]::new($tcpClient.GetStream(), $false, $callback)
         try {
             $sslStream.AuthenticateAsClient($ComputerName)
         }
@@ -172,7 +168,7 @@ function Test-WinRmTlsPinning {
 
         [Parameter(Mandatory)]
         [ValidateNotNull()]
-        [X509Certificate2]$ExpectedCertificate,
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$ExpectedCertificate,
 
         [Parameter()]
         [ValidateRange(1, 65535)]
@@ -214,7 +210,7 @@ function Invoke-LegacyRemoteScriptBlock {
 
         [Parameter(Mandatory)]
         [ValidateNotNull()]
-        [X509Certificate2]$ExpectedCertificate,
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]$ExpectedCertificate,
 
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]

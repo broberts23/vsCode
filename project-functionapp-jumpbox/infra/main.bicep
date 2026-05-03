@@ -68,11 +68,14 @@ var vnetName = '${baseName}-vnet-${environment}-${uniqueSuffix}'
 var nsgName = '${baseName}-nsg-${environment}-${uniqueSuffix}'
 var dcVmName = '${baseName}-dc-${environment}'
 var managementVmName = '${baseName}-mgmt-${environment}'
+var dcComputerName = take(dcVmName, 15)
+var managementComputerName = take(managementVmName, 15)
 var dcNicName = '${dcVmName}-nic'
 var managementNicName = '${managementVmName}-nic'
 var dcPublicIpName = '${dcVmName}-pip'
 var managementPublicIpName = '${managementVmName}-pip'
-var managementHostFqdn = '${managementVmName}.${domainName}'
+var domainControllerFqdn = '${dcComputerName}.${domainName}'
+var managementHostFqdn = '${managementComputerName}.${domainName}'
 var remotingServiceUsername = '${domainNetBiosName}\\svc-legacyjump'
 
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2025-07-01' = {
@@ -367,7 +370,7 @@ resource dcVm 'Microsoft.Compute/virtualMachines@2025-04-01' = {
       vmSize: 'Standard_D2ads_v6'
     }
     osProfile: {
-      computerName: take(dcVmName, 15)
+      computerName: dcComputerName
       adminUsername: vmAdminUsername
       adminPassword: vmAdminPassword
       windowsConfiguration: {
@@ -436,7 +439,7 @@ resource managementVm 'Microsoft.Compute/virtualMachines@2025-04-01' = {
       maxPrice: -1
     }
     osProfile: {
-      computerName: take(managementVmName, 15)
+      computerName: managementComputerName
       adminUsername: vmAdminUsername
       adminPassword: vmAdminPassword
       windowsConfiguration: {
@@ -664,7 +667,7 @@ output functionAppPrincipalId string = functionApp.identity.principalId
 output keyVaultName string = keyVault.name
 output keyVaultUri string = keyVault.properties.vaultUri
 output domainControllerVmName string = dcVm.name
-output domainControllerFqdn string = '${dcVmName}.${domainName}'
+output domainControllerFqdn string = domainControllerFqdn
 output managementVmName string = managementVm.name
 output managementVmFqdn string = managementHostFqdn
 output managementVmPrivateIp string = '10.0.2.4'
