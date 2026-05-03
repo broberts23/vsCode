@@ -216,6 +216,7 @@ resource nsg 'Microsoft.Network/networkSecurityGroups@2025-05-01' = {
             '389'
             '445'
             '636'
+            '9389'
             '3268'
             '3269'
           ]

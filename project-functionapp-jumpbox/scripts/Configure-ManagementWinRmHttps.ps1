@@ -8,10 +8,13 @@ param(
     [string]$ComputerFqdn,
 
     [Parameter()]
+    [string]$AuthorizedPrincipal = '',
+
+    [Parameter()]
     [switch]$InstallRsat = $true,
 
     [Parameter()]
-    [switch]$EnableBasicAuth = $true
+    [switch]$EnableBasicAuth = $false
 )
 
 Set-StrictMode -Version Latest
@@ -43,7 +46,41 @@ function Write-Log {
     Add-Content -Path $script:LogFile -Value "[$timestamp] [$Level] $Message"
 }
 
+function Add-PrincipalToLocalGroup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PrincipalName,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$GroupSid
+    )
+
+    $groupName = ([System.Security.Principal.SecurityIdentifier]$GroupSid).Translate([System.Security.Principal.NTAccount]).Value.Split('\')[-1]
+    $group = [ADSI]("WinNT://./$groupName,group")
+    $principalPath = "WinNT://$($PrincipalName.Replace('\', '/'))"
+
+    $existingMembers = @($group.psbase.Invoke('Members'))
+    foreach ($member in $existingMembers) {
+        $memberPath = $member.GetType().InvokeMember('ADsPath', 'GetProperty', $null, $member, $null)
+        if ($memberPath -ieq $principalPath) {
+            Write-Log "Principal '$PrincipalName' is already a member of local group '$groupName'."
+            return
+        }
+    }
+
+    $group.Add($principalPath)
+    Write-Log "Added principal '$PrincipalName' to local group '$groupName'."
+}
+
 Write-Log "Starting WinRM HTTPS configuration for '$ComputerFqdn'."
+
+if (-not [string]::IsNullOrWhiteSpace($AuthorizedPrincipal)) {
+    Add-PrincipalToLocalGroup -PrincipalName $AuthorizedPrincipal -GroupSid 'S-1-5-32-544'
+    Add-PrincipalToLocalGroup -PrincipalName $AuthorizedPrincipal -GroupSid 'S-1-5-32-580'
+}
 
 if ($InstallRsat) {
     if (Get-Command -Name Install-WindowsFeature -ErrorAction SilentlyContinue) {
@@ -104,6 +141,7 @@ if ($InstallRsat) {
 Write-Log 'Enabling PowerShell remoting and configuring WinRM authentication settings.'
 Enable-PSRemoting -Force
 Set-Item -Path WSMan:\localhost\Service\AllowUnencrypted -Value $false
+Set-Item -Path WSMan:\localhost\Service\Auth\Negotiate -Value $true
 Set-Item -Path WSMan:\localhost\Service\Auth\Basic -Value ([bool]$EnableBasicAuth)
 Set-Item -Path WSMan:\localhost\Client\TrustedHosts -Value '' -Force
 

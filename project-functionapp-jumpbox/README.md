@@ -11,7 +11,7 @@ flowchart LR
     Caller["Caller App\nEntra app role"] --> EasyAuth["Easy Auth\nauthsettingsV2"]
     EasyAuth --> Function["Azure Function\nPowerShell 7.4"]
     Function --> KV["Key Vault\ncredential + cert pin"]
-    Function -->|"Invoke-Command -AsJob\nBasic over HTTPS :5986"| Mgmt["Management VM\nDomain joined + RSAT"]
+    Function -->|"Invoke-Command -AsJob\nNegotiate over HTTPS :5986"| Mgmt["Management VM\nDomain joined + RSAT"]
     Mgmt -->|"Legacy modules"| AD["Active Directory"]
     Mgmt -->|"Implicit remoting / snap-ins"| Exchange["Exchange Mgmt"]
     DC["Domain Controller\nAD DS + DNS"] --> Mgmt
@@ -31,7 +31,7 @@ flowchart LR
   - promote the domain controller
   - create the remoting service account
   - join the management VM to the domain
-  - configure WinRM Basic over HTTPS and install RSAT
+  - configure WinRM over HTTPS and install RSAT
   - publish the jumpbox certificate to Key Vault
 - A PowerShell 7.4 HTTP-trigger Azure Function that:
   - validates Easy Auth principal claims
@@ -294,7 +294,7 @@ This is certificate pinning in application logic. The Function App does not trus
 Once the TLS preflight succeeds, the function creates the remote PowerShell session with:
 
 - `UseSSL = $true`
-- `Authentication = 'Basic'`
+- `Authentication = 'Negotiate'`
 - the Key Vault-backed service credential
 
 The certificate is therefore protecting the server side of the WinRM HTTPS channel. The function uses it to verify that it is really talking to the intended management VM before sending credentials and before sending the script block that will run remotely.
@@ -310,7 +310,7 @@ In practice, the end-to-end chain is:
 ## Notes
 
 - The management VM is intentionally Windows-based so RSAT and legacy management tooling can be installed without containerizing unsupported dependencies.
-- WinRM Basic authentication is enabled only over HTTPS in this design.
+- WinRM uses Negotiate over HTTPS in this design, with the server certificate pinned in application logic before session creation.
 - The function app remains PowerShell 7.4 even though some remote commands will execute under Windows PowerShell-compatible modules on the jumpbox.
 
 ## Related Files

@@ -95,7 +95,13 @@ if (-not $existingUser -and $PSCmdlet.ShouldProcess($ServiceAccountName, 'Create
     Write-Log "Created remoting service account '$ServiceAccountName'."
 }
 else {
-    Write-Log "Remoting service account '$ServiceAccountName' already exists; skipping creation."
+    Write-Log "Remoting service account '$ServiceAccountName' already exists; reconciling password and account settings."
+
+    if ($PSCmdlet.ShouldProcess($ServiceAccountName, 'Reset remoting service account password')) {
+        Set-ADAccountPassword -Identity $ServiceAccountName -Reset -NewPassword $securePassword -ErrorAction Stop
+        Set-ADUser -Identity $ServiceAccountName -Enabled $true -PasswordNeverExpires $true -ErrorAction Stop
+        Write-Log "Reset password and refreshed account settings for remoting service account '$ServiceAccountName'."
+    }
 }
 
 Write-Log "Ensuring remoting service account '$ServiceAccountName' is a member of 'Domain Admins'."

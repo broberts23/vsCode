@@ -238,7 +238,7 @@ function Invoke-LegacyRemoteScriptBlock {
             ComputerName   = $ComputerName
             UseSSL         = $true
             Port           = $Port
-            Authentication = 'Basic'
+            Authentication = 'Negotiate'
             Credential     = $Credential
             SessionOption  = $sessionOption
         }
@@ -254,6 +254,10 @@ function Invoke-LegacyRemoteScriptBlock {
                 $ErrorActionPreference = 'Stop'
                 $VerbosePreference = 'Continue'
                 $InformationPreference = 'Continue'
+
+                foreach ($entry in $RemoteArguments.GetEnumerator()) {
+                    Set-Variable -Name $entry.Key -Value $entry.Value -Scope Local
+                }
 
                 $result = & ([scriptblock]::Create($RemoteScriptText)) @RemoteArguments 6>&1 5>&1 4>&1 3>&1 2>&1
                 $normalized = foreach ($item in $result) {
@@ -290,7 +294,7 @@ function Invoke-LegacyRemoteScriptBlock {
             throw "Remote execution timed out after $TimeoutSeconds seconds."
         }
 
-        $remoteResult = Receive-Job -Job $job -AutoRemoveJob
+        $remoteResult = Receive-Job -Job $job
         return [pscustomobject]@{
             tls    = $tlsValidation
             remote = $remoteResult

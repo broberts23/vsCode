@@ -26,7 +26,7 @@ The management VM carries the legacy burden:
 - **Domain joined for Kerberos Authentication**: This enables the VM to leverage native Kerberos authentication for downstream connections. This is a lifesaver for scenarios like on-premises mailbox migrations where security teams rightly block Basic WinRM access to the Exchange servers' `/PowerShell` endpoints. The Azure Function securely connects to the isolated Jumpbox, and the Jumpbox can seamlessly use Kerberos to act against the backend Exchange environment or other domain resources.
 - **RSAT (Remote Server Administration Tools)** installed natively.
 - **Exchange Management Tools** (or other legacy admin prerequisites) installed locally.
-- **WinRM Basic enabled**: Strictly locked down over HTTPS and firewalled to the VNet. This provides a secure, certificate-pinned bridge from the cloud without exposing your actual Domain Controllers or Exchange servers to edge traffic.
+- **WinRM over HTTPS with explicit credentials**: The function establishes a certificate-pinned HTTPS remoting session to the jumpbox and authenticates with explicit credentials using Negotiate. This provides a secure bridge from the cloud without exposing your actual Domain Controllers or Exchange servers to edge traffic.
 
 ### Executing the Remote Script Block
 
@@ -74,6 +74,7 @@ $tokenResponse = Invoke-RestMethod `
     scope = $scope
   }
 
+
 $body = @{
     scriptBlock = 'Get-ADUser -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
     arguments = @{
@@ -102,7 +103,7 @@ This scaffold handles trust explicitly at the application layer:
 3. It inspects the remote certificate for a thumbprint match and verifies the DNS identity against the configured hostname.
 4. Only after this preflight passes does it establish the remoting session.
 
-This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. Furthermore, while Basic Auth is typically discouraged, it is defensible here because it operates strictly over a private VNet on an HTTPS-encrypted channel, with credentials securely retrieved from Key Vault just-in-time.
+This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. The remoting session then uses Negotiate over that HTTPS channel with credentials retrieved from Key Vault just-in-time.
 
 ## Conclusion
 

@@ -775,6 +775,9 @@ function Invoke-ManagementVmWinRmConfiguration {
         [string]$ComputerFqdn,
 
         [Parameter(Mandatory)]
+        [string]$AuthorizedPrincipal,
+
+        [Parameter(Mandatory)]
         [string]$KeyVaultName
     )
 
@@ -782,6 +785,7 @@ function Invoke-ManagementVmWinRmConfiguration {
         $scriptText = Get-Content (Join-Path $script:ScriptDirectory 'Configure-ManagementWinRmHttps.ps1') -Raw
         $result = Invoke-VmRunCommand -ResourceGroupName $ResourceGroupName -VmName $VmName -ScriptString $scriptText -Parameters @{
             ComputerFqdn = $ComputerFqdn
+            AuthorizedPrincipal = $AuthorizedPrincipal
         }
 
         $message = Get-RunCommandMessage -RunCommandResult $result
@@ -909,7 +913,7 @@ try {
     $domainJoinUsername = '{0}\{1}' -f $domainNetBiosName, $ServiceAccountName
 
     Invoke-ManagementVmDomainJoin -ResourceGroupName $ResourceGroupName -VmName $managementVmName -DomainName $domainName -DomainJoinUsername $domainJoinUsername -DomainJoinPassword $serviceAccountPasswordToUse -DnsServer $domainControllerPrivateIp
-    $null = Invoke-ManagementVmWinRmConfiguration -ResourceGroupName $ResourceGroupName -VmName $managementVmName -ComputerFqdn $managementVmFqdn -KeyVaultName $keyVaultName
+    $null = Invoke-ManagementVmWinRmConfiguration -ResourceGroupName $ResourceGroupName -VmName $managementVmName -ComputerFqdn $managementVmFqdn -AuthorizedPrincipal $domainJoinUsername -KeyVaultName $keyVaultName
 
     if ($PublishFunctionApp) {
         & (Join-Path $script:ScriptDirectory 'Deploy-FunctionApp.ps1') -FunctionAppName $functionAppName -ResourceGroupName $ResourceGroupName -SkipTests:$SkipFunctionAppTests
