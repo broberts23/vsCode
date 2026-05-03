@@ -64,7 +64,9 @@ function Ensure-MgGraphConnection {
 
     $context = Get-MgContext -ErrorAction SilentlyContinue
     $connected = $null -ne $context
-    $hasScopes = $connected -and (($requiredScopes | Where-Object { $context.Scopes -notcontains $_ }).Count -eq 0)
+    $grantedScopes = if ($connected -and $null -ne $context.Scopes) { @($context.Scopes) } else { @() }
+    $missingScopes = if ($connected) { @($requiredScopes | Where-Object { $grantedScopes -notcontains $_ }) } else { @($requiredScopes) }
+    $hasScopes = $connected -and (@($missingScopes).Count -eq 0)
 
     if (-not $hasScopes) {
         Write-StatusMessage 'Connecting to Microsoft Graph with application and app role assignment scopes...' -Type Info
@@ -96,11 +98,11 @@ function Get-AppRoleDefinition {
 
     return @{
         allowedMemberTypes = @('Application', 'User')
-        description = 'Allows invocation of legacy management commands through the jumpbox function app.'
-        displayName = 'Legacy Command Invoke'
-        id = (New-Guid).Guid
-        isEnabled = $true
-        value = $RequiredRole
+        description        = 'Allows invocation of legacy management commands through the jumpbox function app.'
+        displayName        = 'Legacy Command Invoke'
+        id                 = (New-Guid).Guid
+        isEnabled          = $true
+        value              = $RequiredRole
     }
 }
 
@@ -157,10 +159,10 @@ try {
         if ($PSCmdlet.ShouldProcess($DisplayName, 'Create API app registration')) {
             Write-StatusMessage "Creating API app registration '$DisplayName'." -Type Info
             $application = New-MgApplication -BodyParameter @{
-                displayName = $DisplayName
+                displayName    = $DisplayName
                 signInAudience = 'AzureADMyOrg'
-                api = @{ requestedAccessTokenVersion = 2 }
-                appRoles = @((Get-AppRoleDefinition -RequiredRole $RequiredRole))
+                api            = @{ requestedAccessTokenVersion = 2 }
+                appRoles       = @((Get-AppRoleDefinition -RequiredRole $RequiredRole))
             } -ErrorAction Stop
         }
     }
@@ -175,8 +177,8 @@ try {
 
         $identifierUri = "api://$($application.AppId)"
         Update-MgApplication -ApplicationId $application.Id -BodyParameter @{
-            api = @{ requestedAccessTokenVersion = 2 }
-            appRoles = $appRoles
+            api            = @{ requestedAccessTokenVersion = 2 }
+            appRoles       = $appRoles
             identifierUris = @($identifierUri)
         } -ErrorAction Stop
         $application = Get-MgApplication -ApplicationId $application.Id -ErrorAction Stop
@@ -197,14 +199,14 @@ try {
     Write-StatusMessage "API app registration ready. AppId: $($application.AppId)" -Type Success
 
     [pscustomobject]@{
-        DisplayName = $application.DisplayName
-        AppId = $application.AppId
-        ObjectId = $application.Id
+        DisplayName        = $application.DisplayName
+        AppId              = $application.AppId
+        ObjectId           = $application.Id
         ServicePrincipalId = $servicePrincipal.Id
-        IdentifierUri = $desiredIdentifierUri
-        RequiredRole = $RequiredRole
-        AppRoleId = $appRole.Id
-        TenantId = $context.TenantId
+        IdentifierUri      = $desiredIdentifierUri
+        RequiredRole       = $RequiredRole
+        AppRoleId          = $appRole.Id
+        TenantId           = $context.TenantId
     }
 }
 catch {

@@ -301,7 +301,8 @@ function Get-ScriptOutputObject {
         }
 
         $propertyNames = @($candidate.PSObject.Properties.Name)
-        if (($RequiredProperties | Where-Object { $propertyNames -notcontains $_ }).Count -eq 0) {
+        $missingProperties = @($RequiredProperties | Where-Object { $propertyNames -notcontains $_ })
+        if ($missingProperties.Count -eq 0) {
             return $candidate
         }
     }
@@ -401,11 +402,11 @@ function Get-RunCommandErrorMessage {
 
     $errorMessages = @(
         $RunCommandResult.Value |
-            Where-Object {
-                $_.Code -like 'ComponentStatus/StdErr/*' -and
-                -not [string]::IsNullOrWhiteSpace($_.Message)
-            } |
-            ForEach-Object { $_.Message.Trim() }
+        Where-Object {
+            $_.Code -like 'ComponentStatus/StdErr/*' -and
+            -not [string]::IsNullOrWhiteSpace($_.Message)
+        } |
+        ForEach-Object { $_.Message.Trim() }
     )
 
     return ($errorMessages -join [Environment]::NewLine).Trim()
