@@ -346,6 +346,30 @@ function Get-RunCommandMessage {
     return (($RunCommandResult.Value | ForEach-Object { $_.Message }) -join [Environment]::NewLine).Trim()
 }
 
+function Get-RunCommandErrorMessage {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter()]
+        $RunCommandResult
+    )
+
+    if ($null -eq $RunCommandResult -or $null -eq $RunCommandResult.Value) {
+        return ''
+    }
+
+    $errorMessages = @(
+        $RunCommandResult.Value |
+            Where-Object {
+                $_.Code -like 'ComponentStatus/StdErr/*' -and
+                -not [string]::IsNullOrWhiteSpace($_.Message)
+            } |
+            ForEach-Object { $_.Message.Trim() }
+    )
+
+    return ($errorMessages -join [Environment]::NewLine).Trim()
+}
+
 function Wait-ForVmPowerState {
     [CmdletBinding()]
     param(
@@ -427,13 +451,18 @@ function Wait-ForVmReadiness {
         [int]$TimeoutSeconds = 1800,
 
         [Parameter()]
-        [int]$CheckIntervalSeconds = 60
+        [int]$CheckIntervalSeconds = 60,
+
+        [Parameter()]
+        [int]$RebootObservationGraceSeconds = 300
     )
 
     $initialBootTime = Get-VmBootTime -ResourceGroupName $ResourceGroupName -VmName $VmName
     $elapsed = 0
     $rebootObserved = -not $RequireReboot
     $transientFailureObserved = $false
+    $readyMarker = '__READY__'
+    $fallbackReadinessLogged = $false
 
     while ($elapsed -lt $TimeoutSeconds) {
         try {
@@ -451,10 +480,19 @@ function Wait-ForVmReadiness {
                 }
             }
 
-            if ($rebootObserved) {
+            $shouldAttemptReadiness = $rebootObserved
+            if (-not $shouldAttemptReadiness -and $RequireReboot -and $elapsed -ge $RebootObservationGraceSeconds) {
+                $shouldAttemptReadiness = $true
+                if (-not $fallbackReadinessLogged) {
+                    Write-Log "Reboot was not directly observed for VM '$VmName'; probing readiness after grace period instead." -Level Warning
+                    $fallbackReadinessLogged = $true
+                }
+            }
+
+            if ($shouldAttemptReadiness) {
                 $readinessResult = Invoke-VmRunCommand -ResourceGroupName $ResourceGroupName -VmName $VmName -ScriptString $ReadinessScript -AllowFailure
                 $readinessMessage = Get-RunCommandMessage -RunCommandResult $readinessResult
-                if ($readinessResult -and $readinessMessage -notlike '*exit code: 1*' -and $readinessMessage -notlike '*exit code 1*') {
+                if ($readinessResult -and $readinessMessage -match [Regex]::Escape($readyMarker)) {
                     return
                 }
             }
@@ -550,7 +588,7 @@ function Invoke-DomainControllerPostConfig {
 
     if ($PSCmdlet.ShouldProcess($VmName, 'Configure AD post-promotion')) {
         Write-Log 'Waiting for domain controller reboot and AD readiness...'
-        $readinessScript = "try { Import-Module ActiveDirectory -ErrorAction Stop; Get-ADDomain -Identity '$DomainName' -ErrorAction Stop | Out-Null; exit 0 } catch { exit 1 }"
+        $readinessScript = "try { Import-Module ActiveDirectory -ErrorAction Stop; Get-ADDomain -Identity '$DomainName' -ErrorAction Stop | Out-Null; Write-Output '__READY__'; exit 0 } catch { Write-Error `$_.Exception.Message; exit 1 }"
         Wait-ForVmReadiness -ResourceGroupName $ResourceGroupName -VmName $VmName -ReadinessScript $readinessScript -RequireReboot
 
         $postConfigScript = Get-Content (Join-Path $script:ScriptDirectory 'Configure-ADPostPromotion.ps1') -Raw
@@ -594,17 +632,26 @@ function Invoke-ManagementVmDomainJoin {
         Wait-ForVmPowerState -ResourceGroupName $ResourceGroupName -VmName $VmName
 
         $joinScript = Get-Content (Join-Path $script:ScriptDirectory 'Join-ManagementVmToDomain.ps1') -Raw
-        $null = Invoke-VmRunCommand -ResourceGroupName $ResourceGroupName -VmName $VmName -ScriptString $joinScript -Parameters @{
+        $joinResult = Invoke-VmRunCommand -ResourceGroupName $ResourceGroupName -VmName $VmName -ScriptString $joinScript -Parameters @{
             DomainName         = $DomainName
             DomainJoinUsername = $DomainJoinUsername
             DomainJoinPassword = (ConvertTo-PlainText -SecureString $DomainJoinPassword)
             DnsServer          = $DnsServer
-        } -AsJob
+        }
 
-        Write-Log 'Domain join command submitted as a background job.' -Level Success
+        $joinMessage = Get-RunCommandMessage -RunCommandResult $joinResult
+        $joinErrorMessage = Get-RunCommandErrorMessage -RunCommandResult $joinResult
+        if (-not [string]::IsNullOrWhiteSpace($joinMessage)) {
+            Write-Log $joinMessage
+        }
+        if (-not [string]::IsNullOrWhiteSpace($joinErrorMessage)) {
+            throw "Management VM domain join bootstrap failed:`n$joinErrorMessage"
+        }
+
+        Write-Log 'Domain join worker launched on the management VM.' -Level Success
         Start-Sleep -Seconds 30
 
-        $readinessScript = "`$computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem; if (`$computerSystem.PartOfDomain -and `$computerSystem.Domain -ieq '$DomainName') { exit 0 } else { exit 1 }"
+        $readinessScript = "`$computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem; if (`$computerSystem.PartOfDomain -and `$computerSystem.Domain -ieq '$DomainName') { Write-Output '__READY__'; exit 0 } else { Write-Error 'Management VM is not yet joined to the domain.'; exit 1 }"
         Wait-ForVmReadiness -ResourceGroupName $ResourceGroupName -VmName $VmName -ReadinessScript $readinessScript -RequireReboot
     }
 }

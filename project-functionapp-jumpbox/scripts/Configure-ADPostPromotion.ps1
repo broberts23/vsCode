@@ -32,6 +32,7 @@ function Write-Log {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Message,
 
         [Parameter()]
@@ -40,6 +41,10 @@ function Write-Log {
     )
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        $Message = '(no message)'
+    }
+
     Add-Content -Path $script:LogFile -Value "[$timestamp] [$Level] $Message"
 }
 
@@ -91,6 +96,17 @@ if (-not $existingUser -and $PSCmdlet.ShouldProcess($ServiceAccountName, 'Create
 }
 else {
     Write-Log "Remoting service account '$ServiceAccountName' already exists; skipping creation."
+}
+
+Write-Log "Ensuring remoting service account '$ServiceAccountName' is a member of 'Domain Admins'."
+$domainAdminsGroup = Get-ADGroup -Identity 'Domain Admins' -ErrorAction Stop
+$serviceAccountGroups = Get-ADPrincipalGroupMembership -Identity $ServiceAccountName | Select-Object -ExpandProperty DistinguishedName
+if ($serviceAccountGroups -contains $domainAdminsGroup.DistinguishedName) {
+    Write-Log "Remoting service account '$ServiceAccountName' is already a member of 'Domain Admins'."
+}
+elseif ($PSCmdlet.ShouldProcess($ServiceAccountName, "Add to 'Domain Admins'")) {
+    Add-ADGroupMember -Identity $domainAdminsGroup -Members $ServiceAccountName -ErrorAction Stop
+    Write-Log "Added remoting service account '$ServiceAccountName' to 'Domain Admins'."
 }
 
 Write-Log "AD post-promotion configuration completed. Log file: $($script:LogFile)"

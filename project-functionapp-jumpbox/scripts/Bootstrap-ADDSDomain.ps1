@@ -30,6 +30,7 @@ function Write-Log {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Message,
 
         [Parameter()]
@@ -38,6 +39,10 @@ function Write-Log {
     )
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        $Message = '(no message)'
+    }
+
     $logMessage = "[$timestamp] [$Level] $Message"
 
     try {

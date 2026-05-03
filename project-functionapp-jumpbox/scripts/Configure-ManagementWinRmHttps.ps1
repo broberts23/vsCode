@@ -27,6 +27,7 @@ function Write-Log {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$Message,
 
         [Parameter()]
@@ -35,25 +36,67 @@ function Write-Log {
     )
 
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        $Message = '(no message)'
+    }
+
     Add-Content -Path $script:LogFile -Value "[$timestamp] [$Level] $Message"
 }
 
 Write-Log "Starting WinRM HTTPS configuration for '$ComputerFqdn'."
 
 if ($InstallRsat) {
-    $rsatCapabilities = @(
-        'Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0',
-        'Rsat.GroupPolicy.Management.Tools~~~~0.0.1.0'
-    )
+    if (Get-Command -Name Install-WindowsFeature -ErrorAction SilentlyContinue) {
+        $rsatFeatures = @(
+            'RSAT-AD-Tools',
+            'RSAT-AD-PowerShell',
+            'GPMC'
+        )
 
-    foreach ($capability in $rsatCapabilities) {
-        $state = Get-WindowsCapability -Online -Name $capability
-        if ($state.State -ne 'Installed') {
-            Write-Log "Installing Windows capability '$capability'."
-            Add-WindowsCapability -Online -Name $capability | Out-Null
+        foreach ($feature in $rsatFeatures) {
+            $featureState = Get-WindowsFeature -Name $feature -ErrorAction SilentlyContinue
+            if (-not $featureState) {
+                Write-Log "Windows feature '$feature' was not found on this server image." -Level Warning
+                continue
+            }
+
+            if (-not $featureState.Installed) {
+                Write-Log "Installing Windows feature '$feature'."
+                $installResult = Install-WindowsFeature -Name $feature -IncludeAllSubFeature -ErrorAction Stop
+                if (-not $installResult.Success) {
+                    throw "Installation of Windows feature '$feature' did not report success."
+                }
+                Write-Log "Installed Windows feature '$feature'."
+            }
+            else {
+                Write-Log "Windows feature '$feature' is already installed."
+            }
+        }
+    }
+    else {
+        $rsatCapabilities = @(
+            'Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0',
+            'Rsat.GroupPolicy.Management.Tools~~~~0.0.1.0'
+        )
+
+        foreach ($capability in $rsatCapabilities) {
+            $state = Get-WindowsCapability -Online -Name $capability
+            if ($state.State -ne 'Installed') {
+                Write-Log "Installing Windows capability '$capability'."
+                Add-WindowsCapability -Online -Name $capability | Out-Null
+            }
+            else {
+                Write-Log "Windows capability '$capability' is already installed."
+            }
+        }
+    }
+
+    foreach ($commandName in @('Get-ADUser', 'Get-GPO')) {
+        if (Get-Command -Name $commandName -ErrorAction SilentlyContinue) {
+            Write-Log "Verified management command '$commandName' is available."
         }
         else {
-            Write-Log "Windows capability '$capability' is already installed."
+            Write-Log "Management command '$commandName' is not available after RSAT installation." -Level Warning
         }
     }
 }
