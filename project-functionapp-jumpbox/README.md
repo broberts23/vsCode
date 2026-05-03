@@ -27,6 +27,7 @@ flowchart LR
   - a separate management VM intended for legacy remoting
   - Key Vault, storage, App Insights, and Log Analytics
 - Deployment scripts that outline the full orchestration flow:
+  - create or reuse the protected Entra API app registration and caller app registration
   - promote the domain controller
   - create the remoting service account
   - join the management VM to the domain
@@ -118,6 +119,8 @@ pwsh ./scripts/Deploy-Infrastructure.ps1 `
 
 For the end-to-end lab path, use `Deploy-Complete.ps1`. That script now performs the full donor-style orchestration flow: infrastructure deployment, domain controller promotion, AD post-configuration, management VM domain join, WinRM HTTPS configuration, Key Vault certificate upload, and optional function publish.
 
+If you want deployment to also create the Entra API app registration, caller app registration, app role assignment, and caller secret, add `-ConfigureAppRegistration`. The script will print the caller app client ID, secret, tenant ID, and scope to the terminal.
+
 ## Real Deployment
 
 Before running `Deploy-Complete.ps1`, make sure the parameter file for your target environment has real values for:
@@ -153,7 +156,7 @@ pwsh ./scripts/Deploy-Complete.ps1 `
   -Location eastus `
   -ParameterFile ./infra/parameters.dev.json `
   -TenantId '<entra-tenant-guid>' `
-  -ClientId '<api-app-registration-client-id>' `
+  -ConfigureAppRegistration `
   -VmAdminUsername azureadmin `
   -VmAdminPassword $vmAdminPassword `
   -ServiceAccountName svc-legacyjump `
@@ -163,9 +166,11 @@ pwsh ./scripts/Deploy-Complete.ps1 `
 
 What that invocation expects:
 
-- `tenantId` and `clientId` are supplied either in the parameter file or on the command line and point to the API app registration that Easy Auth should trust
+- `tenantId` is supplied either in the parameter file or on the command line
+- `clientId` is supplied either in the parameter file, on the command line, or generated automatically when `-ConfigureAppRegistration` is used
 - the caller has permission to deploy Azure resources, execute VM Run Command, and write secrets into the project Key Vault
 - Az PowerShell with `Publish-AzWebApp` available is installed if `-PublishFunctionApp` is used
+- Microsoft Graph PowerShell is installed if `-ConfigureAppRegistration` is used
 - the passwords meet Windows and domain policy requirements
 
 If you do not want to pass secure strings on the command line, you can place real values in the parameter file and call:
@@ -181,7 +186,57 @@ pwsh ./scripts/Deploy-Complete.ps1 `
 
 In that mode, `Deploy-Complete.ps1` will read `vmAdminUsername`, `vmAdminPassword`, and `serviceAccountPassword` from the parameter file and stop if the file still contains placeholder values.
 
-If you keep `tenantId` and `clientId` as placeholders in the parameter file, pass them explicitly to `Deploy-Complete.ps1` with `-TenantId` and `-ClientId`.
+If you keep `tenantId` and `clientId` as placeholders in the parameter file, either pass them explicitly to `Deploy-Complete.ps1` with `-TenantId` and `-ClientId`, or let deployment generate the API `clientId` by adding `-ConfigureAppRegistration`.
+
+## Function App Authentication
+
+When `-ConfigureAppRegistration` is used, `Deploy-Complete.ps1` creates or reuses:
+
+- the protected API app registration used by Easy Auth
+- the `Role.LegacyCommand.Invoke` app role on that API
+- a caller app registration with that app role assigned
+- a new caller secret
+
+The caller credentials are printed to the terminal once, for example:
+
+```text
+Tenant ID:      <tenant-id>
+Client ID:      <caller-app-client-id>
+Client Secret:  <caller-app-secret>
+Scope:          api://<api-app-client-id>/.default
+```
+
+Use those credentials to request a token and call the Function App:
+
+```powershell
+$tenantId = '<tenant-id>'
+$clientId = '<caller-app-client-id>'
+$clientSecret = '<caller-app-secret>'
+$scope = 'api://<api-app-client-id>/.default'
+
+$tokenResponse = Invoke-RestMethod `
+  -Method Post `
+  -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" `
+  -ContentType 'application/x-www-form-urlencoded' `
+  -Body @{
+    client_id = $clientId
+    client_secret = $clientSecret
+    grant_type = 'client_credentials'
+    scope = $scope
+  }
+
+$body = @{
+  scriptBlock = 'Get-ADUser -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
+  arguments = @{ SamAccountName = 'jdoe' }
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Uri 'https://<your-function-app>.azurewebsites.net/api/InvokeLegacyCommand' `
+  -Method Post `
+  -Headers @{ Authorization = "Bearer $($tokenResponse.access_token)" } `
+  -Body $body `
+  -ContentType 'application/json'
+```
 
 ## JUMPBOX-WINRM-CERT-CER Flow
 

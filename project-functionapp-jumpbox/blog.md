@@ -57,13 +57,36 @@ The script block executes natively on the remote Windows machine, in a context t
 To call the Azure Function, you send an HTTP POST request with a JSON payload containing the script and any required arguments. Here is an example of retrieving an Active Directory user via the jumpbox:
 
 ```powershell
-$uri = "https://<your-function-app>.azurewebsites.net/api/InvokeLegacyCommand"
-$body = @{
-    scriptText = "Get-ADUser -Identity `$args[0] -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName"
-    arguments  = @("jdoe")
-} | ConvertTo-Json
+$tenantId = '<tenant-id>'
+$clientId = '<caller-app-client-id>'
+$clientSecret = '<caller-app-client-secret>'
+$scope = 'api://<api-app-registration-client-id>/.default'
+$functionAppName = '<your-function-app-name>'
 
-Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType "application/json"
+$tokenResponse = Invoke-RestMethod `
+  -Method Post `
+  -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" `
+  -ContentType 'application/x-www-form-urlencoded' `
+  -Body @{
+    client_id = $clientId
+    client_secret = $clientSecret
+    grant_type = 'client_credentials'
+    scope = $scope
+  }
+
+$body = @{
+    scriptBlock = 'Get-ADUser -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
+    arguments = @{
+        SamAccountName = 'jdoe'
+    }
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+    -Uri "https://$functionAppName.azurewebsites.net/api/InvokeLegacyCommand" `
+    -Method Post `
+  -Headers @{ Authorization = "Bearer $($tokenResponse.access_token)" } `
+    -Body $body `
+    -ContentType 'application/json'
 ```
 
 <!-- [Placeholder: Screenshot of Postman or PowerShell console showing the successful JSON response returning the AD user object] -->

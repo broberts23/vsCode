@@ -27,6 +27,21 @@ param(
     [string]$ClientId,
 
     [Parameter()]
+    [switch]$ConfigureAppRegistration,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$ApiAppDisplayName,
+
+    [Parameter()]
+    [ValidateNotNullOrEmpty()]
+    [string]$CallerAppDisplayName,
+
+    [Parameter()]
+    [ValidateRange(1, 24)]
+    [int]$CallerAppSecretExpirationMonths = 12,
+
+    [Parameter()]
     [ValidateNotNullOrEmpty()]
     [string]$DeploymentPrincipalObjectId,
 
@@ -266,6 +281,32 @@ function Resolve-PlainParameterValue {
     }
 
     return $fileValue
+}
+
+function Get-ScriptOutputObject {
+    [CmdletBinding()]
+    [OutputType([object])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [object[]]$Output,
+
+        [Parameter(Mandatory)]
+        [string[]]$RequiredProperties
+    )
+
+    foreach ($candidate in @($Output)) {
+        if ($null -eq $candidate -or -not $candidate.PSObject) {
+            continue
+        }
+
+        $propertyNames = @($candidate.PSObject.Properties.Name)
+        if (($RequiredProperties | Where-Object { $propertyNames -notcontains $_ }).Count -eq 0) {
+            return $candidate
+        }
+    }
+
+    return $null
 }
 
 function Get-DeploymentOutputValue {
@@ -770,12 +811,68 @@ try {
     $vmAdminPasswordToUse = Resolve-SecureParameterValue -ParameterObject $parameterObject -Name 'vmAdminPassword' -ProvidedValue $VmAdminPassword
     $serviceAccountPasswordToUse = Resolve-SecureParameterValue -ParameterObject $parameterObject -Name 'serviceAccountPassword' -ProvidedValue $ServiceAccountPassword
     $tenantIdToUse = Resolve-PlainParameterValue -ParameterObject $parameterObject -Name 'tenantId' -ProvidedValue $TenantId
-    $clientIdToUse = Resolve-PlainParameterValue -ParameterObject $parameterObject -Name 'clientId' -ProvidedValue $ClientId
+    $requiredRoleToUse = Resolve-PlainParameterValue -ParameterObject $parameterObject -Name 'requiredRole' -DefaultValue 'Role.LegacyCommand.Invoke'
     $domainName = [string](Get-ParameterFileValue -ParameterObject $parameterObject -Name 'domainName' -DefaultValue 'contoso.local')
     $domainNetBiosName = [string](Get-ParameterFileValue -ParameterObject $parameterObject -Name 'domainNetBiosName' -DefaultValue 'CONTOSO')
 
+    $clientIdToUse = $null
+    if ($ConfigureAppRegistration) {
+        $apiAppDisplayNameToUse = if ([string]::IsNullOrWhiteSpace($ApiAppDisplayName)) {
+            "Legacy PowerShell Jumpbox API ($Environment)"
+        }
+        else {
+            $ApiAppDisplayName
+        }
+
+        $callerAppDisplayNameToUse = if ([string]::IsNullOrWhiteSpace($CallerAppDisplayName)) {
+            "Legacy PowerShell Jumpbox Caller ($Environment)"
+        }
+        else {
+            $CallerAppDisplayName
+        }
+
+        $configureScript = Join-Path $script:ScriptDirectory 'Configure-AppRegistration.ps1'
+        $callerScript = Join-Path $script:ScriptDirectory 'Create-CallerAppRegistration.ps1'
+        if (-not (Test-Path $configureScript)) {
+            throw "Configure-AppRegistration.ps1 not found at: $configureScript"
+        }
+        if (-not (Test-Path $callerScript)) {
+            throw "Create-CallerAppRegistration.ps1 not found at: $callerScript"
+        }
+
+        Write-Log "Creating or updating Entra API app registration '$apiAppDisplayNameToUse'."
+        $apiRegistrationOutput = & $configureScript -DisplayName $apiAppDisplayNameToUse -RequiredRole $requiredRoleToUse
+        $apiRegistration = Get-ScriptOutputObject -Output @($apiRegistrationOutput) -RequiredProperties @('AppId', 'RequiredRole')
+        if ($null -eq $apiRegistration) {
+            throw 'API app registration creation did not return the expected AppId output.'
+        }
+
+        $clientIdToUse = [string]$apiRegistration.AppId
+        Write-Log "Using generated API clientId '$clientIdToUse' for Easy Auth." -Level Success
+
+        Write-Log "Creating or updating caller app registration '$callerAppDisplayNameToUse'."
+        $callerRegistrationOutput = & $callerScript -DisplayName $callerAppDisplayNameToUse -ApiAppId $clientIdToUse -RequiredRole $requiredRoleToUse -SecretExpirationMonths $CallerAppSecretExpirationMonths
+        $callerRegistration = Get-ScriptOutputObject -Output @($callerRegistrationOutput) -RequiredProperties @('AppId', 'ClientSecret', 'Scope')
+        if ($null -eq $callerRegistration) {
+            throw 'Caller app registration creation did not return the expected client credential output.'
+        }
+
+        Write-Log "Caller app registration '$($callerRegistration.DisplayName)' is ready with clientId '$($callerRegistration.AppId)'." -Level Success
+    }
+    else {
+        $clientIdToUse = Resolve-PlainParameterValue -ParameterObject $parameterObject -Name 'clientId' -ProvidedValue $ClientId
+    }
+
+    if ([string]::IsNullOrWhiteSpace($tenantIdToUse)) {
+        throw 'tenantId must be supplied either in the parameter file or via -TenantId.'
+    }
+    if ([string]::IsNullOrWhiteSpace($clientIdToUse)) {
+        throw 'clientId must be supplied either in the parameter file, via -ClientId, or generated with -ConfigureAppRegistration.'
+    }
+
     $parameterOverrides = @{
         tenantId                    = $tenantIdToUse
+        requiredRole                = $requiredRoleToUse
         clientId                    = $clientIdToUse
         deploymentPrincipalObjectId = $deploymentPrincipalObjectIdToUse
         deploymentPrincipalType     = $deploymentPrincipalTypeToUse
