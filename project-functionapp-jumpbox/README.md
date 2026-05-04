@@ -14,8 +14,7 @@ flowchart LR
     Function -->|"Invoke-Command -AsJob\nNegotiate over HTTPS :5986"| Mgmt["Management VM\nDomain joined + RSAT"]
     Mgmt -->|"Legacy modules"| AD["Active Directory"]
     Mgmt -->|"Implicit remoting / snap-ins"| Exchange["Exchange Mgmt"]
-    DC["Domain Controller\nAD DS + DNS"] --> Mgmt
-    DC --> Function
+  DC["Domain Controller\nAD DS + DNS + ADWS"] --> Mgmt
 ```
 
 ## What This Scaffold Includes
@@ -37,7 +36,7 @@ flowchart LR
   - validates Easy Auth principal claims
   - loads a remoting credential and pinned certificate from Key Vault
   - validates the jumpbox TLS endpoint before session creation
-  - sends a remote job to the management VM and returns serialized output
+  - sends a remote job to the management VM and returns a structured JSON response with remote identity, output, and TLS validation details
 
 ## Why A Jumpbox VM
 
@@ -67,9 +66,9 @@ For the first hop from the Azure Function to the management VM, the design uses 
 
 ## Remote Execution Model
 
-The function accepts a script block payload as text, converts it to a script block on the remote machine, and invokes it via `Invoke-Command -AsJob`. The remote host runs the command with the installed Windows modules and returns serialized output to the function response.
+The function accepts a script block payload as text, converts it to a script block on the remote machine, and invokes it via `Invoke-Command -AsJob`. The remote host runs the command with the installed Windows modules and the API returns a structured response containing the remote computer name, the remote security identity, the normalized command output, and the TLS preflight details used to validate the jumpbox endpoint.
 
-This remoting hop does not automatically solve the classic PowerShell second-hop problem. If a command executed on the management VM needs to authenticate onward to a domain controller, Exchange endpoint, or other remote service, it may still require explicit downstream credentials or a different endpoint model such as RunAs or JEA.
+This remoting hop does not automatically solve the classic PowerShell second-hop problem. If a command executed on the management VM needs to authenticate onward to a domain controller, Exchange endpoint, or other remote service, it may still require explicit downstream credentials or a different endpoint model such as RunAs or JEA. For Active Directory cmdlets, the current lab infrastructure also allows AD Web Services on TCP `9389`, which is required for commands such as `Get-ADUser` to reach the domain controller successfully.
 
 For a production build, tighten this further by replacing free-form script text with an allow-listed command catalog.
 
@@ -319,6 +318,7 @@ In practice, the end-to-end chain is:
 - The management VM is intentionally Windows-based so RSAT and legacy management tooling can be installed without containerizing unsupported dependencies.
 - WinRM uses `Negotiate` over HTTPS in this design, with the server certificate pinned in application logic before session creation.
 - Because the Function App is not domain joined, the first hop should be treated as `Negotiate` with explicit credentials, typically resulting in NTLM rather than Kerberos.
+- The lab NSG currently allows AD DS ports plus ADWS on TCP `9389` so RSAT-backed AD cmdlets from the management VM can contact the domain controller.
 - The remote script receives a `$LegacyCredential` variable that you can pass to downstream AD or Exchange commands that need explicit authentication across the second hop.
 - The function app remains PowerShell 7.4 even though some remote commands will execute under Windows PowerShell-compatible modules on the jumpbox.
 

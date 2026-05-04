@@ -120,4 +120,4 @@ If you want to see a working example of this pattern, check out the full code in
 - [about_Remote_Troubleshooting](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_remote_troubleshooting)
 - [WinRM security considerations](https://learn.microsoft.com/windows/win32/winrm/installation-and-configuration-for-windows-remote-management)
 - [Just Enough Administration (JEA)](https://learn.microsoft.com/powershell/scripting/security/remoting/jea/overview)
-- [My GitHub repo](https://github.com/broberts23/vsCode/project-functionapp-jumpbox)
+- [My GitHub repo](https://github.com/broberts23/vsCode/tree/main/project-functionapp-jumpbox#legacy-powershell-jumpbox-function-app)
