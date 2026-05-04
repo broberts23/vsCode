@@ -103,13 +103,15 @@ This scaffold handles trust explicitly at the application layer:
 3. It inspects the remote certificate for a thumbprint match and verifies the DNS identity against the configured hostname.
 4. Only after this preflight passes does it establish the remoting session.
 
-This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. The remoting session then uses `Negotiate` over that HTTPS channel with credentials retrieved from Key Vault just-in-time. In practice, because the Function App is not domain joined, that first hop should be understood as `Negotiate` with explicit credentials, typically using NTLM rather than Kerberos. If the remote script must authenticate onward to Active Directory or Exchange, the script can use the injected `$LegacyCredential` variable or move to a RunAs or JEA endpoint model.
+This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. The remoting session then uses `Negotiate` over that HTTPS channel with credentials retrieved from Key Vault just-in-time. In practice, because the Function App is not domain joined, that first hop should be understood as `Negotiate` with explicit credentials, typically using NTLM rather than Kerberos. If the remote script must authenticate onward to Active Directory or Exchange, the script can use the injected `$LegacyCredential` variable or move to a RunAs or JEA endpoint model in more complex environments.
 
 ## Conclusion
 
 Creating a bridge between modern serverless architectures and legacy on-premises tooling doesn't require compromising on security or maintainability. By offloading the heavy lifting of Exchange Management Tools or Active Directory RSAT to a dedicated jumpbox VM, your Azure Functions remain lightweight, secure, and easily updatable.
 
 This pattern allows you to bypass the pitfalls of direct LDAP while preserving the usability of native PowerShell cmdlets. To take this scaffold even further for production, consider replacing the flexible script evaluation with JEA (Just Enough Administration) endpoints, adding a secondary VM for high availability, and implementing automated certificate rotation.
+
+If you want to see a working example of this pattern, check out the full code in my GitHub repo, where I've built out this architecture with sample scripts and detailed documentation.
 
 ## Links and References
 
