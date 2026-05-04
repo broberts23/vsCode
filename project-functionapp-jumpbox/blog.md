@@ -110,3 +110,12 @@ This approach ensures zero-trust TLS validation without modifying the underlying
 Creating a bridge between modern serverless architectures and legacy on-premises tooling doesn't require compromising on security or maintainability. By offloading the heavy lifting of Exchange Management Tools or Active Directory RSAT to a dedicated jumpbox VM, your Azure Functions remain lightweight, secure, and easily updatable.
 
 This pattern allows you to bypass the pitfalls of direct LDAP while preserving the usability of native PowerShell cmdlets. To take this scaffold even further for production, consider replacing the flexible script evaluation with JEA (Just Enough Administration) endpoints, adding a secondary VM for high availability, and implementing automated certificate rotation.
+
+## Links and References
+
+- [Azure Functions documentation](https://learn.microsoft.com/azure/azure-functions/)
+- [Azure App Service Authentication and Authorization](https://learn.microsoft.com/azure/app-service/overview-authentication-authorization)
+- [about_Remote_Troubleshooting](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_remote_troubleshooting)
+- [WinRM security considerations](https://learn.microsoft.com/windows/win32/winrm/installation-and-configuration-for-windows-remote-management)
+- [Just Enough Administration (JEA)](https://learn.microsoft.com/powershell/scripting/security/remoting/jea/overview)
+- [My GitHub repo](https://github.com/broberts23/vsCode/project-functionapp-jumpbox)
