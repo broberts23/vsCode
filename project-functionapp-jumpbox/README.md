@@ -226,8 +226,11 @@ $tokenResponse = Invoke-RestMethod `
   }
 
 $body = @{
-  scriptBlock = 'Get-ADUser -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
-  arguments = @{ SamAccountName = 'jdoe' }
+  scriptBlock = 'Get-ADUser -Server $Server -Credential $LegacyCredential -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
+  arguments = @{
+    SamAccountName = 'jdoe'
+    Server = 'legacyjump-dc-d.contoso.local'
+  }
 } | ConvertTo-Json -Depth 5
 
 Invoke-RestMethod `
@@ -311,6 +314,7 @@ In practice, the end-to-end chain is:
 
 - The management VM is intentionally Windows-based so RSAT and legacy management tooling can be installed without containerizing unsupported dependencies.
 - WinRM uses Negotiate over HTTPS in this design, with the server certificate pinned in application logic before session creation.
+- The remote script receives a `$LegacyCredential` variable that you can pass to downstream AD or Exchange commands that need explicit authentication across the second hop.
 - The function app remains PowerShell 7.4 even though some remote commands will execute under Windows PowerShell-compatible modules on the jumpbox.
 
 ## Related Files

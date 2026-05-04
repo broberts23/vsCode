@@ -62,7 +62,7 @@ function Get-FunctionJumpboxCertificate {
     return $script:CachedJumpboxCertificate
 }
 
-function Normalize-CertificateThumbprint {
+function ConvertTo-CertificateThumbprint {
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -121,7 +121,7 @@ function Get-RemoteTlsCertificateInfo {
         $tcpClient.Connect($ComputerName, $Port)
 
         $callback = [System.Net.Security.RemoteCertificateValidationCallback] {
-            param($sender, $certificate, $chain, $sslPolicyErrors)
+            param($callbackSender, $certificate, $chain, $sslPolicyErrors)
 
             if ($certificate) {
                 $script:capturedCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificate)
@@ -176,8 +176,8 @@ function Test-WinRmTlsPinning {
     )
 
     $remoteInfo = Get-RemoteTlsCertificateInfo -ComputerName $ComputerName -Port $Port
-    $expectedThumbprint = Normalize-CertificateThumbprint -Thumbprint $ExpectedCertificate.Thumbprint
-    $remoteThumbprint = Normalize-CertificateThumbprint -Thumbprint $remoteInfo.Certificate.Thumbprint
+    $expectedThumbprint = ConvertTo-CertificateThumbprint -Thumbprint $ExpectedCertificate.Thumbprint
+    $remoteThumbprint = ConvertTo-CertificateThumbprint -Thumbprint $remoteInfo.Certificate.Thumbprint
 
     if ($remoteThumbprint -ne $expectedThumbprint) {
         throw "Jumpbox certificate pinning failed. Expected thumbprint '$expectedThumbprint' but received '$remoteThumbprint'."
@@ -248,12 +248,14 @@ function Invoke-LegacyRemoteScriptBlock {
             Session      = $session
             AsJob        = $true
             ScriptBlock  = {
-                param($RemoteScriptText, $RemoteArguments)
+                param($RemoteScriptText, $RemoteArguments, $RemoteCredential)
 
                 Set-StrictMode -Version Latest
                 $ErrorActionPreference = 'Stop'
                 $VerbosePreference = 'Continue'
                 $InformationPreference = 'Continue'
+
+                Set-Variable -Name 'LegacyCredential' -Value $RemoteCredential -Scope Local
 
                 foreach ($entry in $RemoteArguments.GetEnumerator()) {
                     Set-Variable -Name $entry.Key -Value $entry.Value -Scope Local
@@ -284,7 +286,7 @@ function Invoke-LegacyRemoteScriptBlock {
                     output       = @($normalized)
                 }
             }
-            ArgumentList = @($ScriptText, $Arguments)
+            ArgumentList = @($ScriptText, $Arguments, $Credential)
         }
 
         $job = Invoke-Command @jobParameters
@@ -351,7 +353,7 @@ function Test-RoleClaim {
 Export-ModuleMember -Function @(
     'Get-FunctionJumpboxCredential',
     'Get-FunctionJumpboxCertificate',
-    'Normalize-CertificateThumbprint',
+    'ConvertTo-CertificateThumbprint',
     'Test-CertificateDnsName',
     'Test-WinRmTlsPinning',
     'Invoke-LegacyRemoteScriptBlock',

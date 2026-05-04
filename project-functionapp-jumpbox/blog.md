@@ -76,9 +76,10 @@ $tokenResponse = Invoke-RestMethod `
 
 
 $body = @{
-    scriptBlock = 'Get-ADUser -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
+  scriptBlock = 'Get-ADUser -Server $Server -Credential $LegacyCredential -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
     arguments = @{
         SamAccountName = 'jdoe'
+    Server = 'legacyjump-dc-d.contoso.local'
     }
 } | ConvertTo-Json -Depth 5
 
@@ -103,7 +104,7 @@ This scaffold handles trust explicitly at the application layer:
 3. It inspects the remote certificate for a thumbprint match and verifies the DNS identity against the configured hostname.
 4. Only after this preflight passes does it establish the remoting session.
 
-This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. The remoting session then uses Negotiate over that HTTPS channel with credentials retrieved from Key Vault just-in-time.
+This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. The remoting session then uses Negotiate over that HTTPS channel with credentials retrieved from Key Vault just-in-time, and the remote script can use the injected `$LegacyCredential` variable for downstream Active Directory or Exchange calls that need explicit authentication across the second hop.
 
 ## Conclusion
 
