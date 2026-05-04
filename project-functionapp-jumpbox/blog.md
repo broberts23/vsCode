@@ -23,7 +23,7 @@ The function app stays lean and modern:
 
 The management VM carries the legacy burden:
 
-- **Domain joined for Kerberos Authentication**: This enables the VM to leverage native Kerberos authentication for downstream connections. This is a lifesaver for scenarios like on-premises mailbox migrations where security teams rightly block Basic WinRM access to the Exchange servers' `/PowerShell` endpoints. The Azure Function securely connects to the isolated Jumpbox, and the Jumpbox can seamlessly use Kerberos to act against the backend Exchange environment or other domain resources.
+- **Domain joined for downstream domain access**: The management VM can use native domain-integrated authentication for downstream connections in ways that a Function App worker cannot. That matters for scenarios like on-premises mailbox migrations where security teams rightly block Basic WinRM access to the Exchange servers' `/PowerShell` endpoints. The important nuance is that the Azure Function is not domain joined, so the first hop to the jumpbox is not Kerberos from the function host. It is WinRM over HTTPS using `Negotiate` with explicit credentials, which typically means NTLM on that first hop. Downstream access from the jumpbox still needs to account for the classic second-hop problem.
 - **RSAT (Remote Server Administration Tools)** installed natively.
 - **Exchange Management Tools** (or other legacy admin prerequisites) installed locally.
 - **WinRM over HTTPS with explicit credentials**: The function establishes a certificate-pinned HTTPS remoting session to the jumpbox and authenticates with explicit credentials using Negotiate. This provides a secure bridge from the cloud without exposing your actual Domain Controllers or Exchange servers to edge traffic.
@@ -48,7 +48,7 @@ $job = Invoke-Command @invokeParameters
 $result = Receive-Job -Job $job -Wait -AutoRemoveJob
 ```
 
-The script block executes natively on the remote Windows machine, in a context that has the Active Directory and Exchange tooling readily available. The results are serialized back over PowerShell remoting to the function. (For a production service, this free-form script execution should be replaced with a strict allow-list of parameterized, approved operations).
+The script block executes natively on the remote Windows machine, in a context that has the Active Directory and Exchange tooling readily available. The results are serialized back over PowerShell remoting to the function. One important operational detail is that this does not magically eliminate second-hop constraints. If the remote script needs to talk onward to a domain controller or Exchange endpoint, you may still need explicit downstream credentials, a RunAs endpoint, or a JEA design. (For a production service, this free-form script execution should be replaced with a strict allow-list of parameterized, approved operations).
 
 ### Seeing It In Action
 
@@ -74,12 +74,11 @@ $tokenResponse = Invoke-RestMethod `
     scope = $scope
   }
 
-
 $body = @{
-  scriptBlock = 'Get-ADUser -Server $Server -Credential $LegacyCredential -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
+    scriptBlock = 'Get-ADUser -Server $Server -Credential $LegacyCredential -Identity $SamAccountName -Properties EmailAddress | Select-Object Name, EmailAddress, UserPrincipalName'
     arguments = @{
         SamAccountName = 'jdoe'
-    Server = 'legacyjump-dc-d.contoso.local'
+        Server = 'legacyjump-dc-d.contoso.local'
     }
 } | ConvertTo-Json -Depth 5
 
@@ -104,7 +103,7 @@ This scaffold handles trust explicitly at the application layer:
 3. It inspects the remote certificate for a thumbprint match and verifies the DNS identity against the configured hostname.
 4. Only after this preflight passes does it establish the remoting session.
 
-This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. The remoting session then uses Negotiate over that HTTPS channel with credentials retrieved from Key Vault just-in-time, and the remote script can use the injected `$LegacyCredential` variable for downstream Active Directory or Exchange calls that need explicit authentication across the second hop.
+This approach ensures zero-trust TLS validation without modifying the underlying OS trust store. The remoting session then uses `Negotiate` over that HTTPS channel with credentials retrieved from Key Vault just-in-time. In practice, because the Function App is not domain joined, that first hop should be understood as `Negotiate` with explicit credentials, typically using NTLM rather than Kerberos. If the remote script must authenticate onward to Active Directory or Exchange, the script can use the injected `$LegacyCredential` variable or move to a RunAs or JEA endpoint model.
 
 ## Conclusion
 
