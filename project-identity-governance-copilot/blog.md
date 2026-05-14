@@ -13,7 +13,7 @@ The usual approach is either too manual or too dangerous. Manual exports from Mi
 
 This project implements a more defensible pattern: ingest approved identity-governance data, normalize it into a controlled schema, index it into Azure AI Search, and use Azure OpenAI only for grounded retrieval-based answers. That gives you a practical RAG pipeline for identity governance without turning the model into a privileged operator.
 
-This is the Lab 1 implementation from the AI-103 and AB-620 combined study track. It focuses on a narrow, useful slice of governance data: users, groups, role assignments, access reviews, incidents, approvals, and supporting evidence. It is designed to work in a small lab tenant, which means simulated data is a first-class design requirement, not an afterthought.
+It focuses on a narrow, useful slice of governance data: users, groups, role assignments, access reviews, incidents, approvals, and supporting evidence. It is designed to work in a small lab tenant, which means simulated data is a first-class design requirement, not an afterthought.
 
 ## Scenario Narrative
 
