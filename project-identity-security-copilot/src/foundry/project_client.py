@@ -21,7 +21,7 @@ from src.config import AppConfig
 
 @contextmanager
 def open_project_client(settings: AppConfig) -> Iterator[AIProjectClient]:
-        """Open an authenticated Foundry project client.
+    """Open an authenticated Foundry project client.
 
     PowerShell bridge:
         - Think of this like creating a disposable SDK client and guaranteeing cleanup
@@ -30,8 +30,8 @@ def open_project_client(settings: AppConfig) -> Iterator[AIProjectClient]:
             `try/finally` block.
     """
 
-        # DefaultAzureCredential tries the current developer identity first and then other
-        # supported sources, which keeps local and hosted execution paths aligned.
+    # DefaultAzureCredential tries the current developer identity first and then other
+    # supported sources, which keeps local and hosted execution paths aligned.
     with DefaultAzureCredential() as credential, AIProjectClient(
         endpoint=settings.azure_ai_project_endpoint,
         credential=credential,
@@ -40,14 +40,14 @@ def open_project_client(settings: AppConfig) -> Iterator[AIProjectClient]:
 
 
 def list_deployment_names(settings: AppConfig) -> list[str]:
-        """Return the deployment names visible from the Foundry project.
+    """Return the deployment names visible from the Foundry project.
 
-        PowerShell bridge:
-        - This is like querying a service for a collection of items and projecting just
-            the property you care about.
-        """
+    PowerShell bridge:
+    - This is like querying a service for a collection of items and projecting just
+        the property you care about.
+    """
 
     with open_project_client(settings) as project_client:
-                # The list comprehension keeps the data flow direct: ask the service, then
-                # pull back only the deployment name field.
+        # The list comprehension keeps the data flow direct: ask the service, then
+        # pull back only the deployment name field.
         return [deployment.name for deployment in project_client.deployments.list()]

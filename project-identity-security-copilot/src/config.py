@@ -39,23 +39,27 @@ class AppConfig:
         PowerShell bridge:
         - This is similar to reading required variables from `$env:` and returning one config object.
         - We fail fast for required settings so mistakes show up early.
-                - Keeping this logic in a class method makes startup code look like a single
-                    `New-Object` style construction step rather than a pile of individual reads.
+        - Keeping this logic in a class method makes startup code look like a single
+            `New-Object` style construction step rather than a pile of individual reads.
         """
 
-                # Optional values are resolved first so we can reuse them in the returned object.
+        # Optional values are resolved first so we can reuse them in the returned object.
         chat_deployment = _get_required_env('AZURE_AI_CHAT_DEPLOYMENT')
-        summary_deployment = os.environ.get('AZURE_AI_SUMMARY_DEPLOYMENT', chat_deployment)
-        knowledge_root = Path(os.environ.get('KNOWLEDGE_ROOT', './knowledge')).resolve()
+        summary_deployment = os.environ.get(
+            'AZURE_AI_SUMMARY_DEPLOYMENT', chat_deployment)
+        knowledge_root = Path(os.environ.get(
+            'KNOWLEDGE_ROOT', './knowledge')).resolve()
 
-                # The constructor call is the Python equivalent of returning a custom object
-                # with named properties already populated.
+        # The constructor call is the Python equivalent of returning a custom object
+        # with named properties already populated.
         return cls(
-            azure_ai_project_endpoint=_get_required_env('AZURE_AI_PROJECT_ENDPOINT'),
+            azure_ai_project_endpoint=_get_required_env(
+                'AZURE_AI_PROJECT_ENDPOINT'),
             azure_ai_chat_deployment=chat_deployment,
             azure_ai_summary_deployment=summary_deployment,
             azure_search_endpoint=_get_required_env('AZURE_SEARCH_ENDPOINT'),
-            azure_search_index_name=os.environ.get('AZURE_SEARCH_INDEX_NAME', 'identity-security-knowledge'),
+            azure_search_index_name=os.environ.get(
+                'AZURE_SEARCH_INDEX_NAME', 'identity-security-knowledge'),
             knowledge_root=knowledge_root,
         )
 

@@ -10,6 +10,8 @@ PowerShell bridge:
 """
 
 from __future__ import annotations
+from src.rag import chat
+from src.config import AppConfig
 
 import argparse
 from pathlib import Path
@@ -18,9 +20,6 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.config import AppConfig
-from src.rag import chat
 
 
 def main() -> None:
@@ -32,9 +31,12 @@ def main() -> None:
     - The function keeps the control flow explicit so the code remains easy to scan.
     """
 
-    parser = argparse.ArgumentParser(description='Run the Identity Security Copilot.')
-    parser.add_argument('--prompt', help='Natural-language question to answer.')
-    parser.add_argument('--summarize', help='Topic text to summarize with the summary deployment.')
+    parser = argparse.ArgumentParser(
+        description='Run the Identity Security Copilot.')
+    parser.add_argument(
+        '--prompt', help='Natural-language question to answer.')
+    parser.add_argument(
+        '--summarize', help='Topic text to summarize with the summary deployment.')
     args = parser.parse_args()
 
     # Load the environment-driven configuration once so both code paths use the same

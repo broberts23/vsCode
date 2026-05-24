@@ -8,6 +8,9 @@ PowerShell bridge:
 """
 
 from __future__ import annotations
+from src.search.service import create_search_client
+from src.content.markdown_loader import build_search_documents
+from src.config import AppConfig
 
 from pathlib import Path
 import sys
@@ -15,10 +18,6 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.config import AppConfig
-from src.content.markdown_loader import build_search_documents
-from src.search.service import create_search_client
 
 
 def main() -> None:
@@ -32,13 +31,15 @@ def main() -> None:
     settings = AppConfig.from_env()
     # The markdown loader returns typed objects, which we immediately flatten into
     # dictionaries for Azure SDK upload compatibility.
-    documents = [document.as_dict() for document in build_search_documents(settings.knowledge_root)]
+    documents = [document.as_dict()
+                 for document in build_search_documents(settings.knowledge_root)]
     client = create_search_client(settings)
     results = client.upload_documents(documents=documents)
     # Summarize the upload outcome so the script acts like a useful command.
     succeeded = sum(1 for result in results if result.succeeded)
     failed = len(results) - succeeded
-    print(f'Uploaded {succeeded} markdown documents to Azure AI Search; {failed} failed.')
+    print(
+        f'Uploaded {succeeded} markdown documents to Azure AI Search; {failed} failed.')
 
 
 if __name__ == '__main__':

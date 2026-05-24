@@ -10,6 +10,10 @@ PowerShell bridge:
 """
 
 from __future__ import annotations
+from src.security.masking import mask_answer
+from src.search.service import create_search_client
+from src.foundry.project_client import list_deployment_names, open_project_client
+from src.config import AppConfig
 
 from pathlib import Path
 import sys
@@ -20,11 +24,6 @@ from azure.search.documents.models import QueryType
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-from src.config import AppConfig
-from src.foundry.project_client import list_deployment_names, open_project_client
-from src.search.service import create_search_client
-from src.security.masking import mask_answer
 
 
 def answer_question(prompt: str, settings: AppConfig | None = None) -> str:
@@ -37,8 +36,8 @@ def answer_question(prompt: str, settings: AppConfig | None = None) -> str:
             tests, or other callers without duplicating environment loading.
     """
 
-        # Use caller-supplied settings when available, otherwise build them from the
-        # environment just like a script would.
+    # Use caller-supplied settings when available, otherwise build them from the
+    # environment just like a script would.
     active_settings = settings or AppConfig.from_env()
     search_results = search_documents(prompt, active_settings)
     answer = complete_with_foundry(prompt, search_results, active_settings)
@@ -47,13 +46,13 @@ def answer_question(prompt: str, settings: AppConfig | None = None) -> str:
 
 
 def search_documents(prompt: str, settings: AppConfig, top: int = 5) -> list[dict[str, Any]]:
-        """Run semantic search against the identity security knowledge base.
+    """Run semantic search against the identity security knowledge base.
 
-        PowerShell bridge:
-        - This is the lookup step in the pipeline, similar to querying a service and
-            reshaping the results into a simpler list.
-        - Returning plain dictionaries keeps the downstream formatting logic simple.
-        """
+    PowerShell bridge:
+    - This is the lookup step in the pipeline, similar to querying a service and
+        reshaping the results into a simpler list.
+    - Returning plain dictionaries keeps the downstream formatting logic simple.
+    """
 
     client = create_search_client(settings)
     results = client.search(
@@ -61,7 +60,8 @@ def search_documents(prompt: str, settings: AppConfig, top: int = 5) -> list[dic
         query_type=QueryType.SEMANTIC,
         semantic_configuration_name='default',
         top=top,
-        select=['id', 'source_type', 'title', 'content', 'file_path', 'heading', 'tags'],
+        select=['id', 'source_type', 'title',
+                'content', 'file_path', 'heading', 'tags'],
     )
 
     documents: list[dict[str, Any]] = []
@@ -125,8 +125,8 @@ def summarize_evidence(topic: str, settings: AppConfig | None = None) -> str:
     """
 
     active_settings = settings or AppConfig.from_env()
-        # The summary path skips retrieval because it is meant for compact topic summaries
-        # rather than grounded question answering.
+    # The summary path skips retrieval because it is meant for compact topic summaries
+    # rather than grounded question answering.
     with open_project_client(active_settings) as project_client, project_client.get_openai_client() as openai_client:
         response = openai_client.responses.create(
             model=active_settings.azure_ai_summary_deployment,
@@ -167,14 +167,14 @@ def format_grounding_context(search_results: list[dict[str, Any]]) -> str:
 
 
 def append_citations(answer: str, search_results: list[dict[str, Any]]) -> str:
-        """Append a deterministic source list to the model response.
+    """Append a deterministic source list to the model response.
 
-        PowerShell bridge:
-        - This is similar to adding a final report section after the main output has been
-            created.
-        - We do this in code so the citation list does not depend entirely on the model
-            remembering to format it correctly.
-        """
+    PowerShell bridge:
+    - This is similar to adding a final report section after the main output has been
+        created.
+    - We do this in code so the citation list does not depend entirely on the model
+        remembering to format it correctly.
+    """
 
     citations = format_citations(search_results)
     if not citations:
@@ -201,6 +201,7 @@ def format_citations(search_results: list[dict[str, Any]]) -> str:
 
         # Duplicate IDs are skipped so the same source does not appear multiple times.
         seen_ids.add(document_id)
-        lines.append(f"- {document_id} | {item.get('title')} | {item.get('file_path')}")
+        lines.append(
+            f"- {document_id} | {item.get('title')} | {item.get('file_path')}")
 
     return '\n'.join(lines)

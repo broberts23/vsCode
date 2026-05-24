@@ -19,6 +19,7 @@ def mask_answer(answer: str) -> str:
     """
 
     # Apply the replacements one at a time so the behavior is obvious and easy to extend.
-    masked = answer.replace('breakglass@contoso.com', 'breakglass@redacted.example')
+    masked = answer.replace('breakglass@contoso.com',
+                            'breakglass@redacted.example')
     masked = masked.replace('automation-admin', 'automation-admin-redacted')
     return masked

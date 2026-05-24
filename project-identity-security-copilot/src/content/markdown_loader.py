@@ -17,13 +17,13 @@ import re
 
 @dataclass(slots=True)
 class SearchDocument:
-        """Search-ready document shape for Azure AI Search.
+    """Search-ready document shape for Azure AI Search.
 
-        PowerShell bridge:
-        - Think of this like a custom object with a fixed property set that is ready to
-            be sent to another command or service.
-        - The dataclass keeps the document shape explicit and predictable.
-        """
+    PowerShell bridge:
+    - Think of this like a custom object with a fixed property set that is ready to
+        be sent to another command or service.
+    - The dataclass keeps the document shape explicit and predictable.
+    """
 
     id: str
     source_type: str
@@ -34,15 +34,15 @@ class SearchDocument:
     tags: str
 
     def as_dict(self) -> dict[str, str]:
-                """Convert the typed object into a plain dictionary for SDK upload.
+        """Convert the typed object into a plain dictionary for SDK upload.
 
-                PowerShell bridge:
-                - This is like converting a custom class instance into a hashtable before
-                    passing it into an SDK command.
-                - Azure SDK upload methods generally expect simple dictionary-like payloads.
-                """
+        PowerShell bridge:
+        - This is like converting a custom class instance into a hashtable before
+            passing it into an SDK command.
+        - Azure SDK upload methods generally expect simple dictionary-like payloads.
+        """
 
-                # Keep the shape narrow so the Search index and the upload payload stay aligned.
+        # Keep the shape narrow so the Search index and the upload payload stay aligned.
         return {
             'id': self.id,
             'source_type': self.source_type,
@@ -56,12 +56,12 @@ class SearchDocument:
 
 @dataclass(slots=True)
 class MarkdownSection:
-        """In-memory representation of one markdown section.
+    """In-memory representation of one markdown section.
 
-        PowerShell bridge:
-        - This is a staging object that represents one section before it is flattened into
-            a search document.
-        """
+    PowerShell bridge:
+    - This is a staging object that represents one section before it is flattened into
+        a search document.
+    """
 
     title: str
     content: str
@@ -86,16 +86,16 @@ def load_markdown_sections(knowledge_root: Path) -> list[MarkdownSection]:
 
 
 def build_search_documents(knowledge_root: Path) -> list[SearchDocument]:
-        """Create Azure AI Search documents from markdown sections.
+    """Create Azure AI Search documents from markdown sections.
 
-        PowerShell bridge:
-        - This is like taking parsed objects and projecting them into the exact object
-            shape expected by the next command in the pipeline.
-        """
+    PowerShell bridge:
+    - This is like taking parsed objects and projecting them into the exact object
+        shape expected by the next command in the pipeline.
+    """
 
     documents: list[SearchDocument] = []
     for section in load_markdown_sections(knowledge_root):
-                # The document ID is deterministic so re-ingestion produces stable records.
+        # The document ID is deterministic so re-ingestion produces stable records.
         document_id = _make_document_id(section.file_path, section.heading)
         tags = _build_tags(section.file_path, section.heading)
         documents.append(
@@ -114,13 +114,13 @@ def build_search_documents(knowledge_root: Path) -> list[SearchDocument]:
 
 
 def _split_file_into_sections(file_path: Path) -> list[MarkdownSection]:
-        """Split a markdown file into one section object per heading block.
+    """Split a markdown file into one section object per heading block.
 
-        PowerShell bridge:
-        - This is the parser step. It reads text line by line and turns it into a more
-            structured representation.
-        - We treat headings as boundaries, which is simple and easy to reason about.
-        """
+    PowerShell bridge:
+    - This is the parser step. It reads text line by line and turns it into a more
+        structured representation.
+    - We treat headings as boundaries, which is simple and easy to reason about.
+    """
 
     text = file_path.read_text(encoding='utf-8')
     lines = text.splitlines()
@@ -131,8 +131,9 @@ def _split_file_into_sections(file_path: Path) -> list[MarkdownSection]:
 
     for line in lines:
         if line.startswith('#'):
-                        # Flush the previous section before starting a new heading block.
-            _append_section(sections, file_path, current_heading, current_lines)
+            # Flush the previous section before starting a new heading block.
+            _append_section(sections, file_path,
+                            current_heading, current_lines)
             current_heading = line.lstrip('#').strip() or current_heading
             current_lines = []
             continue
@@ -156,7 +157,8 @@ def _append_section(
       before adding it to the output collection.
     """
 
-    cleaned_content = '\n'.join(line.strip() for line in current_lines if line.strip()).strip()
+    cleaned_content = '\n'.join(line.strip()
+                                for line in current_lines if line.strip()).strip()
     if not cleaned_content:
         return
 
