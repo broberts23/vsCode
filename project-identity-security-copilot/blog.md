@@ -1,157 +1,45 @@
-# Build an Identity Security Copilot in Azure AI Foundry
+# Building a Grounded Identity Security Copilot with Azure AI Foundry
 
-## Why this lab matters
+Identity security is a high-stakes environment. When platform administrators, access reviewers, or security engineers need to determine which Conditional Access controls apply to a privileged role, or what operational risks are associated with an unmanaged workload identity, they usually have to pause and dig through disparate documentation. Building an AI assistant to answer these questions seems like an obvious win.
 
-The AI-103 exam now expects more than raw prompt experimentation. You need to understand how to build a practical AI application around a Foundry project, choose the right SDK entry points, wire retrieval to real content, and keep the security boundary explicit.
+However, doing so safely introduces an immediate challenge: you cannot simply connect a large language model to live Microsoft Graph data or raw directory telemetry without creating a massive, unpredictable security boundary.
 
-Identity security is a strong scenario for this because it forces good engineering discipline. The subject matter is sensitive, the questions are practical, and the application cannot get away with vague answers or uncontrolled data access.
+Instead, we need an assistant that reasons strictly over an approved, read-only set of identity-security content. In this post, we are going to build a standalone Identity Security Copilot that does exactly that. We will use Azure AI Foundry to manage our model connections and Azure AI Search to ground our answers against a curated collection of internal markdown documentation.
 
-This project implements a narrow but realistic shape:
+It is also worth being clear about what this is not. Security Copilot in Microsoft Entra is a Microsoft-managed product experience with deep product integration, built-in workflows, and a user experience designed around operating Entra itself. This solution is different: it is a developer-built, code-first copilot pattern that you own end to end. That gives you flexibility to define the corpus, control the grounding data and behavior, shape the security boundary, and extend the application however you want, but it also means you are responsible for the application design, deployment, observability, and governance choices.
 
-- Microsoft Foundry project endpoint for model access and project metadata
-- Azure AI Search for grounding over a local markdown knowledge base
-- Python code that stays small enough to read top to bottom
-- PowerShell deployment and local test scripts
-- comments that translate Python concepts for someone who already knows PowerShell deeply
+## Making the App Project-Aware
 
-## Scenario
+One of the first design choices in this solution is how we interact with our cloud AI resources. In the past, it was common to wire up individual endpoints for Azure OpenAI, storing raw keys and disparate connection strings.
 
-Assume you want a copilot that helps an identity engineering team answer questions such as:
+Instead, our application uses the Azure AI Foundry SDK. By configuring the app around a single Foundry project endpoint, we can use the AIProjectClient as the central entry point for all our model and project-wide operations. This reflects how modern generative AI applications are built on Azure—treating the Foundry project as the control plane. From there, we can dynamically retrieve an OpenAI-compatible client to generate our chat responses without shuffling endpoints around in code.
 
-- Which Conditional Access controls are missing from a privileged admin scenario?
-- What are the operational risks of workload identities without governance?
-- What evidence should an access reviewer inspect before approving an exception?
-- What controls should be documented before enabling a new privileged automation account?
+## Grounding with a Local Knowledge Base
 
-The goal is not to let the model roam through live tenant data. The goal is to create a secure, grounded assistant over approved identity-security content.
+To keep our assistant focused on approved security patterns rather than hallucinating generic answers, we need a solid retrieval-augmented generation (RAG) foundation.
 
-## What this project demonstrates
+The repository includes a curated local knowledge base filled with markdown files covering topics like access review guidelines and workload identity baselines. Rather than relying on complicated real-time ingestion pipelines for this initial build, we use a custom Python markdown loader that reads these files, splits them into logical sections based on headings, and converts them into structured search documents. Those documents are then uploaded to Azure AI Search. When a user asks a question, the application queries that Search index first and builds a tightly scoped evidence block for the model.
 
-### Foundry project awareness
+## Selecting Models by Task
 
-The app is configured around `AZURE_AI_PROJECT_ENDPOINT`, not around a collection of unrelated endpoints. This reflects the current Foundry SDK model, where the project client is the entry point for project-native operations and can also produce an OpenAI-compatible client for responses.
+In a real-world scenario, you rarely use your most expensive reasoning model for every minor task. To reflect this, the copilot distinguishes between a primary chat deployment and a secondary summary deployment.
 
-### Retrieval over internal markdown
+Right now, you might decide to point both configuration values to the same GPT-4o-mini deployment to keep the lab simple. Programmatically defining task-specific model deployments builds in the flexibility to swap in a smaller, cheaper and faster summarization or classification model down the road.
 
-The repo includes a small local knowledge base under `knowledge/`. A markdown loader turns those files into Azure AI Search documents, keeping the ingestion path easy to understand.
+## Defensible Security Defaults
 
-### Model selection by task
+Because this is an identity security copilot, the architecture itself needs to reflect good security hygiene.
 
-The application distinguishes between a chat model deployment and an optional summary deployment. Even if both point to the same model in a lab, the config shape reflects the exam skill of choosing appropriate models for different tasks.
+First, there are no API keys checked in or loaded into the app. We rely entirely on DefaultAzureCredential to authenticate to both Azure AI Foundry and Azure AI Search. This means the application can seamlessly use your logged-in developer identity during local testing and switch to a locked-down Azure Managed Identity when deployed to the cloud.
 
-### Secure defaults
+Second, we include a final masking pass on the way out. Before the model's text is ever returned to the user, the application scrubs the response to redact predictable sensitive patterns (like break-glass email addresses). This creates an explicit defense-in-depth layer, ensuring we do not rely entirely on the LLM's system prompt to keep our data safe.
 
-The code uses `DefaultAzureCredential`, deterministic citations, and a final masking pass. The Bicep template also deploys supporting services such as App Configuration, Key Vault, and Log Analytics so the project can grow into a more production-like shape.
+## The Infrastructure Foundation
 
-## Design choices
+Everything supporting this application is defined in declarative Bicep templates. When deployed, it provisions Azure AI Search for our grounding layer, a Storage Account for staging artifacts, and operational resources like Azure Key Vault, App Configuration, and Log Analytics. By separating the Azure AI Foundry project creation from the supporting application infrastructure, we ensure our app can plug into an existing enterprise Foundry environment without stepping on toes or attempting to over-provision.
 
-### Why not start with a full agent?
+## Conclusion
 
-Because Topic 1 is better served by a readable app than by a large amount of orchestration code. A full Foundry agent with tools, approvals, and evaluations is a good next step, but it would make the first project harder to understand.
+By combining a secure, local-first markdown retrieval pipeline with Azure AI Foundry, we have created a baseline Identity Security Copilot that genuinely helps engineers without exposing the tenant to unnecessary risk.
 
-### Why not use embeddings yet?
-
-Because the Foundry study topic here is broader than vector search. The app first proves the simpler path: project setup, semantic retrieval, grounded responses, and deployment scaffolding. Vector search can be added later as a focused follow-up.
-
-### Why keep the corpus in the repo?
-
-Because the project needs to stand alone. A reader should be able to clone this one folder, deploy the dependencies, ingest the markdown files, and get useful behavior without depending on another repo folder.
-
-## File-by-file walkthrough
-
-### `src/app.py`
-
-This is the thin CLI entry point. It works like a small PowerShell script with a `param()` block: it accepts a prompt, calls the chat workflow, and prints the answer.
-
-### `src/config.py`
-
-This file centralizes environment variable loading into a typed dataclass. Think of it like a strongly shaped configuration object instead of scattering `Get-Item env:` calls throughout the repo.
-
-### `src/foundry/project_client.py`
-
-This module creates and validates the Azure AI Foundry project client. It also exposes a helper that lists deployments so you can confirm your configured deployment names exist.
-
-### `src/search/build_index.py`
-
-This creates the Azure AI Search index used for markdown grounding. The schema is intentionally small and optimized for semantic search.
-
-### `src/content/markdown_loader.py`
-
-This module reads markdown files from the repo, splits them into sections by heading, and converts them into search documents.
-
-### `src/search/load_documents.py`
-
-This uploads the search documents into Azure AI Search.
-
-### `src/rag/chat.py`
-
-This is the app orchestrator: retrieve documents, format evidence, call the model, append citations, and mask the final answer.
-
-### `src/security/masking.py`
-
-This performs a final response scrub to prevent a few obvious identity examples from leaking into the output unchanged.
-
-## Infrastructure shape
-
-The Bicep template deploys:
-
-- Azure AI Search
-- Storage account for future document staging
-- Key Vault
-- App Configuration
-- Log Analytics workspace
-- Application Insights
-- user-assigned managed identity
-
-The template does not attempt to create the Foundry project itself. At the time of writing, many teams still provision the Foundry project and its connected resources through the portal or a separate management flow. This lab keeps that boundary explicit: the repo deploys supporting resources and expects an existing Foundry project endpoint.
-
-## How to study with this repo
-
-Use the repo in three passes.
-
-### Pass 1: understand the code shape
-
-Read the files in this order:
-
-1. `README.md`
-2. `PYTHON-FOR-POWERSHELL.md`
-3. `src/app.py`
-4. `src/config.py`
-5. `src/rag/chat.py`
-
-### Pass 2: run the local workflow
-
-1. Deploy the infra.
-2. Export the environment variables.
-3. Build the index.
-4. Upload the markdown knowledge base.
-5. Run a few smoke-test prompts.
-
-### Pass 3: extend the lab
-
-After the baseline works, add one feature at a time:
-
-- vector retrieval
-- Foundry evaluations
-- read-only tools
-- tracing
-- CI pipeline
-
-## Exam criteria covered
-
-This project directly supports the AI-103 study guide topic:
-
-- Choose the appropriate Foundry services for generative AI and agents.
-- Choose an appropriate model for each task.
-- Choose an appropriate method for retrieval and indexing.
-- Set up AI solutions in Foundry.
-- Configure model deployments.
-- Design Azure infrastructure for AI apps.
-- Integrate projects with CI/CD in a natural next step.
-
-## Suggested follow-up posts
-
-- Add Foundry evaluations to an identity-security copilot.
-- Convert this project from semantic search to hybrid retrieval.
-- Add read-only function tools for access review evidence lookup.
-- Add tracing and KQL-based troubleshooting for the copilot runtime.
+This architecture gives us a fantastic starting point. The natural next steps will be to evolve our semantic search into a hybrid vector retrieval model, introduce read-only tool calling so the copilot can independently look up access review telemetry, and implement formal tracing and evaluations to quantitatively prove the assistant's accuracy over time.

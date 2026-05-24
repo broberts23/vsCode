@@ -45,4 +45,3 @@ If you already know PowerShell well, do not try to learn all of Python first. Le
 5. run retrieval
 6. call the model
 7. return the answer
-
