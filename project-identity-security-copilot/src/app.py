@@ -34,9 +34,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description='Run the Identity Security Copilot.')
     parser.add_argument(
-        '--prompt', help='Natural-language question to answer.')
+        '--prompt', help='Natural-language question to answer or route automatically.')
     parser.add_argument(
         '--summarize', help='Topic text to summarize with the summary deployment.')
+    parser.add_argument(
+        '--mode',
+        choices=('auto', 'ask', 'summarize'),
+        default='auto',
+        help='Choose automatic routing, grounded Q&A, or summary mode explicitly.',
+    )
     args = parser.parse_args()
 
     # Load the environment-driven configuration once so both code paths use the same
@@ -45,15 +51,23 @@ def main() -> None:
 
     if args.summarize:
         # Summary mode is a separate path because it uses a different deployment name.
-        summarize_handler = getattr(chat, 'summarize_evidence')
-        print(summarize_handler(args.summarize, settings))
+        print(chat.summarize_evidence(args.summarize, settings))
         return
 
     if not args.prompt:
         raise SystemExit('Provide --prompt or --summarize.')
 
-    # The default mode is the grounded question-answering path.
-    print(chat.answer_question(args.prompt, settings))
+    if args.mode == 'summarize':
+        print(chat.summarize_evidence(args.prompt, settings))
+        return
+
+    if args.mode == 'ask':
+        print(chat.answer_question(args.prompt, settings, use_tools=True))
+        return
+
+    # The default mode routes the request so summary-style prompts and grounded
+    # questions can share one entry point.
+    print(chat.route_request(args.prompt, settings))
 
 
 if __name__ == '__main__':

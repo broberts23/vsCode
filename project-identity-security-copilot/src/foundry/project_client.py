@@ -11,16 +11,15 @@ PowerShell bridge:
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Any, Iterator
 
-from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import AppConfig
 
 
 @contextmanager
-def open_project_client(settings: AppConfig) -> Iterator[AIProjectClient]:
+def open_project_client(settings: AppConfig) -> Iterator[Any]:
     """Open an authenticated Foundry project client.
 
     PowerShell bridge:
@@ -32,6 +31,8 @@ def open_project_client(settings: AppConfig) -> Iterator[AIProjectClient]:
 
     # DefaultAzureCredential tries the current developer identity first and then other
     # supported sources, which keeps local and hosted execution paths aligned.
+    from azure.ai.projects import AIProjectClient
+
     with DefaultAzureCredential() as credential, AIProjectClient(
         endpoint=settings.azure_ai_project_endpoint,
         credential=credential,

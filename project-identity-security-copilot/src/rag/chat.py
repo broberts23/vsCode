@@ -10,11 +10,13 @@ PowerShell bridge:
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
 from src.security.masking import mask_answer
 from src.search.service import create_search_client
 from src.foundry.project_client import list_deployment_names, open_project_client
 from src.config import AppConfig
 
+import json
 from pathlib import Path
 import sys
 from typing import Any
@@ -26,7 +28,71 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def answer_question(prompt: str, settings: AppConfig | None = None) -> str:
+@dataclass(slots=True)
+class CopilotPlan:
+        """Small request plan for the copilot.
+
+        PowerShell bridge:
+        - Think of this like a small object returned from a routing function before the main
+            body decides which branch to run.
+        - The plan keeps task selection explicit instead of burying it in one large block
+            of control flow.
+        """
+
+        operation: str
+        retrieval_query: str
+        use_tools: bool
+
+
+def route_request(prompt: str, settings: AppConfig | None = None) -> str:
+        """Route the request to the best local copilot workflow.
+
+        PowerShell bridge:
+        - This is similar to a dispatcher function that picks a downstream command based on
+            the intent of the incoming request.
+        - The goal is not to be magically smart, but to keep the task split explicit:
+            summary requests go to the summary deployment and grounded questions stay in the
+            retrieval plus chat path.
+        """
+
+        plan = build_copilot_plan(prompt)
+        active_settings = settings or AppConfig.from_env()
+
+        if plan.operation == 'summarize':
+                return summarize_evidence(plan.retrieval_query, active_settings)
+
+        return answer_question(plan.retrieval_query, active_settings, use_tools=plan.use_tools)
+
+
+def build_copilot_plan(prompt: str) -> CopilotPlan:
+        """Choose the task path that best matches the request.
+
+        PowerShell bridge:
+        - This is like a lightweight `switch` statement that returns a small plan object.
+        - The heuristic stays intentionally simple so the behavior is easy to reason about
+            and easy to test.
+        """
+
+        normalized_prompt = ' '.join(prompt.split())
+        lowered_prompt = normalized_prompt.lower()
+        summary_prefixes = ('summarize', 'summary', 'give me a summary', 'provide a summary')
+        summary_keywords = ('brief', 'overview', 'executive summary', 'key points')
+
+        if lowered_prompt.startswith(summary_prefixes) or any(keyword in lowered_prompt for keyword in summary_keywords):
+                return CopilotPlan(
+                        operation='summarize',
+                        retrieval_query=normalized_prompt,
+                        use_tools=False,
+                )
+
+        return CopilotPlan(
+                operation='answer',
+                retrieval_query=normalized_prompt,
+                use_tools=True,
+        )
+
+
+def answer_question(prompt: str, settings: AppConfig | None = None, use_tools: bool = False) -> str:
     """Run the full grounded Q&A flow.
 
     PowerShell bridge:
@@ -40,8 +106,13 @@ def answer_question(prompt: str, settings: AppConfig | None = None) -> str:
     # environment just like a script would.
     active_settings = settings or AppConfig.from_env()
     search_results = search_documents(prompt, active_settings)
-    answer = complete_with_foundry(prompt, search_results, active_settings)
-    answer_with_citations = append_citations(answer, search_results)
+    answer, evidence_results = complete_with_foundry(
+        prompt,
+        search_results,
+        active_settings,
+        use_tools=use_tools,
+    )
+    answer_with_citations = append_citations(answer, evidence_results)
     return mask_answer(answer_with_citations)
 
 
@@ -83,7 +154,12 @@ def search_documents(prompt: str, settings: AppConfig, top: int = 5) -> list[dic
     return documents
 
 
-def complete_with_foundry(prompt: str, search_results: list[dict[str, Any]], settings: AppConfig) -> str:
+def complete_with_foundry(
+    prompt: str,
+    search_results: list[dict[str, Any]],
+    settings: AppConfig,
+    use_tools: bool = False,
+) -> tuple[str, list[dict[str, Any]]]:
     """Call the model deployment through the Azure AI Foundry project client.
 
     PowerShell bridge:
@@ -102,6 +178,15 @@ def complete_with_foundry(prompt: str, search_results: list[dict[str, Any]], set
     # We open the project client and the OpenAI-compatible client in the same block so
     # the resources are always cleaned up when the request completes.
     with open_project_client(settings) as project_client, project_client.get_openai_client() as openai_client:
+        if use_tools:
+            return complete_with_tools(
+                prompt,
+                grounded_context,
+                search_results,
+                settings,
+                openai_client,
+            )
+
         response = openai_client.responses.create(
             model=settings.azure_ai_chat_deployment,
             instructions=(
@@ -111,7 +196,155 @@ def complete_with_foundry(prompt: str, search_results: list[dict[str, Any]], set
             ),
             input=f'Question:\n{prompt}\n\nGrounded context:\n{grounded_context}',
         )
-        return response.output_text or 'No response text was returned by the model.'
+        return response.output_text or 'No response text was returned by the model.', search_results
+
+
+def complete_with_tools(
+    prompt: str,
+    grounded_context: str,
+    initial_results: list[dict[str, Any]],
+    settings: AppConfig,
+    openai_client: Any,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Let the chat deployment call small read-only tools before answering.
+
+    PowerShell bridge:
+    - Think of this as a short orchestration loop where the model can request an extra
+      lookup, then continue once the lookup result is injected back into the workflow.
+    - The tools are intentionally read-only and local to this process so the security
+      boundary remains narrow and predictable.
+    """
+
+    response = openai_client.responses.create(
+        model=settings.azure_ai_chat_deployment,
+        instructions=(
+            'You are an identity security copilot. Use the available read-only tools when '
+            'you need more evidence, but answer only from the grounded context and tool outputs. '
+            'If the evidence is missing or incomplete, say that directly. '
+            'When you use evidence, cite document IDs in square brackets.'
+        ),
+        tools=build_foundry_tools(),
+        input=(
+            f'Question:\n{prompt}\n\n'
+            f'Initial grounded context:\n{grounded_context}\n\n'
+            'You may call a read-only search tool if you need better evidence or a narrower lookup.'
+        ),
+    )
+
+    evidence_results = list(initial_results)
+    for _ in range(3):
+        function_calls = extract_function_calls(response)
+        if not function_calls:
+            return response.output_text or 'No response text was returned by the model.', evidence_results
+
+        tool_outputs: list[dict[str, str]] = []
+        for call in function_calls:
+            tool_result, discovered_results = run_tool_call(call, settings)
+            evidence_results.extend(discovered_results)
+            tool_outputs.append(
+                {
+                    'type': 'function_call_output',
+                    'call_id': str(call.get('call_id', '')),
+                    'output': json.dumps(tool_result),
+                }
+            )
+
+        response = openai_client.responses.create(
+            model=settings.azure_ai_chat_deployment,
+            previous_response_id=response.id,
+            input=tool_outputs,
+        )
+
+    return response.output_text or 'No response text was returned by the model.', evidence_results
+
+
+def build_foundry_tools() -> list[dict[str, Any]]:
+    """Describe the read-only tools exposed to the chat deployment."""
+
+    return [
+        {
+            'type': 'function',
+            'name': 'search_identity_knowledge',
+            'description': 'Search the identity security markdown knowledge base for grounded evidence.',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'query': {
+                        'type': 'string',
+                        'description': 'The identity security question or topic to search for.',
+                    },
+                    'top': {
+                        'type': 'integer',
+                        'description': 'How many grounded documents to return.',
+                        'minimum': 1,
+                        'maximum': 8,
+                    },
+                },
+                'required': ['query'],
+                'additionalProperties': False,
+            },
+        },
+        {
+            'type': 'function',
+            'name': 'list_foundry_deployments',
+            'description': 'List model deployments available through the current Foundry project.',
+            'parameters': {
+                'type': 'object',
+                'properties': {},
+                'additionalProperties': False,
+            },
+        },
+    ]
+
+
+def extract_function_calls(response: Any) -> list[dict[str, Any]]:
+    """Normalize function calls from a Responses API object into plain dictionaries."""
+
+    calls: list[dict[str, Any]] = []
+    for item in getattr(response, 'output', []) or []:
+        if getattr(item, 'type', None) != 'function_call':
+            continue
+
+        calls.append(
+            {
+                'name': getattr(item, 'name', ''),
+                'arguments': getattr(item, 'arguments', '{}'),
+                'call_id': getattr(item, 'call_id', ''),
+            }
+        )
+
+    return calls
+
+
+def run_tool_call(call: dict[str, Any], settings: AppConfig) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Execute one read-only tool call from the chat deployment."""
+
+    tool_name = str(call.get('name', ''))
+    raw_arguments = str(call.get('arguments', '{}') or '{}')
+    arguments = json.loads(raw_arguments)
+
+    if tool_name == 'search_identity_knowledge':
+        query = str(arguments.get('query', '')).strip()
+        top = int(arguments.get('top', 5) or 5)
+        documents = search_documents(query, settings, top=max(1, min(top, 8)))
+        return {
+            'query': query,
+            'documents': [
+                {
+                    'id': document.get('id'),
+                    'title': document.get('title'),
+                    'heading': document.get('heading'),
+                    'file_path': document.get('file_path'),
+                    'content': document.get('content'),
+                }
+                for document in documents
+            ],
+        }, documents
+
+    if tool_name == 'list_foundry_deployments':
+        return {'deployments': sorted(list_deployment_names(settings))}, []
+
+    raise RuntimeError(f'Unsupported tool call: {tool_name}')
 
 
 def summarize_evidence(topic: str, settings: AppConfig | None = None) -> str:

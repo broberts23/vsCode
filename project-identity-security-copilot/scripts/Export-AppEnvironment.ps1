@@ -52,7 +52,9 @@ function Invoke-AzCliJson {
 function ConvertTo-BashQuotedValue {
     param([Parameter(Mandatory)][string]$Value)
 
-    return '"' + $Value + '"'
+    $singleQuoteEscape = "'" + '"' + "'" + '"' + "'"
+    $escapedValue = $Value.Replace("'", $singleQuoteEscape)
+    return "'{0}'" -f $escapedValue
 }
 
 function Write-EnvironmentBlock {
@@ -124,6 +126,22 @@ $variables = [ordered]@{
     AZURE_SEARCH_ENDPOINT       = [string]$outputs.searchEndpoint.value
     AZURE_SEARCH_INDEX_NAME     = $SearchIndexName
     KNOWLEDGE_ROOT              = $resolvedKnowledgeRoot
+}
+
+if ($outputs.PSObject.Properties.Name -contains 'appConfigEndpoint') {
+    $variables['AZURE_APP_CONFIGURATION_ENDPOINT'] = [string]$outputs.appConfigEndpoint.value
+}
+
+if ($outputs.PSObject.Properties.Name -contains 'keyVaultUri') {
+    $variables['AZURE_KEY_VAULT_URI'] = [string]$outputs.keyVaultUri.value
+}
+
+if ($outputs.PSObject.Properties.Name -contains 'appInsightsConnectionString') {
+    $variables['APPLICATIONINSIGHTS_CONNECTION_STRING'] = [string]$outputs.appInsightsConnectionString.value
+}
+
+if ($outputs.PSObject.Properties.Name -contains 'managedIdentityClientId') {
+    $variables['AZURE_CLIENT_ID'] = [string]$outputs.managedIdentityClientId.value
 }
 
 if ($Format -in @('PowerShell', 'Both')) {
