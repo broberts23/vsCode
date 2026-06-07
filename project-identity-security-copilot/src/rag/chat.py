@@ -30,66 +30,67 @@ if str(PROJECT_ROOT) not in sys.path:
 
 @dataclass(slots=True)
 class CopilotPlan:
-        """Small request plan for the copilot.
+    """Small request plan for the copilot.
 
-        PowerShell bridge:
-        - Think of this like a small object returned from a routing function before the main
-            body decides which branch to run.
-        - The plan keeps task selection explicit instead of burying it in one large block
-            of control flow.
-        """
+    PowerShell bridge:
+    - Think of this like a small object returned from a routing function before the main
+        body decides which branch to run.
+    - The plan keeps task selection explicit instead of burying it in one large block
+        of control flow.
+    """
 
-        operation: str
-        retrieval_query: str
-        use_tools: bool
+    operation: str
+    retrieval_query: str
+    use_tools: bool
 
 
 def route_request(prompt: str, settings: AppConfig | None = None) -> str:
-        """Route the request to the best local copilot workflow.
+    """Route the request to the best local copilot workflow.
 
-        PowerShell bridge:
-        - This is similar to a dispatcher function that picks a downstream command based on
-            the intent of the incoming request.
-        - The goal is not to be magically smart, but to keep the task split explicit:
-            summary requests go to the summary deployment and grounded questions stay in the
-            retrieval plus chat path.
-        """
+    PowerShell bridge:
+    - This is similar to a dispatcher function that picks a downstream command based on
+        the intent of the incoming request.
+    - The goal is not to be magically smart, but to keep the task split explicit:
+        summary requests go to the summary deployment and grounded questions stay in the
+        retrieval plus chat path.
+    """
 
-        plan = build_copilot_plan(prompt)
-        active_settings = settings or AppConfig.from_env()
+    plan = build_copilot_plan(prompt)
+    active_settings = settings or AppConfig.from_env()
 
-        if plan.operation == 'summarize':
-                return summarize_evidence(plan.retrieval_query, active_settings)
+    if plan.operation == 'summarize':
+        return summarize_evidence(plan.retrieval_query, active_settings)
 
-        return answer_question(plan.retrieval_query, active_settings, use_tools=plan.use_tools)
+    return answer_question(plan.retrieval_query, active_settings, use_tools=plan.use_tools)
 
 
 def build_copilot_plan(prompt: str) -> CopilotPlan:
-        """Choose the task path that best matches the request.
+    """Choose the task path that best matches the request.
 
-        PowerShell bridge:
-        - This is like a lightweight `switch` statement that returns a small plan object.
-        - The heuristic stays intentionally simple so the behavior is easy to reason about
-            and easy to test.
-        """
+    PowerShell bridge:
+    - This is like a lightweight `switch` statement that returns a small plan object.
+    - The heuristic stays intentionally simple so the behavior is easy to reason about
+        and easy to test.
+    """
 
-        normalized_prompt = ' '.join(prompt.split())
-        lowered_prompt = normalized_prompt.lower()
-        summary_prefixes = ('summarize', 'summary', 'give me a summary', 'provide a summary')
-        summary_keywords = ('brief', 'overview', 'executive summary', 'key points')
+    normalized_prompt = ' '.join(prompt.split())
+    lowered_prompt = normalized_prompt.lower()
+    summary_prefixes = ('summarize', 'summary',
+                        'give me a summary', 'provide a summary')
+    summary_keywords = ('brief', 'overview', 'executive summary', 'key points')
 
-        if lowered_prompt.startswith(summary_prefixes) or any(keyword in lowered_prompt for keyword in summary_keywords):
-                return CopilotPlan(
-                        operation='summarize',
-                        retrieval_query=normalized_prompt,
-                        use_tools=False,
-                )
-
+    if lowered_prompt.startswith(summary_prefixes) or any(keyword in lowered_prompt for keyword in summary_keywords):
         return CopilotPlan(
-                operation='answer',
-                retrieval_query=normalized_prompt,
-                use_tools=True,
+            operation='summarize',
+            retrieval_query=normalized_prompt,
+            use_tools=False,
         )
+
+    return CopilotPlan(
+        operation='answer',
+        retrieval_query=normalized_prompt,
+        use_tools=True,
+    )
 
 
 def answer_question(prompt: str, settings: AppConfig | None = None, use_tools: bool = False) -> str:
