@@ -10,12 +10,13 @@ PowerShell bridge:
 """
 
 from __future__ import annotations
-from src.rag import chat
-from src.config import AppConfig
 
 import argparse
-from pathlib import Path
 import sys
+from pathlib import Path
+
+from src.config import AppConfig
+from src.rag import chat
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -32,11 +33,13 @@ def main() -> None:
     """
 
     parser = argparse.ArgumentParser(
-        description='Run the Identity Security Copilot.')
+        description="Run the Identity Security Copilot.")
     parser.add_argument(
-        '--prompt', help='Natural-language question to answer or route automatically.')
+        "--prompt", help="Natural-language question to answer or route automatically."
+    )
     parser.add_argument(
-        '--summarize', help='Topic text to summarize with the summary deployment.')
+        "--summarize", help="Topic text to summarize with the summary deployment."
+    )
     parser.add_argument(
         '--mode',
         choices=('auto', 'ask', 'summarize'),
