@@ -184,7 +184,7 @@ def _make_document_id(file_path: Path, heading: str) -> str:
 
     base_name = file_path.stem.lower().replace(' ', '-')
     heading_slug = re.sub(r'[^a-z0-9]+', '-', heading.lower()).strip('-')
-    return f'{base_name}::{heading_slug or "section"}'
+    return f'{base_name}_{heading_slug or "section"}'
 
 
 def _build_tags(file_path: Path, heading: str) -> str:

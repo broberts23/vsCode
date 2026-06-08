@@ -10,22 +10,23 @@ PowerShell bridge:
 """
 
 from __future__ import annotations
+
+import json
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from src.security.masking import mask_answer
 from src.search.service import create_search_client
 from src.foundry.project_client import list_deployment_names, open_project_client
 from src.config import AppConfig
 
-import json
-from pathlib import Path
-import sys
-from typing import Any
-
 from azure.search.documents.models import QueryType
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 @dataclass(slots=True)

@@ -8,16 +8,17 @@ PowerShell bridge:
 """
 
 from __future__ import annotations
-from src.search.service import create_search_client
-from src.content.markdown_loader import build_search_documents
-from src.config import AppConfig
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.search.service import create_search_client
+from src.content.markdown_loader import build_search_documents
+from src.config import AppConfig
 
 
 def main() -> None:

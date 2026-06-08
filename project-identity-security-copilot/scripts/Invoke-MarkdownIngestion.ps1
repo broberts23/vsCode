@@ -25,8 +25,9 @@ function Invoke-PythonStep {
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 Push-Location $projectRoot
 try {
-    Invoke-PythonStep -ScriptPath './src/search/build_index.py' -FailureMessage 'Search index creation failed.'
-    Invoke-PythonStep -ScriptPath './src/search/load_documents.py' -FailureMessage 'Document upload failed.'
+    # Step up one directory and run Python scripts for search index creation and document upload.
+    Invoke-PythonStep -ScriptPath (Join-Path $projectRoot 'src/search/build_index.py') -FailureMessage "Failed to create search index"
+    Invoke-PythonStep -ScriptPath (Join-Path $projectRoot 'src/search/load_documents.py') -FailureMessage "Failed to upload documents"
 }
 finally {
     Pop-Location

@@ -73,10 +73,10 @@ function Write-EnvironmentBlock {
         $value = [string]$Variables[$name]
 
         if ($Shell -eq 'PowerShell') {
-            Write-Host ('$env:' + $name + ' = "' + ($value -replace '"', '`"') + '"')
+            ('$env:' + $name + ' = "' + ($value -replace '"', '`"') + '"')
         }
         else {
-            Write-Host ('export ' + $name + '=' + (ConvertTo-BashQuotedValue -Value $value))
+            ('export ' + $name + '=' + (ConvertTo-BashQuotedValue -Value $value))
         }
     }
 }

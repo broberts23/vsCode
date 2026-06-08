@@ -2,9 +2,11 @@
 
 If you hang around identity security teams for a day, you quickly notice that their questions never fit into a single neat box. In the morning, someone needs a deep, grounded answer about which Conditional Access policies are safeguarding break-glass accounts. In the afternoon, a manager asks for a clean executive summary on workload identity baselines. And later that week, an analyst runs a query where the initial search results come back too sparse, meaning the assistant needs to ask follow-up questions or run a narrower lookup before offering advice with any confidence.
 
-Standard AI sample templates do a great job of showing how to call an LLM with a single prompt or spin up a basic RAG setup, but they leave out what it takes to build a cohesive, reliable application boundary. If we want a copilot that engineers can actually trust, we need more than a retrieval loop and a folder full of markdown files. We need a system that understands different tasks, queries bounded knowledge sources, and integrates deployment configuration in a logical, automated way.
+This Identity Security Copilot is deliberately constrained to answering questions based only on the static documentation in its knowledge directory (for now...), not live data sources like Microsoft Graph API. The system ingests markdown files into Azure AI Search during setup, creating a fixed knowledge base that the model queries for grounded responses. It cannot access current directory states, active Conditional Access policies, or real-time access review data - this is by design to maintain a tight security boundary.
 
-That is exactly what this project sets out to build. It is a full reference implementation of an Identity Security Copilot that runs on Azure AI Foundry, handling grounded Q&A, adapting tasks to the right model deployments, and leveraging selective read-only tools to make smarter lookups. But rather than stay at the architectural whiteboard level, let us walk through exactly how the code makes this work, from the configuration object that wires everything together to the tool-calling loop that lets the model refine its own evidence.
+Standard AI sample templates do a great job of showing how to call an LLM with a single prompt or spin up a basic RAG setup, but they leave out what it takes to build a cohesive, reliable application boundary. If we want a copilot that engineers can actually trust, we need more than a retrieval loop and a folder full of markdown files. We need a system that understands different tasks, queries bounded knowledge sources, and integrates deployment configuration in a logical, automated way while maintaining strict separation from live production data.
+
+That is exactly what this project sets out to build. It is a full reference implementation of an Identity Security Copilot that runs on Azure AI Foundry, handling grounded Q&A against its pre-approved knowledge base, adapting tasks to the right model deployments, and leveraging selective read-only tools to make smarter lookups within its constrained data scope. But rather than stay at the architectural whiteboard level, let's walk through exactly how the code makes this work, from the configuration object that wires everything together to the tool-calling loop that lets the model refine its own evidence.
 
 ## From Environment Variables to a Typed Contract
 
@@ -25,7 +27,7 @@ The classmethod `from_env` reads required variables like `AZURE_AI_PROJECT_ENDPO
 
 ## How Markdown Becomes Grounded Evidence
 
-The knowledge base lives in a repo folder called `knowledge/`, containing three markdown files that cover Conditional Access policies, access review decision guidance, and workload identity security. The contents are not particularly long, which is intentional. The project wants to demonstrate a pattern, not ship a complete identity library.
+The knowledge base lives in a repo folder called `knowledge/`, containing three markdown files that cover Conditional Access policies, access review decision guidance, and workload identity security. The contents are not particularly long, which is intentional. It's designed to demonstrate a pattern, not ship a complete identity library. The document set could be expanded to include more detailed internal business information or even external sources like API documentation, but for this example, the focus is on demonstrating how to create a grounded Q&A system.
 
 The real work happens in `markdown_loader.py`. It reads every `.md` file in the knowledge directory, then splits each file at every heading boundary into individual `MarkdownSection` objects. A file like `conditional-access.md` with a `## Baseline expectation` heading and a `## Common weak pattern` heading produces two sections, each with its own title, content block, and file path. These are then projected into `SearchDocument` objects.
 
@@ -57,11 +59,11 @@ The search index schema itself is defined in `build_index.py` as a typed `Search
 return SearchIndex(
     name=settings.azure_search_index_name,
     fields=[
-        SimpleField(name='id', type=SearchFieldDataType.String, key=True),
+        SimpleField(name='id', type=SearchFieldDataType.STRING, key=True),
         SearchableField(name='source_type', type=SearchFieldDataType.String, filterable=True),
         SearchableField(name='title', type=SearchFieldDataType.String),
         SearchableField(name='content', type=SearchFieldDataType.String),
-        SimpleField(name='file_path', type=SearchFieldDataType.String, filterable=True),
+        SimpleField(name='file_path', type=SearchFieldDataType.STRING, filterable=True),
         SearchableField(name='heading', type=SearchFieldDataType.String),
         SearchableField(name='tags', type=SearchFieldDataType.String, filterable=True),
     ],
@@ -271,6 +273,14 @@ When you put these pieces together, the project stops looking like a simple RAG 
 
 None of these properties emerged by accident. They came from a specific set of architectural decisions encoded in a few hundred lines of Python and a Bicep template. The grounded context block is explicitly formatted with document IDs so citations can be appended deterministically rather than left to the model's whim. The preflight deployment check catches configuration errors before any model tokens are spent. The three-iteration tool limit prevents infinite loops without hardcoding a timeout. The stable document IDs make re-indexing safe enough to run in CI.
 
-The next sensible progression is clear. You can transition the semantic search into a hybrid vector pipeline by adding embedding fields to the index and switching the query type. You can write Foundry evaluations for grounding accuracy and fluency, then wire them into a PR gating workflow. You can expose the search tool as a proper MCP endpoint and let other agents discover it. But none of those improvements require rethinking the architecture, because the architecture was built to extend.
-
 A copilot's value does not come from raw model capability alone. It comes from the discipline of the boundary you build around it. That boundary is what makes the difference between a demo that impresses for five minutes and a tool that engineers reach for every day. This project draws that boundary in code, infrastructure, and documentation, and it makes every part of that boundary visible, testable, and explainable.
+
+Stay tuned for future phases that will transform this reference implementation into a multi-agent platform. Our next steps include introducing a coordinator agent that routes policy questions, governance evidence requests, and workload identity questions to specialized agents using explicit handoff payloads. We'll expose retrieval capabilities through MCP servers to replace tightly coupled helper code with governed services. And we'll compare synchronous tool calls versus delegated agent workflows for evidence collection and remediation planning. These advancements will extend our architecture rather than replace it - because we built the foundation to scale with agent-based patterns from day one. 🚀
+
+## References
+
+- [Azure AI Foundry documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/)
+- [Azure AI Search documentation](https://learn.microsoft.com/en-us/azure/search/)
+- [Azure AI Search Python SDK](https://learn.microsoft.com/en-us/python/api/azure-search-documents/)
+- [Azure AI Foundry Python SDK](https://learn.microsoft.com/en-us/python/api/azure-ai-projects/azure.ai.projects/)
+- [Azure Identity library](https://learn.microsoft.com/en-us/python/api/azure-identity/)

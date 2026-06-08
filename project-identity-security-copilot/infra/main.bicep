@@ -30,7 +30,7 @@ param tags object = {
 
 var searchServiceName = toLower(substring('${baseName}${uniqueString(resourceGroup().id, deploymentEnvironment)}srch', 0, 24))
 var storageAccountName = toLower(substring('${baseName}${uniqueString(resourceGroup().id, deploymentEnvironment)}st', 0, 24))
-var appConfigName = toLower(substring('${baseName}${uniqueString(resourceGroup().id, deploymentEnvironment)}cfg', 0, 50))
+var appConfigName = toLower(substring('${baseName}${uniqueString(resourceGroup().id, deploymentEnvironment)}cfg', 0, 24))
 var keyVaultName = toLower(substring('${baseName}-${uniqueString(resourceGroup().id, deploymentEnvironment)}-kv', 0, 24))
 var logAnalyticsName = '${baseName}-${deploymentEnvironment}-law'
 var appInsightsName = '${baseName}-${deploymentEnvironment}-appi'
@@ -54,7 +54,7 @@ resource search 'Microsoft.Search/searchServices@2025-05-01' = {
   }
 }
 
-resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+resource storage 'Microsoft.Storage/storageAccounts@2026-04-01' = {
   name: storageAccountName
   location: location
   sku: {
@@ -69,7 +69,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
 }
 
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
+resource keyVault 'Microsoft.KeyVault/vaults@2025-05-01' = {
   name: keyVaultName
   location: location
   tags: tags
@@ -86,7 +86,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
-resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' = {
+resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-06-01' = {
   name: appConfigName
   location: location
   sku: {
@@ -101,7 +101,7 @@ resource appConfig 'Microsoft.AppConfiguration/configurationStores@2024-05-01' =
   }
 }
 
-resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+resource workspace 'Microsoft.OperationalInsights/workspaces@2025-07-01' = {
   name: logAnalyticsName
   location: location
   tags: tags
@@ -124,10 +124,51 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   }
 }
 
-resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+resource managedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = {
   name: userAssignedIdentityName
   location: location
   tags: tags
+}
+
+@description('Object ID of the user-assigned managed identity for role assignments.')
+param managedIdentityObjectId string = ''
+
+@description('Object ID of the deploying principal (user or service principal) for local development access.')
+param deployingPrincipalObjectId string = ''
+
+@description('Object ID of the Azure AI Foundry project\'s managed identity for search data access.')
+param foundryProjectPrincipalObjectId string = ''
+
+var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
+
+resource searchIndexDataContributorToManagedIdentity 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(managedIdentityObjectId)) {
+  scope: search
+  name: guid(search.id, managedIdentityObjectId, searchIndexDataContributorRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataContributorRoleId)
+    principalId: managedIdentityObjectId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource searchIndexDataContributorToDeployer 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployingPrincipalObjectId)) {
+  scope: search
+  name: guid(search.id, deployingPrincipalObjectId, searchIndexDataContributorRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataContributorRoleId)
+    principalId: deployingPrincipalObjectId
+    principalType: 'User'
+  }
+}
+
+resource searchIndexDataContributorToFoundryProject 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(foundryProjectPrincipalObjectId)) {
+  scope: search
+  name: guid(search.id, foundryProjectPrincipalObjectId, searchIndexDataContributorRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataContributorRoleId)
+    principalId: foundryProjectPrincipalObjectId
+    principalType: 'ServicePrincipal'
+  }
 }
 
 output searchEndpoint string = 'https://${search.name}.search.windows.net'
