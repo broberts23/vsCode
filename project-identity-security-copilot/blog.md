@@ -8,6 +8,16 @@ Standard AI sample templates do a great job of showing how to call an LLM with a
 
 That is exactly what this project sets out to build. It is a full reference implementation of an Identity Security Copilot that runs on Azure AI Foundry, handling grounded Q&A against its pre-approved knowledge base, adapting tasks to the right model deployments, and leveraging selective read-only tools to make smarter lookups within its constrained data scope. But rather than stay at the architectural whiteboard level, let's walk through exactly how the code makes this work, from the configuration object that wires everything together to the tool-calling loop that lets the model refine its own evidence.
 
+## The Two Azure Services Powering the Copilot
+
+This project rests on two Azure services that, together, form the spine of every grounded response the copilot produces. Understanding what each one does and why they appear in tandem is essential before diving into the code, because the architecture makes deliberate choices about which responsibility belongs to which service.
+
+**Azure AI Foundry** is a unified platform for building, managing, and consuming AI applications and agents. Think of it as the orchestration layer. It hosts model deployments (the actual inference endpoints), enforces RBAC boundaries around who can call those models, and provides a project-scoped SDK client that handles authentication, endpoint resolution, and response streaming. When this copilot sends a prompt to a model, it does so through the Foundry project client, not by hitting an OpenAI endpoint directly. That indirection matters because it means every model call inherits the access controls, audit logging, and cost tracking configured at the Foundry project level. The project also exposes a management plane the SDK can query, which is how the copilot performs its preflight deployment validation and lists available models through the `list_foundry_deployments` tool.
+
+**Azure AI Search** fills a completely different role. It is a dedicated search service purpose-built for full-text and vector search over indexed content. In this project, it acts as the grounded knowledge store. The markdown files in the `knowledge/` directory get split into sections, projected into typed documents with deterministic IDs, and uploaded to a search index that has semantic ranking configured at the schema level. When a question arrives, the copilot queries this index using `QueryType.SEMANTIC`, which means the search service applies a deep-learning reranker to the initial keyword results, surfaceing the passages most likely to contain relevant evidence. The search service never sees a model call, and Foundry never stores the markdown content. The two services operate at arm's length, connected only by the application layer that calls them in sequence.
+
+The choice to use both services rather than, say, stuffing all the markdown into a model prompt or relying on a single vector database comes down to separation of concerns. Azure AI Search is optimized for retrieval at scale. It handles ranking, filtering, and field-level scoring without consuming any inference tokens. Azure AI Foundry is optimized for model orchestration with security boundaries built in. The copilot routes data between them, but neither service needs to know about the other's existence. That separation is what lets each piece evolve independently.
+
 ## From Environment Variables to a Typed Contract
 
 Every copilot session starts with configuration, and this one is no exception. But instead of scattering `os.environ.get()` calls across a dozen files, the project centralizes everything into a single dataclass.
@@ -245,27 +255,35 @@ $variables = [ordered]@{
 
 The script can output environment blocks for PowerShell, Bash, or both, and it strips the values from any infrastructure outputs that contain secrets. This is the infrastructure equivalent of the `mask_answer` function: a deterministic, automated step that prevents sensitive values from leaking into the wrong context.
 
-## Why the Code Itself Is the Documentation
+## Putting It All Together: The Full Request Lifecycle
 
-The project carries a file called `PYTHON-FOR-POWERSHELL.md` that maps every Python pattern used in the codebase to its PowerShell equivalent. A dataclass is a lightweight class. A context manager is a `try/finally` block. `DefaultAzureCredential` is a smart credential provider that tries multiple login sources. This translation guide is baked into the code comments themselves. Every module, every function, every class has a PowerShell bridge comment that explains the intent in terms a PowerShell engineer already understands.
+It is one thing to read about configuration objects, search indices, and tool-calling loops in isolation. It is another to watch them wire together as a single prompt travels from the terminal through every layer of the system. So let's trace a concrete invocation end to end.
 
-```python
-@dataclass(slots=True)
-class CopilotPlan:
-    """Small request plan for the copilot.
+A user runs `python src/app.py --prompt "What Conditional Access policies protect break-glass accounts?"`. The entry script in `app.py` receives this as a string through `argparse`, does nothing clever with it, and immediately hands it to `route_request` in `chat.py`. That function calls `build_copilot_plan`, which normalizes the prompt to lowercase, checks for summary-oriented phrases, finds none, and returns a `CopilotPlan` with `operation='answer'`, `use_tools=True`, and the original prompt as the retrieval query.
 
-    PowerShell bridge:
-    - Think of this like a small object returned from a routing function before the main
-        body decides which branch to run.
-    - The plan keeps task selection explicit instead of burying it in one large block
-        of control flow.
-    """
-    operation: str
-    retrieval_query: str
-    use_tools: bool
-```
+Now `answer_question` takes over. Its first real action is to call `search_documents`, which creates a search client through `src/search/service.py` using the endpoint and index name from the shared `AppConfig` instance. That client fires a semantic query at Azure AI Search, asking for the top five documents matching the prompt. The search service returns scored results, which the code normalizes into plain dictionaries. At this point, the copilot has made its first Azure service call of the request lifecycle.
 
-This is not just a nicety for the README. It is a pedagogical decision that runs through every line of the project. The code is written to be read by someone who ships PowerShell modules for a living and is now being asked to work with Python SDKs and Azure AI Foundry. Every design tradeoff is explained in those terms, from why the markdown loader splits files by heading boundaries to why the tool-calling loop limits itself to three iterations.
+![Screenshot of the Azure AI Search index browser showing indexed documents, fields, and semantic configuration](images/ai-search-index.png)
+
+The retrieved documents are assembled into a grounded context block with document IDs inline. Before anything reaches the model, `complete_with_foundry` runs a preflight validation: it calls the Foundry SDK to confirm that the configured chat deployment name actually exists in the project. If the deployment was removed or the name was misspelled, the pipeline fails here with a clear error, before a single token is consumed.
+
+With validation passed, the full conversation is assembled: the system message, the grounded context, the user's original question, and the tool definitions for `search_identity_knowledge` and `list_foundry_deployments`. This whole structure is sent to the Foundry project client, which routes it to the model deployment configured as the chat model. The model processes the input, produces token-by-token reasoning, and returns a response.
+
+![Screenshot of an Azure AI Foundry model invocation showing the deployed model, request payload, and response](images/ai-foundry-invocation.png)
+
+The tool-calling loop begins its inspection. If the response contains a function call for `search_identity_knowledge` with a refined query, the app dispatches it through `run_tool_call`, which calls `search_documents` again with the new query. The additional evidence is merged into the accumulated result set and sent back to the model in a follow-up request that reuses the previous response ID for conversational continuity. In practice, most questions resolve after zero or one tool calls. The loop caps at three iterations as a safety boundary, not a normal exit path.
+
+When the model produces a text response with no function calls, the loop exits. The final answer and all accumulated evidence move to `mask_answer`, which replaces any known sensitive strings with redacted placeholders. The formatted answer, complete with citations tied to the deterministic document IDs, is printed to stdout.
+
+![Screenshot of the copilot's terminal output showing the grounded answer with citations](images/copilot-output.png)
+
+The same lifecycle plays out in reverse for summary requests, except the routing layer skips retrieval entirely and sends the prompt directly to the summary deployment. No search, no tools, no evidence accumulation. Just a direct, cost-efficient model call.
+
+Every file in the project has a role in this flow. `src/config.py` provides the typed configuration object that every function reads. `src/app.py` owns the CLI boundary. `src/rag/chat.py` holds the orchestration logic for routing, answering, and summarizing. `src/search/service.py` creates search clients. `src/search/build_index.py` and `src/search/load_documents.py` handle the one-time ingestion path. `src/content/markdown_loader.py` turns file trees into search documents. `src/foundry/project_client.py` wraps the Foundry SDK connection and deployment enumeration. And `src/security/masking.py` owns the final output scrub.
+
+The PowerShell scripts mirror these layers at the infrastructure level. `Deploy-Infrastructure.ps1` provisions everything from the Bicep template. `Export-AppEnvironment.ps1` reads deployment outputs and emits environment variable blocks. `Invoke-MarkdownIngestion.ps1` runs the content bootstrapping pipeline. And `Test-Chat.ps1` ties it all together by calling `app.py` against the live deployment, confirming the entire loop works from end to end.
+
+A single test at `tests/test_markdown_loader.py` validates the content parsing and document ID stability offline. Everything else requires live Azure infrastructure, which is by design—the copilot's value proposition is grounded in real services, not local mocks.
 
 ## From Demo to Platform
 
