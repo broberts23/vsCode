@@ -1,1 +1,1 @@
-# Package marker for the security layer (output masking + inter-agent redaction policy).
+"""Output masking and inter-agent redaction policy."""

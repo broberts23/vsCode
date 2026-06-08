@@ -1,1 +1,1 @@
-# Package marker for the Identity Security Copilot v2 source tree.
+"""Identity Security Copilot v2 shared source tree."""

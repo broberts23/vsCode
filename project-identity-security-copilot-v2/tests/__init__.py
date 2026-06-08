@@ -1,1 +1,1 @@
-# Package marker for the test suite.
+"""Test suite for the Identity Security Copilot v2 project."""

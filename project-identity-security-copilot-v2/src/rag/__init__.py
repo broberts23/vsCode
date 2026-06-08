@@ -1,1 +1,1 @@
-# Package marker for the grounded chat layer (carried over from v1).
+"""Grounded Q&A chat orchestration (carried over from v1)."""

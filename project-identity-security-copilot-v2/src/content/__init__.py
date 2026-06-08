@@ -1,1 +1,1 @@
-# Package marker for the markdown knowledge loader (carried over from v1).
+"""Markdown knowledge loader (carried over from v1)."""

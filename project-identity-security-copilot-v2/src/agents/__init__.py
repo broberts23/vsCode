@@ -1,1 +1,1 @@
-# Package marker for the agents layer (coordinator + specialists + A2A handoff types).
+"""Coordinator agent, specialist agents, and A2A handoff envelope types."""

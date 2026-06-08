@@ -1,1 +1,1 @@
-# Package marker for the Azure AI Search layer (carried over from v1).
+"""Azure AI Search index, query, and ingestion helpers (carried over from v1)."""

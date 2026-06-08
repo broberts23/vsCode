@@ -1,1 +1,1 @@
-# Package marker for the MCP server layer (retrieval, markdown, config).
+"""MCP tool surfaces: retrieval, markdown, configuration."""
