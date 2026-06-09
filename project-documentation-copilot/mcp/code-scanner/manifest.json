@@ -1,0 +1,38 @@
+{
+  "name": "code-scanner",
+  "description": "Scans Python source code and extracts function/class metadata, signatures, and docstrings.",
+  "tools": [
+    {
+      "name": "scan_repository",
+      "description": "Walk a repository tree and extract metadata from all Python files.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "root_path": {
+            "type": "string",
+            "description": "Root directory to scan."
+          },
+          "target_name": {
+            "type": "string",
+            "description": "Specific function or class name to filter by."
+          }
+        },
+        "required": ["root_path"]
+      }
+    },
+    {
+      "name": "resolve_dependencies",
+      "description": "Analyze imports and resolve internal vs external dependencies for a module.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "description": "Path to the Python file to analyze."
+          }
+        },
+        "required": ["file_path"]
+      }
+    }
+  ]
+}

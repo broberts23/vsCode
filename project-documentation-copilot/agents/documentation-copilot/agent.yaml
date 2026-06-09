@@ -1,0 +1,8 @@
+# Documentation Copilot Agent Configuration
+name: documentation-copilot
+version: 1
+project: ./azure.yaml
+skills:
+  - wiki-authoring
+  - code-analysis
+toolbox: documentation-toolbox

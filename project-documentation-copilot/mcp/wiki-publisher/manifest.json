@@ -1,0 +1,50 @@
+{
+  "name": "wiki-publisher",
+  "description": "Publishes and manages wiki pages in Azure DevOps Wiki via REST API.",
+  "tools": [
+    {
+      "name": "publish_wiki_page",
+      "description": "Create or update a wiki page in Azure DevOps Wiki.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "page_path": {
+            "type": "string",
+            "description": "Wiki page path (e.g., API-Reference/MyFunction/module)."
+          },
+          "content": {
+            "type": "string",
+            "description": "Markdown content for the wiki page."
+          },
+          "version": {
+            "type": "string",
+            "description": "ETag version for safe concurrent editing (omit for new pages)."
+          }
+        },
+        "required": ["page_path", "content"]
+      }
+    },
+    {
+      "name": "get_wiki_page",
+      "description": "Retrieve an existing wiki page by path.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "page_path": {
+            "type": "string",
+            "description": "Wiki page path to retrieve."
+          }
+        },
+        "required": ["page_path"]
+      }
+    },
+    {
+      "name": "list_wiki_pages",
+      "description": "List all pages in the configured wiki.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}
