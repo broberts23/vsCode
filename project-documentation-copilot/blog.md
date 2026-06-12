@@ -77,10 +77,33 @@ The copilot's custom connector (`src/ado/`) wraps the Azure DevOps Wiki REST API
 
 - **Get page:** `GET .../pages?path={path}&api-version=7.1&includeContent=true` — returns page content and `ETag` version
 - **Create/Update:** `PUT .../pages?path={path}&api-version=7.1` — with `If-Match` header for safe concurrent editing
-- **Authentication:** PAT-based Basic auth, scoped to Wiki Read & Write only
+- **Authentication:** PAT-based Basic auth, scoped to Wiki Read & Write only, or Microsoft Entra ID Bearer tokens from the agent's platform-assigned managed identity (the production path)
 - **Error handling:** Graceful degradation with typed `WikiPageResult` objects
 
 The page path convention is `API-Reference/{TargetName}/{ModuleName}`, making wiki navigation predictable and browsable.
+
+#### Why a custom connector instead of the Azure DevOps MCP Server?
+
+Microsoft publishes an [official Azure DevOps MCP Server](https://learn.microsoft.com/en-us/azure/devops/mcp-server/mcp-server-overview?view=azure-devops) that connects AI assistants to Azure DevOps data — work items, pull requests, builds, pipelines, and test plans. It is a valuable tool for sprint planning, code review workflows, and standup preparation, and it runs locally via stdio with no external data leakage.
+
+What the Azure DevOps MCP Server does **not** cover is Wiki page management. The server has no tools for creating, reading, updating, or deleting Wiki pages. The documented capability surface is limited to project metadata, work item tracking, PR status, CI/CD results, and test coverage — there is no Wiki endpoint in its tool roster. That gap is exactly the problem the Documentation Copilot solves.
+
+Rather than extend the official MCP server (which would require upstream contributions to a Node.js codebase governed by Microsoft's release cycle), this project builds a purpose-specific, Python-native connector as an MCP toolbox surface (`mcp/wiki-publisher/`). The connector is thin, typed, and focused on one job: Wiki page CRUD. In production, both servers coexist — the Azure DevOps MCP Server handles your daily standup and PR reviews, and the Documentation Copilot keeps your Wiki current.
+
+#### PAT replacement: Workload identity federation via managed identity
+
+The scaffold originally used a Personal Access Token (PAT) stored in Key Vault for Azure DevOps API authentication. Production deployments should instead use the **agent's platform-assigned managed identity** with Microsoft Entra ID Bearer tokens — eliminating long-lived secrets entirely.
+
+The Foundry Hosted Agent runs as its own **platform-assigned managed identity** ([documented in the Foundry agent deployment guide](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/deploy-hosted-agent-code?tabs=python#required-permissions)). That identity can be granted access to Azure DevOps directly, without any shared secret.
+
+**Steps to enable:**
+
+1. **Deploy the agent** to Foundry via `azd deploy` — this creates the platform-assigned managed identity automatically.
+2. **Add the managed identity to Azure DevOps** — a Project Collection Administrator adds the identity's object ID as a user in Azure DevOps (Organization Settings → Users → Add users). Assign a Basic license and project access.
+3. **Grant Wiki Write permission** in Azure DevOps — assign the identity to a security group with Wiki edit permissions for the target project.
+4. **Update the Python connector** (`src/ado/auth.py`) to use `DefaultAzureCredential` to acquire a Bearer token for the scope `https://app.vssps.visualstudio.com/.default`, then send it as `Authorization: Bearer {token}` instead of `Authorization: Basic {pat}`.
+
+This is Microsoft's [recommended authentication path](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops). The PAT approach remains as a local-development fallback for when the agent runs outside of Azure on a developer workstation.
 
 ---
 
@@ -174,7 +197,7 @@ With metadata extracted, the wiki generator (`src/wiki/generator.py`) orchestrat
 
 **Mermaid builder** (`src/wiki/mermaid_builder.py`) produces Azure DevOps Wiki-compatible diagrams:
 
-```
+```text
 ::: mermaid
 classDiagram
     class AuthService {
@@ -624,6 +647,7 @@ For engineers who want to extend the copilot, the MCP toolbox surfaces (`code-sc
 - [docs/connector-design.md](./docs/connector-design.md) — Azure DevOps REST API connector design
 - [docs/azd-journey.md](./docs/azd-journey.md) — end-to-end azd deployment commands
 - [docs/wiki-documentation-schema.md](./docs/wiki-documentation-schema.md) — wiki entry format specification
+- [Azure DevOps MCP Server documentation](https://learn.microsoft.com/en-us/azure/devops/mcp-server/mcp-server-overview?view=azure-devops) — official Microsoft MCP server for Azure DevOps (work items, PRs, builds, test plans; no Wiki support)
 - [Azure DevOps Wiki REST API (Pages)](https://learn.microsoft.com/en-us/rest/api/azure/devops/wiki/pages)
 - [Azure AI Foundry documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/)
 - [Mermaid syntax reference](https://mermaid.js.org/)

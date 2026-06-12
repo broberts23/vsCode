@@ -18,9 +18,24 @@ User Prompt → app.py → wiki_service.py → ado/client.py → Azure DevOps RE
 
 ### 1. Auth Layer (`src/ado/auth.py`)
 
-- Reads `AZURE_DEVOPS_PAT` from environment
+Two-tier authentication strategy:
+
+**Production path (managed identity — no secrets):**
+
+- Uses `DefaultAzureCredential()` from `azure-identity` to acquire a Bearer token
+- Token scope: `https://app.vssps.visualstudio.com/.default`
+- The Foundry Hosted Agent's platform-assigned managed identity is automatically resolved
+- Token is short-lived (1 hour), automatically rotated by Azure
+- Sent as `Authorization: Bearer {token}` on REST API calls
+
+**Local development fallback (PAT):**
+
+- Reads `AZURE_DEVOPS_PAT` from environment variable
 - Constructs Basic auth header with base64-encoded PAT
-- Fails fast with descriptive error if PAT is missing
+- Fails fast with descriptive error if PAT is missing and no managed identity is available
+- PAT should be scoped to **Wiki Read & Write** only
+
+The runtime auto-selects between these paths: if `DefaultAzureCredential` can acquire a token, the Bearer path is used. Otherwise, the PAT fallback is used.
 
 ### 2. REST Client (`src/ado/client.py`)
 
@@ -53,19 +68,40 @@ User Prompt → app.py → wiki_service.py → ado/client.py → Azure DevOps RE
 
 ## Security
 
+**Production (managed identity):**
+
+- The agent's platform-assigned managed identity is authenticated via Microsoft Entra ID — no shared secrets, no long-lived tokens
+- Tokens expire every hour and are automatically refreshed by `DefaultAzureCredential`
+- The managed identity is explicitly added to Azure DevOps with **Wiki Read & Write** permissions only
+- Azure DevOps uses its own permission model (not Microsoft Entra application permissions) — see [Microsoft documentation](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops)
+- All Entra tokens are fetched in-memory; none are stored to disk or logged
+
+**Local development (PAT):**
+
 - PAT scoped to **Wiki Read & Write** only — no broader ADO permissions
-- PAT stored as environment variable, never in code or config files
+- PAT stored in Key Vault as fallback, never in code or config files
 - Base64 encoding for transport (Basic auth), not for storage
-- Output masking via `src/security/masking.py` redacts auth headers from logs
+
+**Cross-cutting:**
+
+- Output masking via `src/security/masking.py` redacts both PAT and Bearer token strings from logs
 - Provenance recorder tracks all wiki operations with correlation IDs
 
 ## Error Handling
 
 | Scenario | Behaviour |
 |---|---|
-| Missing PAT | `RuntimeError` at startup |
+| Missing PAT (no managed identity available) | `RuntimeError` at startup |
+| Managed identity token acquisition failure | Falls back to PAT; logs warning |
 | 401 Unauthorized | `WikiPageResult(status='error', ...)` with error message |
+| 403 Forbidden (managed identity not added to ADO) | `WikiPageResult(status='error', ...)` — check identity has been added as Azure DevOps user |
 | 404 Page not found | `get_page()` returns `None` |
 | 429 Rate limited | Exponential backoff (future enhancement) |
 | Network timeout | `requests.HTTPError` → `WikiPageResult(status='error', ...)` |
-| Concurrent edit conflict | `412 Precondition Failed` when ETag mismatch → retry with fresh version |
+| Concurrent edit conflict | `412 Precondition Failed` when ETag mismatch → retry with fresh version
+
+## References
+
+- [Authenticate to Azure DevOps with service principals and managed identities](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops)
+- [Azure DevOps Wiki REST API (Pages)](https://learn.microsoft.com/en-us/rest/api/azure/devops/wiki/pages)
+- [Azure Identity client library (DefaultAzureCredential)](https://learn.microsoft.com/en-us/python/api/azure-identity/azure.identity.defaultazurecredential) |

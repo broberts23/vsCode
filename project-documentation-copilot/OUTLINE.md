@@ -503,9 +503,9 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
 ---
 
-### Phase 1 — Create Azure infrastructure and secure credentials
+### Phase 1 — Create Azure infrastructure, managed identity, and credentials
 
-**Goal:** Provision all Azure resources required by the copilot and store the Azure DevOps PAT in Key Vault.
+**Goal:** Provision all Azure resources required by the copilot. Configure the agent's platform-assigned managed identity as the primary authentication mechanism to Azure DevOps, with PAT + Key Vault as a local-development fallback.
 
 **Prerequisites:**
 
@@ -513,7 +513,8 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 - Azure CLI 2.80+ (`az login` completed)
 - Azure Developer CLI 1.25.3+ with `microsoft.foundry` and `azure.ai.skills` extensions
 - An Azure DevOps project with Wiki enabled
-- An Azure DevOps PAT with **Wiki Read & Write** scope (generated at `https://dev.azure.com/{org}/_usersSettings/tokens`)
+- Microsoft Entra ID tenant connected to the Azure DevOps organization
+- An Azure DevOps Project Collection Administrator to add the managed identity to the organization (step 7 below)
 
 **Steps:**
 
@@ -527,16 +528,7 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
    az keyvault create --name $kvName --resource-group $rg --location $location --sku Standard
    ```
 
-2. **Store the Azure DevOps PAT in Key Vault**
-
-   ```pwsh
-   $pat = Read-Host -AsSecureString "Enter Azure DevOps PAT"
-   az keyvault secret set --vault-name $kvName --name "AzureDevOpsPat" --value $pat
-   ```
-
-   Important: the PAT is never written to disk, environment variables, or committed files. It lives only in Key Vault and is retrieved at agent runtime via managed identity.
-
-3. **Create Azure AI Foundry project**
+2. **Create Azure AI Foundry project**
 
    ```pwsh
    az cognitiveservices account create `
@@ -547,10 +539,9 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --location $location `
      --yes
    ```
-
    Record the endpoint: `az cognitiveservices account show --name "cog-doccopilot-dev" -g $rg --query "properties.endpoint" -o tsv`
 
-4. **Deploy deepseek-v4-flash model**
+3. **Deploy deepseek-v4-flash model**
 
    ```pwsh
    az cognitiveservices account deployment create `
@@ -563,10 +554,9 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --sku-capacity 1 `
      --sku-name "GlobalStandard"
    ```
-
    Verify: `az cognitiveservices account deployment show --name "cog-doccopilot-dev" -g $rg --deployment-name "deepseek-v4-flash" --query "properties.provisioningState" -o tsv` → `Succeeded`
 
-5. **Grant the deployment contributor access to the Foundry project**
+4. **Grant the deployment contributor access to the Foundry project**
 
    ```pwsh
    $projectId = az cognitiveservices account show --name "cog-doccopilot-dev" -g $rg --query id -o tsv
@@ -576,42 +566,112 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --scope $projectId
    ```
 
-6. **Configure Key Vault access policy for the agent's managed identity**  
-   (Run after Phase 6, once the agent's system-assigned managed identity exists)
+5. **Deploy the agent to Foundry** (see Phase 6 for the full azd journey)
+   Run this now to create the platform-assigned managed identity:
+   ```pwsh
+   azd provision
+   azd deploy
+   ```
 
+   After deployment completes, retrieve the agent's managed identity object ID:
    ```pwsh
    $agentPrincipalId = az resource show `
      --resource-group $rg `
      --name "documentation-copilot" `
      --resource-type "Microsoft.CognitiveServices/accounts/agents" `
      --query "identity.principalId" -o tsv
+   Write-Output "Agent managed identity: $agentPrincipalId"
+   ```
+
+6. **Add the managed identity to Azure DevOps** (performed by a Project Collection Administrator)
+
+   The platform-assigned managed identity must be added as a user in Azure DevOps to obtain access tokens. This is done through the Azure DevOps portal or the `ServicePrincipalEntitlements` REST API.
+
+   **Portal method:**
+   - Navigate to Organization Settings → Users → Add users
+   - Search for the managed identity by its display name (derived from the Foundry agent resource name) or by pasting the object ID
+   - Assign access level: **Basic** (required for API access; Stakeholder does not grant repository or API permissions)
+   - Assign project access: select the target project(s) with **Wiki Read & Write** permissions
+   - Complete the invitation
+
+   **Programmatic method** (repeatable for CI/CD):
+
+   ```pwsh
+   # Requires PAT of the PCA for this call only (or delegated Entra token)
+   $pat = Read-Host -AsSecureString "Enter PCA PAT"
+   $base64Pat = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(":$pat"))
+
+   $body = @{
+      principal = @{
+         displayName = "doc-copilot-agent"
+         originId = $agentPrincipalId
+         principalType = "application"
+      }
+   } | ConvertTo-Json
+
+   Invoke-RestMethod -Uri "https://vsaex.dev.azure.com/{org}/_apis/ServicePrincipalEntitlements?api-version=7.1-preview.1" `
+     -Method Post `
+     -ContentType "application/json" `
+     -Headers @{Authorization = "Basic $base64Pat"} `
+     -Body $body
+   ```
+
+7. **Grant Wiki Write permission** in Azure DevOps
+
+   By default, new users (including service principals) get the same permissions as project contributors. If stricter Wiki permissions are needed:
+   - Navigate to Project Settings → Repositories → Wiki
+   - Add the managed identity with **Contribute** and **Edit wiki pages** permissions
+   - Or use the Azure DevOps CLI or REST API for programmatic assignment
+
+8. **Configure Key Vault access policy for the agent's managed identity**  
+   Grant the managed identity access to read the PAT secret (used as fallback during local development):
+
+   ```pwsh
    az keyvault set-policy --name $kvName --object-id $agentPrincipalId --secret-permissions get list
    ```
 
-7. **Set environment variables for local development** (temporary — Key Vault is used at runtime)
-   Create `.env` (do NOT commit):
+9. **(Local development only) Store the Azure DevOps PAT in Key Vault**
 
-   ```
-   AZURE_AI_PROJECT_ENDPOINT=https://cog-doccopilot-dev.cognitiveservices.azure.com/
-   AZURE_AI_CHAT_DEPLOYMENT=deepseek-v4-flash
-   AZURE_DEVOPS_ORG_URL=https://dev.azure.com/myorg
-   AZURE_DEVOPS_PROJECT=myproject
-   AZURE_DEVOPS_WIKI_ID=myproject.wiki
-   TARGET_REPO_ROOT=C:\Repo\vsCode
-   ```
-
-   Add `.env` to `.gitignore` if not already present.
-
-8. **Verify Azure connectivity**
+   Skip this step for production deployments — the managed identity path is the production mechanism. For local development (running outside Foundry, e.g. from a developer workstation), create a PAT:
 
    ```pwsh
-   $env:AZURE_AI_PROJECT_ENDPOINT = "<from-above>"
-   python -c "from src.foundry.project_client import list_deployment_names; from src.config import AppConfig; c=AppConfig.from_env(); print(list_deployment_names(c))"
+   $pat = Read-Host -AsSecureString "Enter Azure DevOps PAT (Wiki Read & Write scope)"
+   az keyvault secret set --vault-name $kvName --name "AzureDevOpsPat" --value $pat
    ```
 
-   Expected: the output includes `deepseek-v4-flash`.
+   The PAT is never written to disk, environment variables, or committed files. It lives only in Key Vault.
 
-**Verification gate:** Azure resources exist, deepseek-v4-flash responds to API calls, Key Vault holds the PAT, local env vars point to real resources.
+10. **Set environment variables for local development**
+
+    Create `.env` (do NOT commit):
+
+    ```env
+    AZURE_AI_PROJECT_ENDPOINT=https://cog-doccopilot-dev.cognitiveservices.azure.com/
+    AZURE_AI_CHAT_DEPLOYMENT=deepseek-v4-flash
+    AZURE_DEVOPS_ORG_URL=https://dev.azure.com/myorg
+    AZURE_DEVOPS_PROJECT=myproject
+    AZURE_DEVOPS_WIKI_ID=myproject.wiki
+    TARGET_REPO_ROOT=C:\Repo\vsCode
+    ```
+
+    Add `.env` to `.gitignore` if not already present.
+
+11. **Verify Azure connectivity**
+
+    ```pwsh
+    $env:AZURE_AI_PROJECT_ENDPOINT = "<from-above>"
+    python -c "from src.foundry.project_client import list_deployment_names; from src.config import AppConfig; c=AppConfig.from_env(); print(list_deployment_names(c))"
+    ```
+    Expected: the output includes `deepseek-v4-flash`.
+
+**Authentication architecture note:** The Python connector (`src/ado/auth.py`) implements a two-tier auth strategy:
+- **Runtime (in Foundry):** `DefaultAzureCredential()` acquires a Bearer token for scope `https://app.vssps.visualstudio.com/.default`. The platform-assigned managed identity is automatically picked up — no secrets needed.
+- **Local development:** Falls back to PAT-based Basic auth (fetched from Key Vault or `AZURE_DEVOPS_PAT` environment variable) when no managed identity is available.
+- The REST API calls in `src/ado/client.py` use `Authorization: Bearer {token}` when a Bearer token is available, falling back to `Authorization: Basic {base64pat}` otherwise.
+
+This follows Microsoft's [official guidance for service principal and managed identity authentication in Azure DevOps](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops).
+
+**Verification gate:** Azure resources exist, deepseek-v4-flash responds to API calls, the managed identity is added to Azure DevOps with Wiki Write permissions, the Key Vault access policy is configured, and local env vars point to real resources.
 
 ---
 
