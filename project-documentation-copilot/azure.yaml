@@ -1,51 +1,19 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 
-name: project-documentation-copilot
+requiredVersions:
+    extensions:
+        azure.ai.agents: '>=0.1.0-preview'
+name: documentation-copilot
 services:
-    documentation-copilot:
-        project: src/documentation-copilot
+    project-documentation-copilot:
+        project: ./src
         host: azure.ai.agent
-        language: docker
-        docker:
-            remoteBuild: true
+        language: python
         config:
             container:
                 resources:
                     cpu: "0.5"
                     memory: 1Gi
-            deployments:
-                - model:
-                    format: OpenAI
-                    name: gpt-4o-mini
-                    version: "2024-07-18"
-                  name: gpt-4o-mini
-                  sku:
-                    capacity: 10
-                    name: GlobalStandard
-            startupCommand: python main.py
-hooks:
-    postprovision:
-        windows:
-            name: postprovision
-            kind: pwsh
-            shell: pwsh
-            run: |
-                Write-Host "Provisioning complete. Upload skills and publish toolbox:"
-                Write-Host "  azd ai skill create wiki-authoring --file ./skills/wiki-authoring/SKILL.md --no-prompt"
-                Write-Host "  azd ai skill create code-analysis --file ./skills/code-analysis/SKILL.md --no-prompt"
-                Write-Host "  azd ai toolbox publish"
-            interactive: true
-skills:
-    - file: skills/wiki-authoring/SKILL.md
-      name: wiki-authoring
-    - file: skills/code-analysis/SKILL.md
-      name: code-analysis
-toolbox:
-    name: documentation-toolbox
-    servers:
-        - manifest: mcp/code-scanner/manifest.json
-          name: code-scanner
-        - manifest: mcp/wiki-publisher/manifest.json
-          name: wiki-publisher
-        - manifest: mcp/diagram-generator/manifest.json
-          name: diagram-generator
+infra:
+    provider: bicep
+    path: ./infra

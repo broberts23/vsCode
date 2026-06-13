@@ -534,15 +534,17 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
 **Steps:**
 
-1. **Create resource group and Key Vault**
+1. **Create resource group**
 
    ```pwsh
    $rg = "rg-documentation-copilot-dev"
-   $location = "eastus2"
+   $location = "westus3"
    $kvName = "kv-doccopilot-dev"
    az group create --name $rg --location $location
-   az keyvault create --name $kvName --resource-group $rg --location $location --sku Standard
    ```
+
+   ```pwsh
+   az acr create --resource-group $rg --name "cogdoccopilotdev" --sku Basic --location $location
 
 2. **Create Azure AI Foundry project**
 
@@ -556,6 +558,14 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --yes
    ```
 
+   ```pwsh
+   az cognitiveservices account project create `
+    --resource-group $rg `
+    --name "cog-doccopilot-dev" `
+    --project-name "cog-doccopilot-dev" `
+    --location $location
+   ```
+
    Record the endpoint: `az cognitiveservices account show --name "cog-doccopilot-dev" -g $rg --query "properties.endpoint" -o tsv`
 
 3. **Deploy deepseek-v4-flash model**
@@ -564,11 +574,11 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
    az cognitiveservices account deployment create `
      --name "cog-doccopilot-dev" `
      -g $rg `
-     --deployment-name "deepseek-v4-flash" `
+     --deployment-name "DeepSeek-V4-Flash" `
      --model-name "DeepSeek-V4-Flash" `
-     --model-version "1" `
      --model-format "DeepSeek" `
-     --sku-capacity 1 `
+     --model-version "2026-04-23" `
+     --capacity 1 `
      --sku-name "GlobalStandard"
    ```
 
@@ -579,7 +589,7 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
    ```pwsh
    $projectId = az cognitiveservices account show --name "cog-doccopilot-dev" -g $rg --query id -o tsv
    az role assignment create `
-     --assignee <your-user-object-id> `
+     --assignee '<your-user-object-id> '`
      --role "Cognitive Services OpenAI User" `
      --scope $projectId
    ```
@@ -588,18 +598,26 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
    Run this now to create the platform-assigned managed identity. The `azd ai agent init` command requires an **AgentManifest template** (with `template:` and `resources:` fields), not our local deployment manifest. Use the official Foundry sample URL (same approach as the v2 template):
 
    ```pwsh
-   # Step 5a — Register the agent with Foundry using the official sample template
    azd ai agent init `
      -m "https://github.com/microsoft-foundry/foundry-samples/blob/main/samples/python/hosted-agents/agent-framework/responses/01-basic/agent.manifest.yaml"
    ```
 
+   ```pwsh
+   azd ai agent init --no-prompt `
+   --project-id '/subscriptions/34a28ea2-9908-48d1-b391-89bc6a0c1102/resourceGroups/rg-documentation-copilot-dev/providers/Microsoft.CognitiveServices/accounts/cog-doccopilot-dev-resource/projects/cog-doccopilot-dev' `
+   --deploy-mode code `
+   --runtime python_3_13 `
+   --entry-point main.py
+   ```
+
    During the interactive prompts, you will be asked for an **Azure Container Registry (ACR)** login server:
 
-   ```
+   ```text
    ? Enter your ACR login server (e.g., myregistry.azurecr.io), or leave blank to create a new one:
    ```
 
    - **Use an existing ACR:** Enter the login server name of an ACR already in your subscription.
+   - **Container Registry RBAC** Ensure the managed identity of the Foundry project has AcrPull permissions on the ACR. If not, assign them using Azure CLI or the portal.
    - **Create a new one:** Leave blank; `azd` automatically provisions a new ACR during `azd provision`.
 
    After `azd ai agent init` completes, replace the generated files with our project's versions:
@@ -617,24 +635,14 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
    If `azd ai agent init` has already been run previously, you can skip to `azd provision && azd deploy`.
 
-   After deployment completes, retrieve the agent's managed identity object ID:
-
-   ```pwsh
-   $agentPrincipalId = az resource show `
-     --resource-group $rg `
-     --name "documentation-copilot" `
-     --resource-type "Microsoft.CognitiveServices/accounts/agents" `
-     --query "identity.principalId" -o tsv
-   Write-Output "Agent managed identity: $agentPrincipalId"
-   ```
-
 6. **Add the managed identity to Azure DevOps** (performed by a Project Collection Administrator)
 
    The platform-assigned managed identity must be added as a user in Azure DevOps to obtain access tokens. This is done through the Azure DevOps portal or the `ServicePrincipalEntitlements` REST API.
 
    **Portal method:**
    - Navigate to Organization Settings → Users → Add users
-   - Search for the managed identity by its display name (derived from the Foundry agent resource name) or by pasting the object ID
+   - **Search for the managed identity by its display name** (derived from the Foundry agent resource name) or by pasting the object ID
+      - (this is very important, adding the managed identity as the object ID does not work)
    - Assign access level: **Basic** (required for API access; Stakeholder does not grant repository or API permissions)
    - Assign project access: select the target project(s) with **Wiki Read & Write** permissions
    - Complete the invitation
