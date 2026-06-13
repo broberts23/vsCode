@@ -548,6 +548,10 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
 2. **Create Azure AI Foundry project**
 
+   A Foundry project is a sub-resource of a Cognitive Services account. Two steps are required: create the account with a custom domain, then create the project under it.
+
+   **2a — Create the Cognitive Services account with `CustomSubDomainName`** (required before projects can be created):
+
    ```pwsh
    az cognitiveservices account create `
      --name "cog-doccopilot-dev" `
@@ -555,18 +559,27 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --kind "AIServices" `
      --sku S0 `
      --location $location `
+     --custom-domain "cog-doccopilot-dev01" `
      --yes
    ```
 
+   The `--custom-domain` flag sets the `CustomSubDomainName` property on the account. Without it, `az cognitiveservices account project create` fails with `BadRequest: Account must set CustomSubDomainName before creating projects.`
+
+   Record the account endpoint: `az cognitiveservices account show --name "cog-doccopilot-dev" -g $rg --query "properties.endpoint" -o tsv`
+
+   **2b — Create the Foundry project under the account:**
+
    ```pwsh
    az cognitiveservices account project create `
-    --resource-group $rg `
-    --name "cog-doccopilot-dev" `
-    --project-name "cog-doccopilot-dev" `
-    --location $location
+     --resource-group $rg `
+     --name "cog-doccopilot-dev" `
+     --project-name "doccopilot" `
+     --location $location `
+     --display-name "Documentation Copilot" `
+     --description "Foundry project for the Documentation Copilot agent"
    ```
 
-   Record the endpoint: `az cognitiveservices account show --name "cog-doccopilot-dev" -g $rg --query "properties.endpoint" -o tsv`
+   The project name (`doccopilot`) is distinct from the account name and is used in resource IDs of the form `/subscriptions/.../accounts/cog-doccopilot-dev/projects/doccopilot`. This is the value passed to `--project-id` in step 5.
 
 3. **Deploy deepseek-v4-flash model**
 
@@ -594,21 +607,40 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --scope $projectId
    ```
 
-5. **Deploy the agent to Foundry** (see Phase 6 for the full azd journey)
-   Run this now to create the platform-assigned managed identity. The `azd ai agent init` command requires an **AgentManifest template** (with `template:` and `resources:` fields), not our local deployment manifest. Use the official Foundry sample URL (same approach as the v2 template):
+5. **Register the agent with an existing Foundry project**
+   Run this now to create the platform-assigned managed identity. The `azd ai agent init` command requires an **AgentManifest template** (with `template:` and `resources:` fields), not our local deployment manifest. Use the official Foundry sample URL (same approach as the v2 template) and pass the **existing Foundry project resource ID** via `--project-id` to skip project creation:
+
+   First, get the Foundry project resource ID (the project created in step 2b — the path must end in `/projects/{name}`):
+
+   ```pwsh
+   $projectResourceId = az cognitiveservices account project show `
+     --name "cog-doccopilot-dev" `
+     -g $rg `
+     --project-name "doccopilot" `
+     --query id -o tsv
+   Write-Output "Project resource ID: $projectResourceId"
+   # Expected format: /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/cog-doccopilot-dev/projects/doccopilot
+   ```
+
+   Then register the agent against that existing project:
 
    ```pwsh
    azd ai agent init `
-     -m "https://github.com/microsoft-foundry/foundry-samples/blob/main/samples/python/hosted-agents/agent-framework/responses/01-basic/agent.manifest.yaml"
+     -m "https://github.com/microsoft-foundry/foundry-samples/blob/main/samples/python/hosted-agents/agent-framework/responses/01-basic/agent.manifest.yaml" `
+     --project-id $projectResourceId `
+     --deploy-mode code `
+     --runtime python_3_13 `
+     --entry-point main.py `
+     --agent-name "documentation-copilot" 
    ```
 
-   ```pwsh
+   <!-- ```pwsh
    azd ai agent init --no-prompt `
    --project-id '<your-foundry-project-id>' `
    --deploy-mode code `
    --runtime python_3_13 `
    --entry-point main.py
-   ```
+   ``` -->
 
    During the interactive prompts, you will be asked for an **Azure Container Registry (ACR)** login server:
 

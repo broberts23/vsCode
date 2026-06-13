@@ -1,9 +1,0 @@
-kind: hosted
-name: project-documentation-copilot
-protocols:
-    - protocol: responses
-      version: 1.0.0
-code_configuration:
-    runtime: python_3_13
-    entry_point: main.py
-    dependency_resolution: remote_build
