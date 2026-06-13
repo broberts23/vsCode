@@ -94,6 +94,8 @@ Rather than extend the official MCP server (which would require upstream contrib
 
 The scaffold originally used a Personal Access Token (PAT) stored in Key Vault for Azure DevOps API authentication. Production deployments should instead use the **agent's platform-assigned managed identity** with Microsoft Entra ID Bearer tokens — eliminating long-lived secrets entirely.
 
+The agents idenity is automatically registered in entra when when teh agent is deployed to Foundry. The agent's identity can be granted access to Azure DevOps directly, without any shared secret.
+
 The Foundry Hosted Agent runs as its own **platform-assigned managed identity** ([documented in the Foundry agent deployment guide](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/deploy-hosted-agent-code?tabs=python#required-permissions)). That identity can be granted access to Azure DevOps directly, without any shared secret.
 
 **Steps to enable:**

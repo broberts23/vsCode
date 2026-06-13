@@ -604,7 +604,7 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
    ```pwsh
    azd ai agent init --no-prompt `
-   --project-id '/subscriptions/34a28ea2-9908-48d1-b391-89bc6a0c1102/resourceGroups/rg-documentation-copilot-dev/providers/Microsoft.CognitiveServices/accounts/cog-doccopilot-dev-resource/projects/cog-doccopilot-dev' `
+   --project-id '<your-foundry-project-id>' `
    --deploy-mode code `
    --runtime python_3_13 `
    --entry-point main.py
