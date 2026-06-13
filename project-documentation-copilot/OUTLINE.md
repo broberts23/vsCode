@@ -539,6 +539,7 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --location $location `
      --yes
    ```
+
    Record the endpoint: `az cognitiveservices account show --name "cog-doccopilot-dev" -g $rg --query "properties.endpoint" -o tsv`
 
 3. **Deploy deepseek-v4-flash model**
@@ -554,6 +555,7 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --sku-capacity 1 `
      --sku-name "GlobalStandard"
    ```
+
    Verify: `az cognitiveservices account deployment show --name "cog-doccopilot-dev" -g $rg --deployment-name "deepseek-v4-flash" --query "properties.provisioningState" -o tsv` → `Succeeded`
 
 4. **Grant the deployment contributor access to the Foundry project**
@@ -567,13 +569,32 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
    ```
 
 5. **Deploy the agent to Foundry** (see Phase 6 for the full azd journey)
-   Run this now to create the platform-assigned managed identity:
+   Run this now to create the platform-assigned managed identity. The `azd ai agent init` command requires an **AgentManifest template** (with `template:` and `resources:` fields), not our local deployment manifest. Use the official Foundry sample URL (same approach as the v2 template):
+
    ```pwsh
+   # Step 5a — Register the agent with Foundry using the official sample template
+   azd ai agent init `
+     -m "https://github.com/microsoft-foundry/foundry-samples/blob/main/samples/python/hosted-agents/agent-framework/responses/01-basic/agent.manifest.yaml" 
+
+   
+
+   After `azd ai agent init` completes, replace the generated files with our project's versions:
+   - Replace `agents/documentation-copilot/main.py` with the scaffolded version
+   - Replace `agents/documentation-copilot/agent.manifest.yaml` with the deployment manifest (the `-m` template is only for scaffolding)
+   - Update `azure.yaml` to include the `toolbox:` and `skills:` blocks
+
+   ```pwsh
+   # Step 5b — Provision infrastructure (creates Foundry agent resource + tags)
    azd provision
+
+   # Step 5c — Deploy agent code
    azd deploy
    ```
 
+   If `azd ai agent init` has already been run previously, you can skip to `azd provision && azd deploy`.
+
    After deployment completes, retrieve the agent's managed identity object ID:
+
    ```pwsh
    $agentPrincipalId = az resource show `
      --resource-group $rg `
@@ -662,9 +683,11 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
     $env:AZURE_AI_PROJECT_ENDPOINT = "<from-above>"
     python -c "from src.foundry.project_client import list_deployment_names; from src.config import AppConfig; c=AppConfig.from_env(); print(list_deployment_names(c))"
     ```
+
     Expected: the output includes `deepseek-v4-flash`.
 
 **Authentication architecture note:** The Python connector (`src/ado/auth.py`) implements a two-tier auth strategy:
+
 - **Runtime (in Foundry):** `DefaultAzureCredential()` acquires a Bearer token for scope `https://app.vssps.visualstudio.com/.default`. The platform-assigned managed identity is automatically picked up — no secrets needed.
 - **Local development:** Falls back to PAT-based Basic auth (fetched from Key Vault or `AZURE_DEVOPS_PAT` environment variable) when no managed identity is available.
 - The REST API calls in `src/ado/client.py` use `Authorization: Bearer {token}` when a Bearer token is available, falling back to `Authorization: Basic {base64pat}` otherwise.
