@@ -530,11 +530,7 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
    $location = "westus3"
    $kvName = "kv-doccopilot-dev"
    az group create --name $rg --location $location
-   ```
-
-   ```pwsh
-   az acr create --resource-group $rg --name "cogdoccopilotdev" --sku Basic --location $location
-
+ 
 2. **Create Azure AI Foundry project**
 
    A Foundry project is a sub-resource of a Cognitive Services account. Two steps are required: create the account with a custom domain, then create the project under it.
@@ -622,24 +618,6 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --entry-point main.py `
      --agent-name "documentation-copilot" 
    ```
-
-   <!-- ```pwsh
-   azd ai agent init --no-prompt `
-   --project-id '<your-foundry-project-id>' `
-   --deploy-mode code `
-   --runtime python_3_13 `
-   --entry-point main.py
-   ``` -->
-
-   During the interactive prompts, you will be asked for an **Azure Container Registry (ACR)** login server:
-
-   ```text
-   ? Enter your ACR login server (e.g., myregistry.azurecr.io), or leave blank to create a new one:
-   ```
-
-   - **Use an existing ACR:** Enter the login server name of an ACR already in your subscription.
-   - **Container Registry RBAC** Ensure the managed identity of the Foundry project has AcrPull permissions on the ACR. If not, assign them using Azure CLI or the portal.
-   - **Create a new one:** Leave blank; `azd` automatically provisions a new ACR during `azd provision`.
 
    After `azd ai agent init` completes, replace the generated files with our project's versions:
    - Replace `agents/documentation-copilot/main.py` with the scaffolded version

@@ -19,14 +19,10 @@ azd ext install microsoft.foundry
 azd ext install azure.ai.skills
 ```
 
-- **Azure Container Registry (ACR):** Foundry Hosted Agents require an ACR to store container images before deployment. You can either provide an existing ACR login server during `azd ai agent init`, or leave blank to have `azd` provision one automatically.
-
 ## Step 1 — Scaffold the Agent
 
 ```pwsh
 azd ai agent init -m "https://github.com/microsoft-foundry/foundry-samples/blob/main/samples/python/hosted-agents/agent-framework/responses/01-basic/agent.manifest.yaml"
-
-# When prompted, provide your ACR login server or leave blank to create a new one
 ```
 
 After init completes:
@@ -44,9 +40,7 @@ Replace the generated `main.py` with `agents/documentation-copilot/main.py`.
 azd provision
 ```
 
-Creates: resource group, Foundry project, deepseek-v4-flash deployment, Azure Container Registry (ACR), Log Analytics, managed identities.
-
-If you left the ACR prompt blank during init, `azd` provisions a new ACR automatically here.
+Creates: resource group, Foundry project, deepseek-v4-flash deployment, Log Analytics, managed identities.
 
 ## Step 3 — Upload Skills
 
@@ -130,8 +124,6 @@ azd down
 | `SubscriptionNotRegistered` | `az provider register -n Microsoft.CognitiveServices` |
 | `AuthorizationFailed` | Request Contributor at resource group scope |
 | `AuthenticationError` | `azd auth logout && azd auth login` |
-| ACR login prompt during init | Must provide existing ACR login server or leave blank for auto-provision |
-| `AcrPullUnauthorized` during deploy | Grant **AcrPull** role to the project managed identity on the Container Registry |
 | deepseek-v4-flash not found | Verify model is available in selected region (Global Standard) |
 | Agent `failed` | Check `error.message` — typically pip resolution issue |
 | 401 from DevOps API | Verify `AZURE_DEVOPS_PAT` is set and has Wiki scope |

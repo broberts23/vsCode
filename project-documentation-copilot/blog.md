@@ -392,7 +392,7 @@ Replace the generated `main.py` with `agents/documentation-copilot/main.py` and 
 azd provision
 ```
 
-Creates the resource group, Foundry project, deepseek-v4-flash deployment, Container Registry, Log Analytics workspace, and Application Insights instance.
+Creates the resource group, Foundry project, deepseek-v4-flash deployment, Log Analytics workspace, and Application Insights instance.
 
 Deployment verification:
 

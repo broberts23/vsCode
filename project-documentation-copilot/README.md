@@ -27,7 +27,7 @@ Result:    A new wiki page at API-Reference/calculate_total/calculator with:
 | **Wiki generation** | Structured pipeline: code metadata → LLM prose → formatted markdown |
 | **Diagram generation** | Mermaid DSL (class diagrams, sequence diagrams, flowcharts) |
 | **Wiki publishing** | Azure DevOps REST API v7.1 with Bearer token (managed identity) or PAT auth |
-| **Deployment** | Foundry Hosted Agent via `azd` (source-code deployment); requires Azure Container Registry (ACR) |
+| **Deployment** | Foundry Hosted Agent via `azd` (source-code deployment) |
 | **Observability** | Provenance recorder + Application Insights |
 
 ## Repository layout
