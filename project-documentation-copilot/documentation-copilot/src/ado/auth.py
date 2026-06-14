@@ -100,13 +100,14 @@ class ServicePrincipalAuth(requests.auth.AuthBase):
         self.scope = scope
         self._cache = _TokenCache()
         self._kv_credential: object | None = None
+        self._secret_client: object | None = None
         self._tenant_id: str | None = None
         self._client_id: str | None = None
         self._client_secret: str | None = None
 
     def _ensure_secret_client(self):
-        if self._kv_credential is not None:
-            return self._kv_credential
+        if self._secret_client is not None:
+            return self._secret_client
         from azure.identity import DefaultAzureCredential
         from azure.keyvault.secrets import SecretClient
 
@@ -117,26 +118,43 @@ class ServicePrincipalAuth(requests.auth.AuthBase):
                 'environment variable pointing to the vault that holds the '
                 'AdoServicePrincipal* secrets.'
             )
+        logger.info('ServicePrincipalAuth: using Key Vault %s', vault_url)
         self._kv_credential = DefaultAzureCredential()
         self._secret_client = SecretClient(
             vault_url=vault_url, credential=self._kv_credential)
-        return self._kv_credential
+        return self._secret_client
 
     def _load_credentials(self) -> None:
         if self._client_id and self._client_secret and self._tenant_id:
             return
-        client = self._ensure_secret_client()
-        self._client_id = client.get_secret(KV_SECRET_SP_CLIENT_ID).value
-        self._client_secret = client.get_secret(KV_SECRET_SP_CLIENT_SECRET).value
+        secret_client = self._ensure_secret_client()
+        try:
+            self._client_id = secret_client.get_secret(
+                KV_SECRET_SP_CLIENT_ID).value
+            self._client_secret = secret_client.get_secret(
+                KV_SECRET_SP_CLIENT_SECRET).value
+        except Exception as exc:
+            vault_url = _key_vault_url() or '<unknown>'
+            raise RuntimeError(
+                f'Failed to load service principal secrets from Key Vault '
+                f'{vault_url}. Required secrets: {KV_SECRET_SP_CLIENT_ID!r}, '
+                f'{KV_SECRET_SP_CLIENT_SECRET!r}. '
+                f'Store them via: '
+                f'az keyvault secret set --vault-name <vault> '
+                f'--name {KV_SECRET_SP_CLIENT_ID} --value <app_id> ; '
+                f'az keyvault secret set --vault-name <vault> '
+                f'--name {KV_SECRET_SP_CLIENT_SECRET} --value <client_secret> '
+                f'Underlying error: {exc}'
+            ) from exc
         # The object ID isn't needed for token acquisition but is logged
         # for diagnostics.
-        _ = client.get_secret(KV_SECRET_SP_OBJECT_ID).value
-        # Tenant ID is required for the token endpoint. Prefer the env var
-        # (always available in Foundry via the azd env), fall back to a
-        # query against Microsoft Graph via the credential.
+        try:
+            _ = secret_client.get_secret(KV_SECRET_SP_OBJECT_ID).value
+        except Exception:
+            pass  # optional
+        # Tenant ID is required for the token endpoint.
         self._tenant_id = os.environ.get('AZURE_TENANT_ID')
         if not self._tenant_id:
-            from azure.identity import DefaultAzureCredential
             raise RuntimeError(
                 'AZURE_TENANT_ID environment variable is required for the '
                 'service principal auth flow (the OAuth 2.0 token endpoint '
@@ -219,8 +237,9 @@ def _try_service_principal_token(scope: str) -> str | None:
 
     Returns the token, or None if the service principal is not configured
     (no Key Vault, missing secrets, missing tenant ID) or the token exchange
-    fails. Failures are logged at DEBUG level — the absence of SP config is
-    expected in local dev, not an error.
+    fails. Failures are logged at INFO level (not DEBUG) so they surface in
+    the agent's operational logs — a silent fall-through to managed identity
+    is a real auth failure, not a diagnostic curiosity.
     """
     try:
         auth = ServicePrincipalAuth(scope=scope)
@@ -228,7 +247,10 @@ def _try_service_principal_token(scope: str) -> str | None:
         auth._refresh()
         return auth._cache.token
     except Exception as exc:
-        logger.debug('Service principal token acquisition not available: %s', exc)
+        logger.warning(
+            'Service principal token acquisition failed (will fall back to '
+            'managed identity): %s', exc,
+        )
         return None
 
 
