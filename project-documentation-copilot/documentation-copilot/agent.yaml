@@ -20,6 +20,18 @@ resources:
 environment_variables:
     - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
       value: DeepSeek-V4-Flash
+    - name: AZURE_AI_PROJECT_ENDPOINT
+      value: ${AZURE_AI_PROJECT_ENDPOINT}
+    - name: AZURE_DEVOPS_ORG_URL
+      value: ${AZURE_DEVOPS_ORG_URL}
+    - name: AZURE_DEVOPS_PROJECT
+      value: ${AZURE_DEVOPS_PROJECT}
+    - name: AZURE_DEVOPS_WIKI_ID
+      value: ${AZURE_DEVOPS_WIKI_ID}
+    - name: AZURE_DEVOPS_PAT
+      value: ${AZURE_DEVOPS_PAT}
+    - name: TARGET_REPO_ROOT
+      value: ${TARGET_REPO_ROOT}
 code_configuration:
     runtime: python_3_13
     entry_point: main.py

@@ -57,9 +57,13 @@ class AdoWikiClient:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
-            logger.error('Wiki API error for %s: %s', path, exc)
+            logger.error('Wiki API error for %s: %s | body: %s', path, exc, response.text[:500])
             return None
-        data = response.json()
+        try:
+            data = response.json()
+        except (ValueError, requests.exceptions.JSONDecodeError) as exc:
+            logger.error('Wiki API returned non-JSON for %s: %s | body: %s', path, exc, response.text[:500])
+            return None
         return WikiPage(
             path=path,
             content=data.get('content', ''),

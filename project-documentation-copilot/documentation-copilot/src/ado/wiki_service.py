@@ -74,7 +74,12 @@ def _ensure_ancestor_pages(client: AdoWikiClient, leaf_path: str) -> None:
     parts = leaf_path.strip('/').split('/')
     for i in range(1, len(parts)):
         ancestor_path = '/' + '/'.join(parts[:i])
-        if client.get_page(ancestor_path) is not None:
+        try:
+            existing = client.get_page(ancestor_path)
+        except Exception as exc:
+            logger.error('Unexpected error checking ancestor %s: %s', ancestor_path, exc)
+            continue
+        if existing is not None:
             continue
         title = parts[i - 1]
         content = (
