@@ -1207,67 +1207,22 @@ This follows Microsoft's [official guidance for service principal and managed id
 
 7. **Publish MCP toolbox**
 
+   The toolbox is declared in `agent.yaml` (in the deployment bundle) as `documentation-toolbox` with three MCP servers. After `azd provision` creates the initial version, publish it as the default:
+
    ```pwsh
-   azd provision
-   azd ai toolbox publish
+   # Confirm the toolbox exists and see its versions
+   azd ai toolbox list
+   azd ai toolbox versions documentation-toolbox
+
+   # Promote the initial version to default
+   azd ai toolbox publish documentation-toolbox 1
    ```
 
+   The `publish` command takes two positional arguments: the toolbox `<name>` and the `<version>` to promote. The error `accepts 2 arg(s), received 0` occurs when the command is run bare without the name and version.
+
+   The initial version is `1`. Subsequent versions are created by `azd ai toolbox connection add/remove` or `azd ai toolbox skill add/remove` and incremented automatically.
+
 **Verification gate:** Agent starts locally and responds to HTTP requests. `azd deploy` completes successfully. `azd ai agent show` reports `Status: active`. Skills are uploaded and visible. Toolbox is published.
-
----
-
-### Phase 6.5 — Deployment bundle mechanics
-
-**Goal:** Document what actually ends up in the deployed agent container, because the deployment model is not obvious from the project layout.
-
-**What `azd ai agent init` produced:**
-
-The init command created a `documentation-copilot/` subdirectory at the project root with this layout:
-
-```text
-documentation-copilot/
-├── azure.yaml                  # azd project manifest (services: documentation-copilot)
-├── infra/                      # Bicep for Foundry project, ACR, identity, etc.
-└── src/
-    └── documentation-copilot/  # ← DEPLOYMENT BUNDLE (zipped by azd deploy)
-        ├── main.py             # HTTP server entry point
-        ├── agent.yaml          # Foundry agent definition (skills, models, env)
-        ├── Dockerfile          # Container build (COPY . user_agent/)
-        ├── requirements.txt    # agent-framework + agent-framework-foundry-hosting
-        ├── .agentignore        # Files excluded from package
-        └── README.md
-```
-
-**Critical alignment: the scaffold's `agents/documentation-copilot/` is NOT the deployment bundle.** The bundle is at `documentation-copilot/src/documentation-copilot/`. The scaffold's `agents/documentation-copilot/main.py` is a reference implementation; the actual deployed `main.py` lives in the bundle.
-
-**Three things must be wired correctly for the deployed agent to work:**
-
-1. **The `src/` library must be reachable from inside the container.**  
-   The bundle's `main.py` does `from src.workflow.provenance import ...`. The `src/` library lives at the project root, not in the bundle. The current `main.py` has a `sys.path` hack that adds the project root — this works locally but breaks in the deployed container because the Dockerfile's `COPY . user_agent/` only copies the bundle. **Fix options:**
-   - **Recommended:** Set `azure.yaml`'s `project:` field to `./` (the project root) so `azd deploy` packages everything including `src/`. Update `agent.yaml`'s `main.py` to use the project root as its CWD.
-   - **Alternative:** Add a pre-deploy step that copies `src/` into the bundle directory:
-     ```pwsh
-     xcopy /E /I /Y src documentation-copilot\src\documentation-copilot\src
-     ```
-   - **Alternative:** Build `src/` as a wheel, add `pip install ./src` to the bundle's `requirements.txt`, and rename imports to a proper package.
-
-2. **Skills are uploaded to the Foundry registry, not bundled.**  
-   The `skills/` folder at the project root is NOT included in the deployment package. The `SKILL.md` files are uploaded via `azd ai skill create` to the project-level skill registry. The bundle's `agent.yaml` `skills:` block binds skills to the agent by name. The `file:` paths in `agent.yaml` are informational metadata for the local repo, not the runtime source of skill content.
-
-3. **Environment variables are wired through `azure.yaml` → `agent.yaml`.**  
-   The `azure.yaml` `config.deployments` block tells Foundry which model deployments to create (deepseek-v4-flash). The `agent.yaml` `environment_variables` block declares the runtime env vars (`AZURE_AI_MODEL_DEPLOYMENT_NAME` etc.). Application-specific vars (`AZURE_AI_PROJECT_ENDPOINT`, `AZURE_DEVOPS_ORG_URL`, etc.) must be added to `agent.yaml` `environment_variables` for the deployed agent to access them — they are not in the current scaffold-generated `agent.yaml`.
-
-**Updating the bundle after code changes:**
-
-Since the scaffold's `main.py` may change during development, the bundle's `main.py` must be kept in sync. The simplest workflow:
-
-```pwsh
-# After editing agents/documentation-copilot/main.py:
-copy /Y agents\documentation-copilot\main.py documentation-copilot\src\documentation-copilot\main.py
-azd deploy
-```
-
-Or, if the project layout is restructured so the bundle IS the project root (recommended), no copy step is needed — `azd deploy` packages whatever the `project:` field points to.
 
 ---
 
