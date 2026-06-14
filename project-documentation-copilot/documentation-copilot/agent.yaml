@@ -28,8 +28,10 @@ environment_variables:
       value: ${AZURE_DEVOPS_PROJECT}
     - name: AZURE_DEVOPS_WIKI_ID
       value: ${AZURE_DEVOPS_WIKI_ID}
-    - name: AZURE_DEVOPS_PAT
-      value: ${AZURE_DEVOPS_PAT}
+    - name: AZURE_DEVOPS_CLIENT_ID
+      value: ${AZURE_DEVOPS_CLIENT_ID}
+    - name: KEY_VAULT_NAME
+      value: ${KEY_VAULT_NAME}
     - name: TARGET_REPO_ROOT
       value: ${TARGET_REPO_ROOT}
 code_configuration:

@@ -510,9 +510,15 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
 ---
 
-### Phase 1 — Create Azure infrastructure, managed identity, and credentials
+### Phase 1 — Create Azure infrastructure, Key Vault, and service principal
 
-**Goal:** Provision all Azure resources required by the copilot. Configure the agent's platform-assigned managed identity as the primary authentication mechanism to Azure DevOps, with PAT + Key Vault as a local-development fallback.
+**Goal:** Provision all Azure resources required by the copilot. Create a **dedicated service principal (app registration)** for Azure DevOps authentication, store its client secret in Key Vault, and grant the Foundry agent's platform-assigned managed identity RBAC to read the secret. The service principal is added to Azure DevOps as a user (not the platform-assigned identity, which fails with VS403283 when added directly).
+
+**Authentication strategy (three tiers):**
+
+1. **Runtime in Foundry (production):** The agent's platform-assigned managed identity uses `DefaultAzureCredential` to fetch a client secret from Key Vault, then exchanges it for a Microsoft Entra token via the client credentials flow (`client_credentials` grant) for scope `https://app.vssps.visualstudio.com/.default`. The service principal receives Basic-equivalent permissions in Azure DevOps without ever being in the agent's process memory as a long-lived secret.
+2. **Local development (fallback):** Reads `AZURE_DEVOPS_PAT` from the environment (or Key Vault) and uses Basic auth. Used when no managed identity is available (developer workstation).
+3. **Stale secret / auth failure:** The `AdoWikiClient` validates response content type — HTML responses (sign-in page redirects) are treated as authentication failures, not successes.
 
 **Prerequisites:**
 
@@ -521,18 +527,22 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 - Azure Developer CLI 1.25.3+ with `microsoft.foundry` and `azure.ai.skills` extensions
 - An Azure DevOps project with Wiki enabled
 - Microsoft Entra ID tenant connected to the Azure DevOps organization
-- An Azure DevOps Project Collection Administrator to add the managed identity to the organization (step 7 below)
+- An Azure DevOps Project Collection Administrator to add the service principal to the organization (step 8 below)
 
 **Steps:**
 
-1. **Create resource group**
+1. **Create resource group and Key Vault**
+
+   The Key Vault stores the service principal's client secret. The agent's platform-assigned managed identity will be granted RBAC to read it.
 
    ```pwsh
    $rg = "rg-documentation-copilot-dev"
    $location = "westus3"
    $kvName = "kv-doccopilot-dev"
    az group create --name $rg --location $location
- 
+   az keyvault create --name $kvName --resource-group $rg --location $location --sku Standard
+   ```
+
 2. **Create Azure AI Foundry project**
 
    A Foundry project is a sub-resource of a Cognitive Services account. Two steps are required: create the account with a custom domain, then create the project under it.
@@ -608,10 +618,36 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --scope $projectId
    ```
 
-5. **Register the agent with an existing Foundry project**
-   Run this now to create the platform-assigned managed identity. The `azd ai agent init` command requires an **AgentManifest template** (with `template:` and `resources:` fields), not our local deployment manifest. Use the official Foundry sample URL (same approach as the v2 template) and pass the **existing Foundry project resource ID** via `--project-id` to skip project creation:
+5. **Create a dedicated service principal (app registration) for Azure DevOps**
 
-   First, get the Foundry project resource ID (the project created in step 2b — the path must end in `/projects/{name}`):
+   The platform-assigned managed identity from Foundry is not reliably added to Azure DevOps (the `ServicePrincipalEntitlements` API returns `VS403283: could not add user` for many platform-assigned identities). A dedicated service principal with a stable display name, object ID, and client secret is the recommended path per Microsoft's [service principal and managed identity guidance](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops).
+
+   ```pwsh
+   $spDisplayName = "doc-copilot-ado-sp"
+   $app = az ad app create --display-name $spDisplayName --sign-in-audience AzureADMyOrg -o json | ConvertFrom-Json
+   $appId = $app.appId
+   $spId = $app.id
+   Write-Output "App ID (client_id): $appId"
+   Write-Output "Service principal object ID: $spId"
+   ```
+
+   Create a 24-month client secret and store it in Key Vault under a stable name:
+
+   ```pwsh
+   $secretJson = az ad app credential reset --id $appId --display-name "doc-copilot-ado-secret" --years 2 -o json
+   $secretValue = ($secretJson | ConvertFrom-Json).password
+   az keyvault secret set --vault-name $kvName --name "AdoServicePrincipalSecret" --value $secretValue
+   az keyvault secret set --vault-name $kvName --name "AdoServicePrincipalClientId" --value $appId
+   az keyvault secret set --vault-name $kvName --name "AdoServicePrincipalObjectId" --value $spId
+   ```
+
+   The client secret never enters the agent's runtime environment variables — it stays in Key Vault and is fetched on demand.
+
+6. **Register the agent with an existing Foundry project**
+
+   Run this now to create the platform-assigned managed identity that will be granted Key Vault access.
+
+   First, get the Foundry project resource ID:
 
    ```pwsh
    $projectResourceId = az cognitiveservices account project show `
@@ -620,10 +656,9 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --project-name "doccopilot" `
      --query id -o tsv
    Write-Output "Project resource ID: $projectResourceId"
-   # Expected format: /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CognitiveServices/accounts/cog-doccopilot-dev/projects/doccopilot
    ```
 
-   Then register the agent against that existing project:
+   Then register the agent:
 
    ```pwsh
    azd ai agent init `
@@ -632,7 +667,7 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      --deploy-mode code `
      --runtime python_3_13 `
      --entry-point main.py `
-     --agent-name "documentation-copilot" 
+     --agent-name "documentation-copilot"
    ```
 
    After `azd ai agent init` completes, replace the generated files with our project's versions:
@@ -641,26 +676,57 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
    - Update `azure.yaml` to include the `toolbox:` and `skills:` blocks
 
    ```pwsh
-   # Step 5b — Provision infrastructure (creates Foundry agent resource + tags)
+   # Step 6b — Provision infrastructure (creates Foundry agent resource + tags)
    azd provision
 
-   # Step 5c — Deploy agent code
+   # Step 6c — Deploy agent code
    azd deploy
    ```
 
    If `azd ai agent init` has already been run previously, you can skip to `azd provision && azd deploy`.
 
-6. **Add the managed identity to Azure DevOps** (performed by a Project Collection Administrator)
+7. **Grant the agent's managed identity Key Vault RBAC to read the client secret**
 
-   The platform-assigned managed identity must be added as a user in Azure DevOps to obtain access tokens. This is done through the Azure DevOps portal or the `ServicePrincipalEntitlements` REST API.
+   The agent's platform-assigned managed identity needs to read the `AdoServicePrincipalSecret`, `AdoServicePrincipalClientId`, and `AdoServicePrincipalObjectId` secrets from Key Vault. Use Azure RBAC (recommended) or the legacy access policy model.
 
-   **Portal method:**
-   - Navigate to Organization Settings → Users → Add users
-   - **Search for the managed identity by its display name** (derived from the Foundry agent resource name) or by pasting the object ID
-      - (this is very important, adding the managed identity as the object ID does not work)
-   - Assign access level: **Basic** (required for API access; Stakeholder does not grant repository or API permissions)
-   - Assign project access: select the target project(s) with **Wiki Read & Write** permissions
-   - Complete the invitation
+   **Azure RBAC model (preferred):**
+
+   ```pwsh
+   $agentPrincipalId = az resource show `
+     --resource-group $rg `
+     --name "documentation-copilot" `
+     --resource-type "Microsoft.CognitiveServices/accounts/agents" `
+     --query "identity.principalId" -o tsv
+   Write-Output "Agent managed identity: $agentPrincipalId"
+
+   $kvResourceId = az keyvault show --name $kvName -g $rg --query id -o tsv
+
+   az role assignment create `
+     --assignee $agentPrincipalId `
+     --role "Key Vault Secrets User" `
+     --scope $kvResourceId
+   ```
+
+   **Access policy model (fallback if RBAC role is unavailable):**
+
+   ```pwsh
+   az keyvault set-policy --name $kvName --object-id $agentPrincipalId --secret-permissions get list
+   ```
+
+   The `Key Vault Secrets User` role grants `get` and `list` on secrets, which is the minimum required for the agent to fetch the client secret.
+
+8. **Add the service principal to Azure DevOps** (performed by a Project Collection Administrator)
+
+   The dedicated service principal from step 5 is added to Azure DevOps — not the platform-assigned managed identity, which fails with `VS403283`. Use the service principal's object ID from the **Enterprise applications** pane (NOT the App registrations pane) as the `originId`.
+
+   **Portal method (recommended — most forgiving):**
+
+   - Navigate to `https://dev.azure.com/{org}/_admin/_users` (or Organization Settings → Users)
+   - Click **Add users**
+   - Search for `doc-copilot-ado-sp` (the display name from step 5)
+   - Assign access level: **Basic** (required for API access; Stakeholder blocks repository and API access)
+   - Assign project access: select `project-documentation-copilot` with **Wiki Read & Write** permissions
+   - Send the invitation
 
    **Programmatic method** (repeatable for CI/CD):
 
@@ -671,9 +737,9 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
    $body = @{
       principal = @{
-         displayName = "doc-copilot-agent"
-         originId = $agentPrincipalId
-         principalType = "application"
+         displayName = "doc-copilot-ado-sp"
+         originId = $spId
+         principalType = "servicePrincipal"
       }
    } | ConvertTo-Json
 
@@ -684,30 +750,14 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      -Body $body
    ```
 
-7. **Grant Wiki Write permission** in Azure DevOps
+   The `originId` is the service principal's object ID from the **Enterprise applications** pane (`$spId` from step 5). Using the App registration's object ID will fail.
+
+9. **Grant Wiki Write permission** in Azure DevOps
 
    By default, new users (including service principals) get the same permissions as project contributors. If stricter Wiki permissions are needed:
    - Navigate to Project Settings → Repositories → Wiki
-   - Add the managed identity with **Contribute** and **Edit wiki pages** permissions
+   - Add the service principal with **Contribute** and **Edit wiki pages** permissions
    - Or use the Azure DevOps CLI or REST API for programmatic assignment
-
-8. **Configure Key Vault access policy for the agent's managed identity**  
-   Grant the managed identity access to read the PAT secret (used as fallback during local development):
-
-   ```pwsh
-   az keyvault set-policy --name $kvName --object-id $agentPrincipalId --secret-permissions get list
-   ```
-
-9. **(Local development only) Store the Azure DevOps PAT in Key Vault**
-
-   Skip this step for production deployments — the managed identity path is the production mechanism. For local development (running outside Foundry, e.g. from a developer workstation), create a PAT:
-
-   ```pwsh
-   $pat = Read-Host -AsSecureString "Enter Azure DevOps PAT (Wiki Read & Write scope)"
-   az keyvault secret set --vault-name $kvName --name "AzureDevOpsPat" --value $pat
-   ```
-
-   The PAT is never written to disk, environment variables, or committed files. It lives only in Key Vault.
 
 10. **Set environment variables for local development**
 
@@ -719,8 +769,11 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      AZURE_DEVOPS_ORG_URL=https://dev.azure.com/myorg
      AZURE_DEVOPS_PROJECT=myproject
      AZURE_DEVOPS_WIKI_ID=myproject.wiki
+     KEY_VAULT_NAME=kv-doccopilot-dev
      TARGET_REPO_ROOT=C:\Repo\vsCode
      ```
+
+     For local development without a managed identity, also set `AZURE_DEVOPS_PAT` to a PAT with **Wiki Read & Write** scope. In Foundry, this is not set; the agent reads the service principal secret from Key Vault at runtime.
 
      Add `.env` to `.gitignore` if not already present.
 
@@ -730,21 +783,21 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
     $env:AZURE_AI_PROJECT_ENDPOINT = $projectEndpoint
     $env:AZURE_DEVOPS_ORG_URL = "https://dev.azure.com/placeholder"
     $env:AZURE_DEVOPS_PROJECT = "placeholder"
-    $env:AZURE_DEVOPS_PAT = "placeholder"
+    $env:KEY_VAULT_NAME = $kvName
     python -c "from src.foundry.project_client import list_deployment_names; from src.config import AppConfig; c=AppConfig.from_env(); print(list_deployment_names(c))"
     ```
 
     Expected: the output includes `deepseek-v4-flash`. The ADO env vars use placeholder values because this test only checks Foundry connectivity — the ADO connector is tested separately in Phase 4.
 
-**Authentication architecture note:** The Python connector (`src/ado/auth.py`) implements a two-tier auth strategy:
+**Authentication architecture note:** The Python connector (`src/ado/auth.py`) implements a three-tier auth strategy:
 
-- **Runtime (in Foundry):** `DefaultAzureCredential()` acquires a Bearer token for scope `https://app.vssps.visualstudio.com/.default`. The platform-assigned managed identity is automatically picked up — no secrets needed.
-- **Local development:** Falls back to PAT-based Basic auth (fetched from Key Vault or `AZURE_DEVOPS_PAT` environment variable) when no managed identity is available.
-- The REST API calls in `src/ado/client.py` use `Authorization: Bearer {token}` when a Bearer token is available, falling back to `Authorization: Basic {base64pat}` otherwise.
+- **Runtime in Foundry (production):** `DefaultAzureCredential()` acquires a Microsoft Entra token for scope `https://app.vssps.visualstudio.com/.default`. The platform-assigned managed identity is used to read the service principal's client secret from Key Vault, then the agent exchanges that secret for a Microsoft Entra token via the OAuth 2.0 `client_credentials` flow. The resulting Bearer token authenticates REST API calls to Azure DevOps. **No long-lived secrets live in the agent's environment variables** — only the Key Vault reference.
+- **Local development (fallback):** When no managed identity is available, the agent reads `AZURE_DEVOPS_PAT` from the environment or Key Vault and uses Basic auth.
+- **Auth failure detection:** The `AdoWikiClient` validates response content type — HTML responses (sign-in page redirects from 302s) are treated as authentication failures, not silent successes.
 
 This follows Microsoft's [official guidance for service principal and managed identity authentication in Azure DevOps](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/service-principal-managed-identity?view=azure-devops).
 
-**Verification gate:** Azure resources exist, deepseek-v4-flash responds to API calls, the managed identity is added to Azure DevOps with Wiki Write permissions, the Key Vault access policy is configured, and local env vars point to real resources.
+**Verification gate:** Azure resources exist, deepseek-v4-flash responds to API calls, the service principal is created and added to Azure DevOps with Wiki Write permissions, the client secret is in Key Vault, the agent's managed identity has `Key Vault Secrets User` RBAC, and local env vars point to real resources.
 
 ---
 
