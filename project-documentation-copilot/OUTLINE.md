@@ -770,12 +770,32 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      AZURE_DEVOPS_PROJECT=myproject
      AZURE_DEVOPS_WIKI_ID=myproject.wiki
      KEY_VAULT_NAME=kv-doccopilot-dev
+     AZURE_TENANT_ID=00000000-0000-0000-0000-000000000000
      TARGET_REPO_ROOT=C:\Repo\vsCode
      ```
 
      For local development without a managed identity, also set `AZURE_DEVOPS_PAT` to a PAT with **Wiki Read & Write** scope. In Foundry, this is not set; the agent reads the service principal secret from Key Vault at runtime.
 
      Add `.env` to `.gitignore` if not already present.
+
+     **Critical for Foundry deployment:** The env vars `KEY_VAULT_NAME` and `AZURE_TENANT_ID` must also be declared in the `agent.yaml` `environment_variables` block with `${VAR}` substitution. Without them, the agent's runtime has no Key Vault URL or tenant ID, the `_service_principal_configured()` check returns `False`, and the agent falls back to managed identity direct auth (which fails with `VS403283` when added to ADO):
+
+     ```yaml
+     environment_variables:
+         - name: KEY_VAULT_NAME
+           value: ${KEY_VAULT_NAME}
+         - name: AZURE_TENANT_ID
+           value: ${AZURE_TENANT_ID}
+     ```
+
+     Set them via `azd env` so the `${VAR}` substitution has a value to resolve:
+
+     ```pwsh
+     azd env set KEY_VAULT_NAME "kv-doccopilot-dev" --no-prompt
+     azd env set AZURE_TENANT_ID "<your-tenant-id>" --no-prompt
+     ```
+
+     The `KV_SECRET_SP_*` constants (`AdoServicePrincipalClientId`, `AdoServicePrincipalSecret`, `AdoServicePrincipalObjectId`) in `auth.py` are hardcoded names for the secrets stored **inside** Key Vault — they are NOT env vars, so they don't need to be in `agent.yaml` or `azd env`.
 
 11. **Verify Azure connectivity**
 
