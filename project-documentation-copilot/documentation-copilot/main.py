@@ -40,7 +40,8 @@ def handle_request(input_text: str, mode: str = 'auto', scan_data: list[dict[str
        skips local scanning, and goes directly to generation + publishing.
 
     Also detects ``__SCAN__:`` marker in input_text for azd ai agent invoke
-    compatibility (scan data is base64-encoded in the prompt text).
+    compatibility (scan data is base64-encoded in the prompt text) and
+    ``__SCANZ__:`` for gzip-compressed scan data (large modules).
 
     This is the core handler invoked by both the local dev server and the
     Foundry Hosted Agent runtime.
@@ -59,6 +60,21 @@ def handle_request(input_text: str, mode: str = 'auto', scan_data: list[dict[str
             input_text = f'update the wiki for {target_name}'
         except Exception as exc:
             logger.warning('Failed to parse __SCAN__ payload: %s', exc)
+
+    # Detect gzip-compressed inline scan data (for large modules)
+    if input_text.startswith('__SCANZ__:'):
+        import gzip
+        try:
+            payload_raw = input_text[len('__SCANZ__:'):]
+            payload_bytes = base64.b64decode(payload_raw)
+            payload_json = gzip.decompress(payload_bytes)
+            payload = json.loads(payload_json)
+            target_name = payload.get('target', '')
+            scan_data = payload.get('scan_data')
+            mode = payload.get('mode', mode)
+            input_text = f'update the wiki for {target_name}'
+        except Exception as exc:
+            logger.warning('Failed to parse __SCANZ__ payload: %s', exc)
 
     correlation_id = new_correlation_id()
     record_event('agent_request_received', correlation_id,

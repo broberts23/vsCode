@@ -9,6 +9,9 @@ Adapted from the `project-identity-security-copilot-v2` argpattern.
 """
 
 from __future__ import annotations
+from src.workflow.provenance import new_correlation_id, record_event
+from src.security.masking import mask_answer
+from src.config import AppConfig
 
 import argparse
 import logging
@@ -19,9 +22,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config import AppConfig
-from src.security.masking import mask_answer
-from src.workflow.provenance import new_correlation_id, record_event
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,12 +53,14 @@ def main() -> None:
     settings = AppConfig.from_env()
     correlation_id = new_correlation_id()
 
-    record_event('request_received', correlation_id, prompt=args.prompt, mode=args.mode)
+    record_event('request_received', correlation_id,
+                 prompt=args.prompt, mode=args.mode)
 
     target_name = args.target or _extract_target_from_prompt(args.prompt)
 
     if not target_name:
-        logger.warning('No target function/class could be inferred from prompt.')
+        logger.warning(
+            'No target function/class could be inferred from prompt.')
         print(
             'Could not determine a target function or class from your prompt. '
             'Use --target to specify one explicitly.'
@@ -88,7 +90,7 @@ def _extract_target_from_prompt(prompt: str) -> str | None:
 
     patterns = [
         r'(?:wiki\s+for|document(?:\s+the)?|update(?:\s+the)?\s+wiki\s+for|create(?:\s+a)?(?:\s+new)?\s+wiki\s+for)\s+(\w+)',
-        r'(?:scan\s+for|find|lookup|locate)\s+(\w+)',
+        r'(?:scan\s+for|find|lookup|locate)\s+(?:the\s+)?(\w+)(?:\s+(?:function|class))?',
         r'(?:function|class)\s+(\w+)',
         r'(\w+)\s+(?:function|class)',
     ]
@@ -124,7 +126,8 @@ def _handle_scan_only(target_name: str, settings: AppConfig, correlation_id: str
         for cls in mod.classes:
             print(f'  class {cls.name}')
             for method in cls.methods:
-                print(f'    def {method.name}(...) -> {method.return_type or "None"}')
+                print(
+                    f'    def {method.name}(...) -> {method.return_type or "None"}')
 
     print(f'\nFound {len(matching)} matching module(s).')
 
