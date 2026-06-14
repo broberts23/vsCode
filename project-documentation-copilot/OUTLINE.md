@@ -1,10 +1,11 @@
 # Documentation Copilot — Project Outline
 
-> The Documentation Copilot generates Azure DevOps Wiki entries for Python codebases using a **two-tier architecture**. A local CLI (`wikicopilot.py`) scans the developer's repository using Python's `ast` module and packages the extracted metadata as JSON. It sends this data to a **Foundry Hosted Agent** via `azd ai agent invoke` using a base64-encoded `__SCAN__:` protocol. The Foundry agent deserialises the metadata, generates prose descriptions via deepseek-v4-flash, builds Mermaid diagrams, and publishes the structured wiki pages to Azure DevOps Wiki using a service principal that authenticates through Key Vault.
+> The Documentation Copilot generates Azure DevOps Wiki entries for Python codebases using a **two-tier architecture**. A local CLI (`wikicopilot.py`) scans the developer's repository using Python's `ast` module and packages the extracted metadata as JSON. It sends this data to a **Foundry Hosted Agent** via the `azure-ai-projects` Python SDK (`AIProjectClient` → `get_openai_client(agent_name=...)` → `responses.create()` with `extra_body`). The Foundry agent deserialises the metadata, generates prose descriptions via deepseek-v4-flash, builds Mermaid diagrams, and publishes the structured wiki pages to Azure DevOps Wiki using a service principal that authenticates through Key Vault.
 > >
 > > A developer types "update the wiki for `MyFunction`", the CLI scans the locally cloned repository, the Foundry agent handles everything that requires network access: LLM generation, dependency resolution across the full codebase, and Azure DevOps REST API calls. No PAT, Key Vault, or LLM credentials are needed on the developer workstation.
 > >
 > > The two tiers are:
+> >
 > > 1. **Local CLI** (`wikicopilot.py` at project root) — file-system scanning, AST analysis, serialization, prompt routing. Zero network dependencies, runs in milliseconds.
 > > 2. **Foundry Hosted Agent** (`documentation-copilot/main.py`) — deserialisation, prose generation via deepseek-v4-flash, Mermaid diagram building, ADO Wiki REST API publishing with service principal authentication (Key Vault-backed client credentials flow).
 > >
@@ -30,11 +31,16 @@ graph LR
         PROMPT[User Prompt<br/>"update the wiki for ABC"]
         WIKI[wikicopilot.py<br/>Local CLI]
         SCAN[Python AST Scanner<br/>no network needed]
-        SERIALIZE[module_serializer.py<br/>to_dict / from_dict]
+        SERIALIZE[module_serializer.py<br/>to_dict]
+    end
+
+    subgraph SDK["azure-ai-projects SDK"]
+        CLIENT[AIProjectClient<br/>DefaultAzureCredential]
+        INVOKE[responses.create<br/>extra_body: scan_data]
     end
 
     subgraph FOUNDRY["Azure AI Foundry (Hosted Agent)"]
-        DESER[Detect __SCAN__:<br/>Deserialize scan_data]
+        DESER[Deserialize scan_data]
         GEN[Wiki Content Generation<br/>deepseek-v4-flash]
         MB[Mermaid Diagram Builder]
         FMT[Markdown Formatter]
@@ -48,7 +54,9 @@ graph LR
     PROMPT --> WIKI
     WIKI --> SCAN
     SCAN --> SERIALIZE
-    SERIALIZE -- "__SCAN__:<base64>" --> DESER
+    SERIALIZE -- scan_data dict --> CLIENT
+    CLIENT --> INVOKE
+    INVOKE -- POST /responses --> DESER
     DESER --> GEN
     GEN --> MB
     MB --> FMT
@@ -60,7 +68,7 @@ graph LR
 
 1. **Developer runs** `python wikicopilot.py --target MyFunction` — the local CLI extracts the target, scans the repository, and serialises the AST metadata to JSON.
 
-2. **The CLI invokes** the Foundry agent via `azd ai agent invoke "__SCAN__:<base64-payload>"`. The base64 payload contains target name, serialised `ModuleInfo` data, and mode. The agent detects the `__SCAN__:` prefix, base64-decodes and deserialises the metadata, and proceeds directly to generation + publishing.
+2. **The CLI invokes** the Foundry agent via the `azure-ai-projects` Python SDK (`AIProjectClient` → `get_openai_client(agent_name="documentation-copilot")` → `responses.create()`). The `scan_data` and `mode` are passed as `extra_body` fields alongside the standard `input` field. No manual token management is needed — the SDK uses `DefaultAzureCredential` to acquire tokens from the existing Azure CLI session. No base64 encoding, no gzip compression, no command-line length limits.
 
 3. **The agent generates** comprehensive Azure DevOps Wiki entries containing:
    - Module path and file location
@@ -79,9 +87,11 @@ graph LR
 
 The original design ran **all** code inside a single Foundry container with `TARGET_REPO_ROOT=/app`, scanning the agent's own deployed source tree. This was useless — the agent could never reach the developer's repository.
 
-The two-tier refactor moves the scanner to the developer's machine. The CLI uses the exact same `src/scanner/` and `src/ado/module_serializer.py` modules that the agent uses internally. The agent's `main.py` gains a `__SCAN__:` marker detector: when the input text starts with this prefix, it base64-decodes the rest as a JSON payload containing `target`, `scan_data` (list of serialised `ModuleInfo` dicts), and `mode`. It deserialises via `dict_to_module_info()` and skips the local file scan.
+The two-tier refactor moves the scanner to the developer's machine. The CLI uses the exact same `src/scanner/` and `src/ado/module_serializer.py` modules that the agent uses internally. The agent's `main.py` accepts `scan_data` as a direct JSON body field — the CLI passes it via `extra_body` in the `responses.create()` call. The agent deserialises via `dict_to_module_info()` and skips the local file scan.
 
 The agent retains its original local-scan code path (when `scan_data` is `None`) for backward compatibility.
+
+### Key architectural constraint: No LLM tool calling
 
 ### Key architectural constraint: No LLM tool calling
 
@@ -196,12 +206,16 @@ graph TB
         PARSE[scanner/python_parser.py<br/>AST Analysis]
         SERIALIZE[ado/module_serializer.py<br/>to_dict]
 
+        SDK[azure-ai-projects SDK<br/>AIProjectClient]
+        GET_OC[get_openai_client<br/>agent_name]
+        INVOKE[responses.create<br/>extra_body: scan_data]
+
         PV[workflow/provenance.py<br/>Event Recording]
         MASK[security/masking.py<br/>Output Scrubbing]
     end
 
     subgraph AGENT["Foundry Hosted Agent (Azure)"]
-        DESER[Detect __SCAN__:<br/>Deserialize scan_data]
+        DESER[Deserialize scan_data<br/>from JSON body field]
         DEPS[scanner/dependency_resolver.py<br/>Dependency Graph]
         GEN[wiki/generator.py<br/>Wiki Content Pipeline]
         MB[wiki/mermaid_builder.py<br/>Diagram Generation]
@@ -209,6 +223,7 @@ graph TB
         LLM[rag/chat.py<br/>LLM Prose Generation]
         ADO[ado/client.py<br/>AdoWikiClient]
         AUTH[ado/auth.py<br/>SP Auth via Key Vault]
+        EXTRACT_RESP[_extract_agent_output<br/>output[0].content[0].text]
     end
 
     subgraph FOUNDRY["Azure AI Foundry"]
@@ -226,7 +241,10 @@ graph TB
     EXTRACT --> SCAN
     SCAN --> PARSE
     PARSE --> SERIALIZE
-    SERIALIZE -- "__SCAN__:<base64><br/>azd ai agent invoke" --> DESER
+    SERIALIZE --> SDK
+    SDK --> GET_OC
+    GET_OC --> INVOKE
+    INVOKE -- HTTP POST<br/>scan_data in body --> DESER
     DESER --> DEPS
     DEPS --> GEN
     GEN --> LLM
@@ -240,6 +258,9 @@ graph TB
     AGENT --> WIKI
     AGENT --> TOOLBOX
     AGENT --> SKILLS
+
+    AGENT -- OpenAI Response envelope<br/>output[0].content[0].text --> EXTRACT_RESP
+    EXTRACT_RESP --> WIKI
 ```
 
 The architecture is a deliberate two-tier design:
@@ -248,7 +269,16 @@ The architecture is a deliberate two-tier design:
 
 2. **Foundry Hosted Agent (Tier 2):** The deployed agent handles everything that requires network access or secrets — dependency graph computation across the codebase, LLM prose generation via deepseek-v4-flash, Mermaid diagram building, and Azure DevOps Wiki REST API publishing with service principal authentication backed by Key Vault.
 
-The tiers communicate via a base64-encoded payload embedded in the `azd ai agent invoke` prompt string. The agent's `main.py` detects the `__SCAN__:` prefix, decodes the payload, deserialises the `ModuleInfo` objects via `dict_to_module_info()`, and proceeds directly to generation + publishing — skipping the local file scan entirely. The original local-scan code path (when no `__SCAN__:` payload is present) is retained for backward compatibility.
+The tiers communicate through the `azure-ai-projects` Python SDK:
+
+1. `wikicopilot.py` creates an `AIProjectClient` with `DefaultAzureCredential`
+2. Binds an OpenAI client to the agent via `get_openai_client(agent_name="documentation-copilot")`
+3. Calls `responses.create(input=..., extra_body={"scan_data": [...], "mode": "publish"})`
+4. The SDK POSTs the JSON body to the agent endpoint, authenticating via the user's Azure CLI session
+5. The Foundry ingress wraps the agent's custom JSON response inside an OpenAI Response envelope
+6. `wikicopilot.py` extracts the agent output from `response.output[0].content[0].text` via `_extract_agent_output()`
+
+No base64 encoding, no gzip compression, no `__SCAN__:` markers, and no command-line length limits. The original `__SCAN__:` marker detection in `main.py` is retained for backward compatibility with direct `azd ai agent invoke` usage.
 
 ---
 
@@ -346,8 +376,8 @@ class AppConfig:
 Two CLI entry points exist:
 
 | Entry point | Location | Runs on | Purpose |
-|---|---|---|---|
-| `wikicopilot.py` | Project root | Developer workstation | Scan local repo, serialise scan data, invoke Foundry agent via `azd ai agent invoke` |
+|---|---|---|---|---|
+| `wikicopilot.py` | Project root | Developer workstation | Scan local repo, serialise scan data, invoke Foundry agent via `azure-ai-projects` SDK (`AIProjectClient` → `responses.create()`) |
 | `src/app.py` (legacy) | `src/` | Anywhere (including agent container) | Direct scan + generate + publish (used by agent's own `handle_request` when no scan data provided) |
 
 ### 5.2 Prompt routing
@@ -375,19 +405,34 @@ If no target can be extracted, the CLI returns a clear error asking the user to 
 | `scan-only` | `--mode scan-only` | Scan → Print findings (no publish) |
 | `publish` | `--mode publish` | Force publish even if no changes detected |
 
-### 5.4 `__SCAN__:` protocol
+### 5.4 Invocation via the `azure-ai-projects` SDK
 
-When the local CLI (`wikicopilot.py`) invokes the Foundry agent, it packages the scan data as a base64-encoded JSON payload embedded directly in the prompt string:
+The local CLI (`wikicopilot.py`) invokes the Foundry agent through the `azure-ai-projects` Python SDK, not through `azd ai agent invoke`. This avoids command-line length limits (the scan data travels in the HTTP body, not the command line) and eliminates manual token management.
 
+**SDK call sequence:**
+
+```python
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+credential = DefaultAzureCredential()
+project = AIProjectClient(endpoint=project_endpoint, credential=credential)
+openai_client = project.get_openai_client(agent_name="documentation-copilot")
+
+response = openai_client.responses.create(
+    input=f'update the wiki for {target_name}',
+    stream=False,
+    extra_body={'mode': mode, 'scan_data': scan_data},
+)
 ```
-__SCAN__:<base64-encoded JSON>
-```
 
-The JSON payload has the shape:
+**Request body sent to the agent endpoint:**
 
 ```json
 {
-  "target": "MyFunction",
+  "input": "update the wiki for MyFunction",
+  "stream": false,
+  "mode": "publish",
   "scan_data": [
     {
       "file_path": "src/module.py",
@@ -395,14 +440,29 @@ The JSON payload has the shape:
       "classes": [...],
       "imports": [...]
     }
-  ],
-  "mode": "publish"
+  ]
 }
 ```
 
-The agent's `handle_request()` in `main.py` detects the `__SCAN__:` prefix, decodes and deserialises the payload via `module_serializer.dict_to_module_info()`, and calls `update_wiki_for_target_from_data()` — skipping the local file scan entirely.
+The agent's `do_POST` handler extracts `input`, `mode`, and `scan_data` from the JSON body and passes them to `handle_request(input_text, mode, scan_data)`. Since `scan_data` is provided directly (not decoded from a marker), the handler calls `_handle_remote_scan()` which deserialises via `module_serializer.dict_to_module_info()` and calls `update_wiki_for_target_from_data()`.
 
-For `azd ai agent invoke` compatibility, the full payload is passed as a single string argument to `azd ai agent invoke`, which sends it as `{"input": "__SCAN__:...", "stream": false}` to the agent endpoint. The Foundry runtime handles authentication — no manual token acquisition is needed.
+**Response extraction:**
+
+The Foundry ingress wraps the agent's custom JSON response inside the standard OpenAI Responses API format:
+
+```
+response.output[0].content[0].text  →  '{"status": "success", "pages": [...], ...}'
+```
+
+The CLI extracts this via `_extract_agent_output(response)`, which navigates the nested structure using `getattr` and falls back to `model_dump_json()` if the structure is unexpected.
+
+**Authentication:**
+
+The SDK uses `DefaultAzureCredential`, which acquires a token from the existing `az login` session via `AzureCliCredential`. No PAT, Key Vault access, or local authentication configuration is required on the developer workstation. The Foundry ingress validates the token against the project's scope (`https://ai.azure.com` resource) and the caller must have `Foundry User` (or higher) RBAC on the project.
+
+**Preserved backward compatibility:**
+
+The `__SCAN__:` and `__SCANZ__:` marker detection in `main.py` is retained for cases where someone calls the agent through `azd ai agent invoke` directly (small payloads only, no SDK).
 
 ### 5.5 Wiki page lifecycle
 
@@ -913,10 +973,12 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
      ```pwsh
      $env:PYTHONPATH = "C:\Repo\vsCode\project-documentation-copilot\documentation-copilot"
+     $env:AZURE_AI_PROJECT_ENDPOINT = "https://cog-doccopilot-dev01.services.ai.azure.com/api/projects/doccopilot"
+
      # Scan only (no publish — verify the scanner finds your target)
      python wikicopilot.py --target walk_repository --mode scan-only
 
-     # Full publish: scan locally, send to agent, agent generates + publishes to ADO Wiki
+     # Full publish: scan locally, send to agent via SDK, agent generates + publishes to ADO Wiki
      python wikicopilot.py --target _build_wiki_page_path --mode publish
      ```
 
@@ -925,7 +987,7 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
      Verify the page exists in ADO Wiki at:
      `https://dev.azure.com/{org}/{project}/_wiki/wikis/{wiki-id}?pagePath=API-Reference/{Target}/{Module}`
 
-     The CLI uses `azd ai agent invoke` under the hood, so it authenticates through Azure CLI's existing session. No manual token acquisition or PAT configuration is needed on the local machine. No local Key Vault access is required.
+     The CLI uses the `azure-ai-projects` SDK (`DefaultAzureCredential` from the `az login` session). No manual token acquisition, no PAT configuration, and no Key Vault access is needed on the local machine. The SDK handles all authentication through the existing Azure CLI session.
 
 **Authentication architecture note:** The Python connector (`src/ado/auth.py`) implements a three-tier auth strategy:
 
@@ -1308,7 +1370,7 @@ This follows Microsoft's [official guidance for service principal and managed id
    ```
 
    - `do_POST` — parse JSON body, extract `input`, `mode`, and optional `scan_data`
-   - `handle_request()` — detects `__SCAN__:` marker in input for `azd ai agent invoke` compatibility; extracts target from prompt; runs the scan → generate → publish pipeline (local scan path) or deserialises pre-scanned module data (remote scan path)
+   - `handle_request()` — detects `__SCAN__:` and `__SCANZ__:` markers in input for `azd ai agent invoke` compatibility (backward compat only); also accepts `scan_data` directly from the JSON body field (preferred path); extracts target from prompt; runs the scan → generate → publish pipeline (local scan path) or deserialises pre-scanned module data (remote scan path)
    - `_handle_remote_scan()` — deserialises `scan_data` via `module_serializer.dict_to_module_info()`, then calls `update_wiki_for_target_from_data()` for generation + publishing
    - `do_GET /health` and `do_GET /readiness` — return `{"status": "healthy"}`
    - Listen on `PORT` env var (default 8088)
@@ -1330,9 +1392,11 @@ This follows Microsoft's [official guidance for service principal and managed id
 4. **Create `wikicopilot.py`** at project root — local CLI for the two-tier workflow
    - Scans a local repository using `src/scanner/repo_walker.py`
    - Serialises matching `ModuleInfo` objects via `module_serializer.module_info_to_dict()`
-   - Base64-encodes the payload and invokes the agent via `azd ai agent invoke "__SCAN__:..."` subprocess
-   - Supports `--target`, `--mode`, `--repo`, `--json` flags
-   - Uses `azd ai agent invoke` internally, inheriting its native Azure CLI credential authentication — no manual token acquisition needed
+   - Invokes the Foundry agent via the `azure-ai-projects` Python SDK (`AIProjectClient` → `get_openai_client(agent_name=...)` → `responses.create()`)
+   - Passes `scan_data` and `mode` as `extra_body` fields alongside the standard `input` field — no base64, no gzip, no command-line length limits
+   - Extracts the agent's custom JSON response from the OpenAI Response envelope via `_extract_agent_output()` which navigates `response.output[0].content[0].text`
+   - Supports `--target`, `--mode`, `--repo`, `--json`, `--project-endpoint`, and `--agent-name` flags
+   - Uses `DefaultAzureCredential` internally (acquires token from `az login` session via `AzureCliCredential`) — no manual token acquisition, no `azd ai agent invoke` subprocess
    - Zero local dependencies on PAT, Key Vault, or LLM credentials
 
 5. **Fix known `agent.yaml` bugs**
@@ -1467,7 +1531,7 @@ This follows Microsoft's [official guidance for service principal and managed id
 
    Verify: the wiki page is updated (check ETag changes in response). Content reflects the new code.
 
-3. **Edge case — target not found**
+4. **Edge case — target not found**
 
    ```pwsh
    azd ai agent invoke "update the wiki for NonExistentFunction123"
@@ -1475,7 +1539,7 @@ This follows Microsoft's [official guidance for service principal and managed id
 
    Expected response: `{"status": "no_target_found", "pages_published": 0, ...}`. No wiki page created. Logged at WARNING level.
 
-4. **Edge case — ambiguous target (multiple modules)**
+5. **Edge case — ambiguous target (multiple modules)**
 
    ```pwsh
    azd ai agent invoke "update the wiki for load_config"
@@ -1483,17 +1547,17 @@ This follows Microsoft's [official guidance for service principal and managed id
 
    If `load_config` exists in 2+ modules, the agent creates pages for ALL matching modules. Verify both pages exist with distinct content.
 
-5. **Edge case — empty repository**
+6. **Edge case — empty repository**
    Set `TARGET_REPO_ROOT` to an empty directory. The agent returns `{"status": "success", "pages_published": 0, ...}` with no error.
 
-6. **Error handling — invalid PAT**
+7. **Error handling — invalid PAT**
    Set `AZURE_DEVOPS_PAT` to an invalid value. The agent returns:
 
    ```json
    {"status": "error", "message": "Azure DevOps authentication failed. Verify AZURE_DEVOPS_PAT has Wiki Read & Write scope.", "correlation_id": "..."}
    ```
 
-7. **Observability verification**
+8. **Observability verification**
 
    ```pwsh
    # After running several test invocations, check Application Insights
@@ -1506,7 +1570,7 @@ This follows Microsoft's [official guidance for service principal and managed id
    - `agent_publish_completed` with number of pages published
    - Correlation IDs join all events for a single request
 
-8. **Performance baselines**
+9. **Performance baselines**
    Measure and record these timings:
    - **Cold start** (first invocation after deploy): < 30s
    - **Hot invocation** (subsequent): < 10s
@@ -1514,7 +1578,7 @@ This follows Microsoft's [official guidance for service principal and managed id
    - **Wiki publish** (single page): < 3s
    - **LLM prose generation** (per function): < 3s
 
-9. **Wiki content quality checklist**
+10. **Wiki content quality checklist**
    For every generated wiki page, manually verify:
    - [ ] No placeholder text ("TODO", "TBD", "implement this")
    - [ ] Function signatures match actual code (parameter names, types, defaults)
@@ -1525,7 +1589,7 @@ This follows Microsoft's [official guidance for service principal and managed id
    - [ ] Parameter descriptions match the actual parameter behavior
    - [ ] Return type documentation matches the actual return type
 
-10. **Regression test suite**
+11. **Regression test suite**
 
     ```pwsh
     # Run against the SAME target twice — the second run should update, not create

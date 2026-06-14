@@ -18,6 +18,7 @@ chain (Key Vault → SP Bearer token).
 """
 
 from __future__ import annotations
+
 import json
 import logging
 import os
@@ -28,9 +29,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 AGENT_DIR = PROJECT_ROOT / 'documentation-copilot'
 sys.path.insert(0, str(AGENT_DIR))
 
-from src.scanner.repo_walker import scan_target, walk_repository
-from src.app import _extract_target_from_prompt
 from src.ado.module_serializer import module_info_to_dict
+from src.app import _extract_target_from_prompt
+from src.scanner.repo_walker import scan_target, walk_repository
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,8 +94,7 @@ def main() -> None:
         sys.exit(1)
 
     repo_root = Path(args.repo).resolve()
-    logger.info('Target: %s  |  Repo: %s  |  Mode: %s',
-                target_name, repo_root, args.mode)
+    logger.info('Target: %s  |  Repo: %s  |  Mode: %s', target_name, repo_root, args.mode)
     _run_pipeline(
         target_name, repo_root, args.mode, args.json,
         args.project_endpoint, args.agent_name,
@@ -158,7 +158,6 @@ def _invoke_agent(
 
     scan_data = [module_info_to_dict(m) for m in matching]
 
-    # Resolve project endpoint from override, env, or default
     project_endpoint = (
         project_endpoint_override
         or os.environ.get('AZURE_AI_PROJECT_ENDPOINT')
@@ -176,7 +175,6 @@ def _invoke_agent(
         endpoint=project_endpoint, credential=credential, allow_preview=True)
     openai_client = project.get_openai_client(agent_name=agent_name)
 
-    # Send with extra_body to pass our custom fields alongside standard fields
     response = openai_client.responses.create(
         input=f'update the wiki for {target_name}',
         stream=False,
@@ -186,7 +184,10 @@ def _invoke_agent(
         },
     )
 
-    output = response.output_text or ''
+    # The Foundry ingress wraps our agent's JSON inside an OpenAI Response.
+    # Our output is at  response.output[0].content[0].text
+    output = _extract_agent_output(response)
+
     if raw_json:
         print(output)
         return
@@ -198,15 +199,44 @@ def _invoke_agent(
 # Output helpers
 # ---------------------------------------------------------------------------
 
+def _extract_agent_output(response: object) -> str:
+    """Extract our custom JSON envelope from the OpenAI Response model.
+
+    The Foundry ingress wraps our agent's HTTP response body inside the
+    standard OpenAI Responses API format before returning it to the SDK.
+    Our JSON lives at ``response.output[0].content[0].text``.
+
+    Returns the raw JSON string from our agent, or a fallback error JSON.
+    """
+    try:
+        outputs = getattr(response, 'output', None)
+        if outputs and len(outputs) > 0:
+            first = outputs[0]
+            content = getattr(first, 'content', None)
+            if content and len(content) > 0:
+                text = getattr(content[0], 'text', None)
+                if text:
+                    return str(text)
+    except Exception:
+        pass
+
+    # Fallback: dump the full model as JSON for diagnostics
+    try:
+        return response.model_dump_json()  # type: ignore[union-attr]
+    except Exception:
+        return json.dumps({'status': 'error',
+                          'message': 'Could not extract agent response'})
+
+
 def _print_agent_response(output: str, target_name: str) -> None:
     try:
-        response = json.loads(output)
+        resp = json.loads(output)
     except json.JSONDecodeError:
         print(output)
         return
 
-    status = response.get('status', 'unknown')
-    pages = response.get('pages', [])
+    status = resp.get('status', 'unknown')
+    pages = resp.get('pages', [])
 
     if status == 'success' and pages:
         print(f'\nPublished {len(pages)} wiki page(s) for "{target_name}":')
@@ -216,7 +246,7 @@ def _print_agent_response(output: str, target_name: str) -> None:
         print(f'\nNo pages published for "{target_name}". '
               f'The code was scanned but no matching modules were found on the agent side.')
     else:
-        msg = response.get('message', 'Unknown error')
+        msg = resp.get('message', 'Unknown error')
         print(f'\nAgent error: {msg}')
 
 
@@ -228,8 +258,7 @@ def _print_scan_only(matching: list, target_name: str) -> None:
         for cls in mod.classes:
             print(f'  class {cls.name}')
             for method in cls.methods:
-                print(
-                    f'    def {method.name}(...) -> {method.return_type or "None"}')
+                print(f'    def {method.name}(...) -> {method.return_type or "None"}')
     print(f'\nFound {len(matching)} matching module(s) for "{target_name}".')
 
 
