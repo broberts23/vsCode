@@ -6,7 +6,7 @@ requiredVersions:
 name: ai-foundry-starter-basic
 services:
     documentation-copilot:
-        project: src/documentation-copilot
+        project: ./
         host: azure.ai.agent
         language: python
         config:
