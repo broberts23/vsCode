@@ -81,12 +81,15 @@ def _extract_target_from_prompt(prompt: str) -> str | None:
     - "update the wiki for ABC function"
     - "create a new wiki for XYZ function"
     - "document the MyClass class"
+    - "find the walk_repository function"
+    - "function MyParser needs documentation"
     """
     import re
 
     patterns = [
         r'(?:wiki\s+for|document(?:\s+the)?|update(?:\s+the)?\s+wiki\s+for|create(?:\s+a)?(?:\s+new)?\s+wiki\s+for)\s+(\w+)',
         r'(?:function|class)\s+(\w+)',
+        r'(\w+)\s+(?:function|class)',
     ]
 
     for pattern in patterns:

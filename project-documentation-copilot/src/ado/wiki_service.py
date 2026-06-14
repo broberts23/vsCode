@@ -43,6 +43,9 @@ def update_wiki_for_target(
     for mod in matching:
         content = generate_wiki_content(mod, settings)
         path = _build_wiki_page_path(mod, target_name)
+
+        _ensure_ancestor_pages(client, path)
+
         existing = client.get_page(path)
         page = WikiPage(
             path=path,
@@ -60,7 +63,37 @@ def update_wiki_for_target(
     return published
 
 
+def _ensure_ancestor_pages(client: AdoWikiClient, leaf_path: str) -> None:
+    """Create any missing ancestor pages in the wiki hierarchy.
+
+    Azure DevOps Wiki requires all ancestor pages to exist before a child
+    page can be created (returns WikiAncestorPageNotFoundException otherwise).
+    Walks the path from the root down to the leaf's parent and creates any
+    missing pages with minimal index content.
+    """
+    parts = leaf_path.strip('/').split('/')
+    for i in range(1, len(parts)):
+        ancestor_path = '/' + '/'.join(parts[:i])
+        if client.get_page(ancestor_path) is not None:
+            continue
+        title = parts[i - 1]
+        content = (
+            f'# {title}\n\n'
+            f'Index page for `{ancestor_path}`. '
+            'Module pages appear below this folder.\n'
+        )
+        result = client.create_or_update_page(
+            WikiPage(path=ancestor_path, content=content))
+        if result.status in ('created', 'updated'):
+            logger.info('Created ancestor page: %s', result.path)
+        else:
+            logger.error(
+                'Failed to create ancestor %s: %s',
+                result.path, result.error_message,
+            )
+
+
 def _build_wiki_page_path(module_info: 'ModuleInfo', target_name: str) -> str:
     """Build the wiki page path for a given module and target."""
     file_stem = module_info.file_path.replace('\\', '/').split('/')[-1].replace('.py', '')
-    return f'API-Reference/{target_name}/{file_stem}'
+    return f'/API-Reference/{target_name}/{file_stem}'

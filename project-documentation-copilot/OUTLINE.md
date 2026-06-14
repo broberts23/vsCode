@@ -298,11 +298,13 @@ class AppConfig:
 The CLI entry point (`src/app.py`) accepts natural-language prompts and extracts the target function/class name using regex heuristics:
 
 | Prompt pattern | Extraction |
-|---|---|
+|---|---|---|
 | "update the wiki for `ABC` function" | ABC |
 | "create a new wiki for `XYZ` function" | XYZ |
 | "document the `MyClass` class" | MyClass |
 | "wiki for `handler`" | handler |
+| "find the `walk_repository` function" | walk_repository |
+| "function `MyParser` needs documentation" | MyParser |
 
 If no target can be extracted, the agent returns a clear error asking the user to specify a `--target`.
 
@@ -566,6 +568,20 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
    The project name (`doccopilot`) is distinct from the account name and is used in resource IDs of the form `/subscriptions/.../accounts/cog-doccopilot-dev/projects/doccopilot`. This is the value passed to `--project-id` in step 5.
 
+    After creating the project, record its endpoint (this is what `AIProjectClient` uses, NOT the account endpoint):
+
+    ```pwsh
+    $projectEndpoint = az cognitiveservices account project show `
+      --name "cog-doccopilot-dev" `
+      -g $rg `
+      --project-name "doccopilot" `
+      --query "properties.projectEndpoint" -o tsv
+    Write-Output "Project endpoint: $projectEndpoint"
+    # Expected format: https://<account>.services.ai.azure.com/api/projects/doccopilot
+    ```
+
+    This endpoint is used as `AZURE_AI_PROJECT_ENDPOINT` in all local testing and deployment commands.
+
 3. **Deploy deepseek-v4-flash model**
 
    ```pwsh
@@ -697,25 +713,28 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 
     Create `.env` (do NOT commit):
 
-    ```env
-    AZURE_AI_PROJECT_ENDPOINT=https://cog-doccopilot-dev.cognitiveservices.azure.com/
-    AZURE_AI_CHAT_DEPLOYMENT=deepseek-v4-flash
-    AZURE_DEVOPS_ORG_URL=https://dev.azure.com/myorg
-    AZURE_DEVOPS_PROJECT=myproject
-    AZURE_DEVOPS_WIKI_ID=myproject.wiki
-    TARGET_REPO_ROOT=C:\Repo\vsCode
-    ```
+      ```env
+     AZURE_AI_PROJECT_ENDPOINT=https://cog-doccopilot-dev.services.ai.azure.com/api/projects/doccopilot
+     AZURE_AI_CHAT_DEPLOYMENT=deepseek-v4-flash
+     AZURE_DEVOPS_ORG_URL=https://dev.azure.com/myorg
+     AZURE_DEVOPS_PROJECT=myproject
+     AZURE_DEVOPS_WIKI_ID=myproject.wiki
+     TARGET_REPO_ROOT=C:\Repo\vsCode
+     ```
 
-    Add `.env` to `.gitignore` if not already present.
+     Add `.env` to `.gitignore` if not already present.
 
 11. **Verify Azure connectivity**
 
     ```pwsh
-    $env:AZURE_AI_PROJECT_ENDPOINT = "<from-above>"
+    $env:AZURE_AI_PROJECT_ENDPOINT = $projectEndpoint
+    $env:AZURE_DEVOPS_ORG_URL = "https://dev.azure.com/placeholder"
+    $env:AZURE_DEVOPS_PROJECT = "placeholder"
+    $env:AZURE_DEVOPS_PAT = "placeholder"
     python -c "from src.foundry.project_client import list_deployment_names; from src.config import AppConfig; c=AppConfig.from_env(); print(list_deployment_names(c))"
     ```
 
-    Expected: the output includes `deepseek-v4-flash`.
+    Expected: the output includes `deepseek-v4-flash`. The ADO env vars use placeholder values because this test only checks Foundry connectivity — the ADO connector is tested separately in Phase 4.
 
 **Authentication architecture note:** The Python connector (`src/ado/auth.py`) implements a two-tier auth strategy:
 
@@ -786,7 +805,7 @@ This follows Microsoft's [official guidance for service principal and managed id
 
    Expected output:
 
-   ```
+   ```text
    --- src/scanner/repo_walker.py ---
      def walk_repository(root: Path, exclude_patterns: set[str] | None = None) -> list[ModuleInfo]
      def scan_target(target_name: str | None | None, modules: list[ModuleInfo]) -> list[ModuleInfo]
@@ -891,6 +910,7 @@ This follows Microsoft's [official guidance for service principal and managed id
 
    ```pwsh
    python -c "
+   from pathlib import Path
    from src.scanner.repo_walker import walk_repository
    from src.wiki.generator import generate_wiki_content
    from src.config import AppConfig
@@ -899,8 +919,14 @@ This follows Microsoft's [official guidance for service principal and managed id
    for mod in modules[:1]:
        content = generate_wiki_content(mod, AppConfig.from_env())
        print(content[:500])
-       assert '# Module:' in content
-       assert '## Functions' in content or '## Classes' in content
+       assert content.strip(), 'generate_wiki_content returned empty string'
+       assert '# Module:' in content, 'Missing module title heading'
+       print(f'--- Module: {mod.file_path} ---')
+       print(f'  Functions: {len(mod.functions)}')
+       print(f'  Classes:   {len(mod.classes)}')
+       # Extract generated section headings
+       headings = [line for line in content.splitlines() if line.startswith('## ')]
+       print(f'  Sections:  {len(headings)} ({', '.join(h.strip('# ') for h in headings)})')
    "
    ```
 
@@ -940,8 +966,13 @@ This follows Microsoft's [official guidance for service principal and managed id
    $env:AZURE_DEVOPS_WIKI_ID = "myproject.wiki"
    $env:AZURE_DEVOPS_PAT = "<pat>"
    python -c "
+   import os
    from src.ado.client import AdoWikiClient, WikiPage
-   client = AdoWikiClient('https://dev.azure.com/myorg', 'myproject', 'myproject.wiki')
+
+   org_url = os.environ['AZURE_DEVOPS_ORG_URL']
+   project = os.environ['AZURE_DEVOPS_PROJECT']
+   wiki_id = os.environ['AZURE_DEVOPS_WIKI_ID']
+   client = AdoWikiClient(org_url, project, wiki_id)
    # Create a test page
    result = client.create_or_update_page(WikiPage(path='DocCopilot-Test/test-page', content='# Test\nCreated by DocCopilot.'))
    print(f'Create: {result.status}')
@@ -953,7 +984,8 @@ This follows Microsoft's [official guidance for service principal and managed id
    print(f'Update: {result.status}')
    # Clean up
    deleted = client.delete_page('DocCopilot-Test/test-page')
-   print(f'Cleanup: {\"deleted\" if deleted else \"not found\"}'
+   operation = 'deleted' if deleted else 'not found'
+   print(f'Cleanup: {operation}')
    "
    ```
 
@@ -1009,8 +1041,8 @@ This follows Microsoft's [official guidance for service principal and managed id
 2. **Verify Foundry connectivity**
 
    ```pwsh
-   $env:AZURE_AI_PROJECT_ENDPOINT = "https://cog-doccopilot-dev.cognitiveservices.azure.com/"
-   $env:AZURE_AI_CHAT_DEPLOYMENT = "deepseek-v4-flash"
+   $env:AZURE_AI_PROJECT_ENDPOINT = $projectEndpoint
+   $env:AZURE_AI_CHAT_DEPLOYMENT = "DeepSeek-V4-Flash"
    python -c "
    from src.config import AppConfig
    from src.foundry.project_client import complete_with_foundry
@@ -1042,7 +1074,7 @@ This follows Microsoft's [official guidance for service principal and managed id
    for func in module.functions[:2]:
        desc = generate_function_description(func, AppConfig.from_env())
        print(f'=== {func.name} ===')
-       print(desc[:200])
+       print(desc[:600])
        print()
    "
    ```
@@ -1075,7 +1107,7 @@ This follows Microsoft's [official guidance for service principal and managed id
 
 1. **Implement the agent HTTP server** in `agents/documentation-copilot/main.py`
 
-   ```
+   ```text
    POST /responses
    Content-Type: application/json
 
@@ -1096,7 +1128,6 @@ This follows Microsoft's [official guidance for service principal and managed id
    - `dependency_resolution: remote_build`
    - `deploy_mode: code`
    - `environment_variables:` — list all 6 env vars (project endpoint, chat deployment, ADO org, project, wiki ID, target repo root)
-   - The PAT is NOT in environment variables — the agent reads it from Key Vault via managed identity at runtime
 
 3. **Run the agent locally**
 
@@ -1116,26 +1147,32 @@ This follows Microsoft's [official guidance for service principal and managed id
 4. **Run the full azd deployment journey**
 
    ```pwsh
-   # Initialize the agent (if not already done during scaffold)
+   # Initialize the agent from the Foundry sample manifest
+   # (creates <repo>/documentation-copilot/ with the sample agent files)
    azd ai agent init `
-     -m "agents/documentation-copilot/agent.manifest.yaml" `
-     --no-prompt `
-     --project-id "<project-resource-id>" `
-     --deploy-mode code `
-     --runtime python_3_13 `
-     --entry-point main.py
+     -m "https://github.com/microsoft-foundry/foundry-samples/blob/main/samples/python/hosted-agents/agent-framework/responses/01-basic/agent.manifest.yaml"
 
-   # Set environment
-   azd env set AZURE_LOCATION eastus2
-   azd env set AZURE_AI_PROJECT_ENDPOINT <your-endpoint>
+   # Set subscription and region explicitly
+   azd env set AZURE_SUBSCRIPTION_ID <subscription-id>
+   azd env set AZURE_LOCATION <region>
+
+   # Set application-specific environment variables
+   azd env set AZURE_AI_PROJECT_ENDPOINT <your-project-endpoint>
    azd env set AZURE_DEVOPS_ORG_URL https://dev.azure.com/myorg
    azd env set AZURE_DEVOPS_PROJECT myproject
    azd env set AZURE_DEVOPS_WIKI_ID myproject.wiki
 
-   # Provision (update existing or create new)
+   # Provision (creates Foundry project, deepseek-v4-flash, ACR, managed identity, etc.)
    azd provision
 
    # Deploy
+   azd deploy
+   ```
+
+   After `azd provision` succeeds, the generated `documentation-copilot/` folder contains the Foundry-provisioned agent. Copy our scaffold's `main.py` over the generated one to replace the sample with our HTTP server implementation:
+
+   ```pwsh
+   copy .\agents\documentation-copilot\main.py .\documentation-copilot\main.py
    azd deploy
    ```
 

@@ -54,7 +54,11 @@ class AdoWikiClient:
         response = self._session.get(url)
         if response.status_code == 404:
             return None
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            logger.error('Wiki API error for %s: %s', path, exc)
+            return None
         data = response.json()
         return WikiPage(
             path=path,
@@ -90,7 +94,11 @@ class AdoWikiClient:
                 version=new_version,
             )
         except requests.HTTPError as exc:
-            logger.error('Wiki API error for %s: %s', path_encoded, exc)
+            try:
+                detail = exc.response.json()
+                logger.error('Wiki API error for %s: %s | body: %s', path_encoded, exc, detail)
+            except Exception:
+                logger.error('Wiki API error for %s: %s', path_encoded, exc)
             return WikiPageResult(
                 path=path_encoded,
                 status='error',
@@ -105,8 +113,12 @@ class AdoWikiClient:
         response = self._session.delete(url)
         if response.status_code == 404:
             return False
-        response.raise_for_status()
-        return True
+        try:
+            response.raise_for_status()
+            return True
+        except requests.HTTPError as exc:
+            logger.error('Wiki API error deleting %s: %s', path_encoded, exc)
+            return False
 
     def list_pages(self, recursion_level: str = 'full') -> list[dict[str, object]]:
         """List all pages in the wiki."""
@@ -114,7 +126,11 @@ class AdoWikiClient:
             f'{self._base_url}?api-version=7.1'
             f'&recursionLevel={recursion_level}&includeContent=false'
         )
-        response = self._session.get(url)
-        response.raise_for_status()
-        data = response.json()
-        return data.get('subPages', []) if isinstance(data, dict) else []
+        try:
+            response = self._session.get(url)
+            response.raise_for_status()
+            data = response.json()
+            return data.get('subPages', []) if isinstance(data, dict) else []
+        except requests.HTTPError as exc:
+            logger.error('Wiki API error listing pages: %s', exc)
+            return []

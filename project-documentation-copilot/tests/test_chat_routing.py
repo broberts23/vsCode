@@ -40,3 +40,10 @@ def test_extract_target_from_function_keyword() -> None:
     result = _extract_target_from_prompt(
         'function MyParser needs documentation')
     assert result == 'MyParser'
+
+
+def test_extract_target_from_find_prompt() -> None:
+    """'find the <name> function' should extract the name before 'function'."""
+    result = _extract_target_from_prompt(
+        'find the walk_repository function')
+    assert result == 'walk_repository'
