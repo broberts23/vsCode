@@ -88,6 +88,7 @@ def _extract_target_from_prompt(prompt: str) -> str | None:
 
     patterns = [
         r'(?:wiki\s+for|document(?:\s+the)?|update(?:\s+the)?\s+wiki\s+for|create(?:\s+a)?(?:\s+new)?\s+wiki\s+for)\s+(\w+)',
+        r'(?:scan\s+for|find|lookup|locate)\s+(\w+)',
         r'(?:function|class)\s+(\w+)',
         r'(\w+)\s+(?:function|class)',
     ]

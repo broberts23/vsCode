@@ -28,15 +28,42 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def handle_request(input_text: str, mode: str = 'auto') -> str:
+def handle_request(input_text: str, mode: str = 'auto', scan_data: list[dict[str, object]] | None = None) -> str:
     """Process a documentation request and return the result.
+
+    Two operation modes:
+    1. **Local scan (legacy):** When ``scan_data`` is ``None``, the agent scans
+       its own file system at ``TARGET_REPO_ROOT``, generates wiki content,
+       and publishes to ADO Wiki.
+    2. **Remote scan (preferred):** When ``scan_data`` is provided (from a
+       local CLI), the agent deserializes the pre-scanned module metadata,
+       skips local scanning, and goes directly to generation + publishing.
+
+    Also detects ``__SCAN__:`` marker in input_text for azd ai agent invoke
+    compatibility (scan data is base64-encoded in the prompt text).
 
     This is the core handler invoked by both the local dev server and the
     Foundry Hosted Agent runtime.
     """
+    import base64
+
+    # Detect inline scan data marker (base64-encoded, for azd ai agent invoke compat)
+    if input_text.startswith('__SCAN__:'):
+        try:
+            payload_raw = input_text[len('__SCAN__:'):]
+            payload_bytes = base64.b64decode(payload_raw)
+            payload = json.loads(payload_bytes)
+            target_name = payload.get('target', '')
+            scan_data = payload.get('scan_data')
+            mode = payload.get('mode', mode)
+            input_text = f'update the wiki for {target_name}'
+        except Exception as exc:
+            logger.warning('Failed to parse __SCAN__ payload: %s', exc)
+
     correlation_id = new_correlation_id()
     record_event('agent_request_received', correlation_id,
-                 input=input_text, mode=mode)
+                 input=input_text, mode=mode,
+                 scan_data_provided=scan_data is not None)
 
     settings = AppConfig.from_env()
     target_name = _extract_target_from_prompt(input_text)
@@ -48,10 +75,13 @@ def handle_request(input_text: str, mode: str = 'auto') -> str:
             'correlation_id': correlation_id,
         })
 
-    logger.info('Agent handling target: %s (mode: %s)', target_name, mode)
+    logger.info('Agent handling target: %s (mode: %s, remote_scan: %s)',
+                target_name, mode, scan_data is not None)
+
+    if scan_data is not None:
+        return _handle_remote_scan(target_name, scan_data, mode, settings, correlation_id)
 
     if mode == 'scan-only':
-        # Redirect stdout capture for scan-only output
         import io
         old_stdout = sys.stdout
         sys.stdout = buffer = io.StringIO()
@@ -71,6 +101,54 @@ def handle_request(input_text: str, mode: str = 'auto') -> str:
     from src.ado.wiki_service import update_wiki_for_target
     record_event('agent_publish_started', correlation_id, target=target_name)
     published = update_wiki_for_target(target_name, settings)
+    record_event('agent_publish_completed', correlation_id, pages=published)
+
+    return json.dumps({
+        'status': 'success' if published else 'no_target_found',
+        'target': target_name,
+        'mode': mode,
+        'pages_published': len(published),
+        'pages': published,
+        'correlation_id': correlation_id,
+    })
+
+
+def _handle_remote_scan(
+    target_name: str,
+    scan_data: list[dict[str, object]],
+    mode: str,
+    settings: AppConfig,
+    correlation_id: str,
+) -> str:
+    """Handle a request where the caller already scanned the repo locally."""
+    from src.ado.module_serializer import dict_to_module_info
+    from src.scanner.python_parser import ModuleInfo
+
+    modules = [dict_to_module_info(d) for d in scan_data]
+    logger.info('Deserialized %d module(s) from remote scan data', len(modules))
+
+    if mode == 'scan-only':
+        output_lines: list[str] = []
+        for mod in modules:
+            output_lines.append(f'\n--- {mod.file_path} ---')
+            for func in mod.functions:
+                output_lines.append(f'  def {func.name}(...) -> {func.return_type or "None"}')
+            for cls in mod.classes:
+                output_lines.append(f'  class {cls.name}')
+                for method in cls.methods:
+                    output_lines.append(f'    def {method.name}(...) -> {method.return_type or "None"}')
+        output_lines.append(f'\nFound {len(modules)} matching module(s).')
+        return json.dumps({
+            'status': 'success',
+            'target': target_name,
+            'mode': 'scan-only',
+            'output': '\n'.join(output_lines),
+            'correlation_id': correlation_id,
+        })
+
+    from src.ado.wiki_service import update_wiki_for_target_from_data
+    record_event('agent_publish_started', correlation_id, target=target_name)
+    published = update_wiki_for_target_from_data(target_name, modules, settings)
     record_event('agent_publish_completed', correlation_id, pages=published)
 
     return json.dumps({
@@ -103,7 +181,8 @@ if __name__ == '__main__':
 
             input_text = data.get('input', '')
             mode = data.get('mode', 'auto')
-            result = handle_request(input_text, mode)
+            scan_data: list[dict[str, object]] | None = data.get('scan_data')
+            result = handle_request(input_text, mode, scan_data)
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

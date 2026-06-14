@@ -28,7 +28,9 @@ environment_variables:
       value: ${AZURE_DEVOPS_PROJECT}
     - name: AZURE_DEVOPS_WIKI_ID
       value: ${AZURE_DEVOPS_WIKI_ID}
-    - name: KEY_VAULT_NAMEse
+    - name: KEY_VAULT_URL
+      value: ${KEY_VAULT_URL}
+    - name: KEY_VAULT_NAME
       value: ${KEY_VAULT_NAME}
     - name: AZURE_TENANT_ID
       value: ${AZURE_TENANT_ID}

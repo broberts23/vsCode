@@ -12,6 +12,7 @@ import logging
 
 from src.ado.client import AdoWikiClient, WikiPage
 from src.config import AppConfig
+from src.scanner.python_parser import ModuleInfo
 from src.scanner.repo_walker import scan_target, walk_repository
 
 logger = logging.getLogger(__name__)
@@ -25,13 +26,43 @@ def update_wiki_for_target(
 
     Returns a list of wiki page paths that were created or updated.
     """
-    from src.wiki.generator import generate_wiki_content
-
     modules = walk_repository(settings.target_repo_root)
     matching = scan_target(target_name, modules)
     if not matching:
         logger.warning('No code found matching target: %s', target_name)
         return []
+
+    return _publish_modules(matching, target_name, settings)
+
+
+def update_wiki_for_target_from_data(
+    target_name: str,
+    modules: list[ModuleInfo],
+    settings: AppConfig,
+) -> list[str]:
+    """Generate and publish wiki documentation from pre-scanned module data.
+
+    The caller (e.g. a local CLI) has already scanned the repository and
+    extracted module metadata. This function skips the scan step and goes
+    directly to generation + publishing.
+
+    Returns a list of wiki page paths that were created or updated.
+    """
+    matching = scan_target(target_name, modules)
+    if not matching:
+        logger.warning('No code found matching target: %s', target_name)
+        return []
+
+    return _publish_modules(matching, target_name, settings)
+
+
+def _publish_modules(
+    modules: list[ModuleInfo],
+    target_name: str,
+    settings: AppConfig,
+) -> list[str]:
+    """Core publish logic: generate content and push to ADO Wiki."""
+    from src.wiki.generator import generate_wiki_content
 
     client = AdoWikiClient(
         org_url=settings.azure_devops_org_url,
@@ -40,7 +71,7 @@ def update_wiki_for_target(
     )
 
     published: list[str] = []
-    for mod in matching:
+    for mod in modules:
         content = generate_wiki_content(mod, settings)
         path = _build_wiki_page_path(mod, target_name)
 
