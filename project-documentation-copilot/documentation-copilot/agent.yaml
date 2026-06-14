@@ -1,9 +1,40 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/microsoft/AgentSchema/refs/heads/main/schemas/v1.0/ContainerAgent.yaml
+
 kind: hosted
 name: documentation-copilot
+description: |
+    A basic Agent Framework agent hosted by Foundry.
+metadata:
+    tags:
+        - Agent Framework
+        - AI Agent Hosting
+        - Azure AI AgentServer
+        - Responses Protocol
+        - Streaming
 protocols:
     - protocol: responses
       version: 1.0.0
+resources:
+    cpu: "0.5"
+    memory: 1Gi
+environment_variables:
+    - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+      value: DeepSeek-V4-Flash
 code_configuration:
     runtime: python_3_13
     entry_point: main.py
     dependency_resolution: remote_build
+skills:
+    - file: skills/wiki-authoring/SKILL.md
+      name: wiki-authoring
+    - file: skills/code-analysis/SKILL.md
+      name: code-analysis
+toolbox:
+    name: documentation-toolbox
+    servers:
+        - manifest: mcp/code-scanner/manifest.json
+          name: code-scanner
+        - manifest: mcp/wiki-publisher/manifest.json
+          name: wiki-publisher
+        - manifest: mcp/diagram-generator/manifest.json
+          name: diagram-generator

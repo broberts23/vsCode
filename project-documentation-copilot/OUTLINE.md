@@ -1205,25 +1205,6 @@ This follows Microsoft's [official guidance for service principal and managed id
 
    Skills are uploaded to the Foundry project-level skill registry, NOT into the deployment bundle. The bundle's `agent.yaml` binds skills by name to the agent at deploy time. At agent startup, Foundry injects each bound skill's content into the agent's system prompt.
 
-7. **Publish MCP toolbox**
-
-   The toolbox is declared in `agent.yaml` (in the deployment bundle) as `documentation-toolbox` with three MCP servers. After `azd provision` creates the initial version, publish it as the default:
-
-   ```pwsh
-   # Confirm the toolbox exists and see its versions
-   azd ai toolbox list
-   azd ai toolbox versions documentation-toolbox
-
-   # Promote the initial version to default
-   azd ai toolbox publish documentation-toolbox 1
-   ```
-
-   The `publish` command takes two positional arguments: the toolbox `<name>` and the `<version>` to promote. The error `accepts 2 arg(s), received 0` occurs when the command is run bare without the name and version.
-
-   The initial version is `1`. Subsequent versions are created by `azd ai toolbox connection add/remove` or `azd ai toolbox skill add/remove` and incremented automatically.
-
-**Verification gate:** Agent starts locally and responds to HTTP requests. `azd deploy` completes successfully. `azd ai agent show` reports `Status: active`. Skills are uploaded and visible. Toolbox is published.
-
 ---
 
 ### Phase 7 — Real-world testing and validation
