@@ -371,7 +371,6 @@ This section is the contract for **how** the project is built, deployed, and ver
 - Azure Developer CLI 1.25.3+ (`azd version`)
 - `azd ext install microsoft.foundry`
 - `azd ext install azure.ai.skills`
-- **Azure Container Registry (ACR)** — Foundry Hosted Agents require an ACR to store container images before deployment. You can either use an existing ACR (provide the login server name, e.g. `myregistry.azurecr.io`) or leave blank to have `azd` create a new one during provisioning.
 - Foundry Project Manager + Subscription Owner/User Access Administrator roles
 - (Optional) Foundry Toolkit for VS Code
 
@@ -380,15 +379,6 @@ This section is the contract for **how** the project is built, deployed, and ver
 ```pwsh
 azd ai agent init -m "https://github.com/microsoft-foundry/foundry-samples/blob/main/samples/python/hosted-agents/agent-framework/responses/01-basic/agent.manifest.yaml"
 ```
-
-During the interactive prompts, you will be asked for an ACR login server:
-
-```
-? Enter your ACR login server (e.g., myregistry.azurecr.io), or leave blank to create a new one:
-```
-
-- **Use an existing ACR:** Enter the login server name of an ACR in your subscription.
-- **Create a new one:** Leave blank; `azd` provisions one automatically during `azd provision`.
 
 After the scaffold completes, set the subscription and location:
 
@@ -405,7 +395,7 @@ Replace the sample `main.py` with `agents/documentation-copilot/main.py`. Update
 azd provision
 ```
 
-Creates: resource group, Foundry project, deepseek-v4-flash serverless deployment, Azure Container Registry (ACR), Log Analytics, Application Insights, per-agent managed identity with Foundry User role.
+Creates: resource group, Foundry project, deepseek-v4-flash serverless deployment, Log Analytics, Application Insights, per-agent managed identity with Foundry User role.
 
 ### 9.4 Step 3 — Upload skills (`azd ai skill create`)
 
@@ -530,7 +520,6 @@ The scaffold is the deliverable for this pass. Implementation follows the phases
 - An Azure DevOps project with Wiki enabled
 - Microsoft Entra ID tenant connected to the Azure DevOps organization
 - An Azure DevOps Project Collection Administrator to add the managed identity to the organization (step 7 below)
-- **Azure Container Registry (ACR)** — the `azure.ai.agent` host type requires an ACR to store container images. You can either provide an existing ACR login server during `azd ai agent init`, or leave blank and `azd` provisions one automatically.
 
 **Steps:**
 
