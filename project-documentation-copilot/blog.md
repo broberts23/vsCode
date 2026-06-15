@@ -1,4 +1,4 @@
-# Building a Documentation Copilot: From Repository Scan to Live Wiki Page
+# Building a Documentation Agent: From Repository Scan to Live Wiki Page
 
 A developer clones a repository, makes a change to a function signature, and types `python wikicopilot.py --target AuthService --mode publish`. Eight seconds later, the Azure DevOps Wiki page for `AuthService` has been updated with the correct parameters, return types, decorators, and a Mermaid class diagram showing the inheritance hierarchy. No markdown was written by hand. No wiki page was opened in a browser. No pull request was sent to a documentation repo that nobody maintains.
 
@@ -263,3 +263,4 @@ Stay tuned for future updates as I explore more advanced RAG techniques, multi-t
 - Foundry Hosted Agent deployment guide: <https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/deploy-hosted-agent-code>
 - Azure DevOps Wiki REST API (Pages): <https://learn.microsoft.com/en-us/rest/api/azure/devops/wiki/pages>
 - Azure Developer CLI: <https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/>
+- My Repo: <https://github.com/broberts23/vsCode/tree/main/project-documentation-copilot/>
