@@ -104,7 +104,7 @@ azd ai agent invoke "create a new wiki for AuthService class"
 
 ## Step 9 — Verify in Portal
 
-1. Open https://ai.azure.com
+1. Open <https://ai.azure.com>
 2. Navigate to project → Build → Agents
 3. Select `documentation-copilot` → Open in playground
 4. Verify wiki pages in Azure DevOps Wiki

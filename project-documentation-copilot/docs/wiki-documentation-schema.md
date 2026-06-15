@@ -73,6 +73,7 @@ API-Reference/{TargetName}/{ModuleName}
 ```
 
 Examples:
+
 - `API-Reference/calculate_total/calculator`
 - `API-Reference/AuthService/auth`
 - `API-Reference/parse_config/config_loader`

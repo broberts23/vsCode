@@ -5,6 +5,7 @@ Lightweight pattern for spinning up (and explicitly tearing down) per‑pull‑r
 > Preview: Microsoft Graph Bicep resource types are in beta; schemas may change. Validate in a test tenant before production use.
 
 ## ✨ Key Features
+
 - Declarative identity layer: App + Service Principal + OAuth2 scopes (Swagger.Read/Write) + application role (Swagger.Admin) + tester security group in Bicep.
 - Deterministic GUID seeding for scopes & role → stable across redeploys.
 - Ephemeral infra: Key Vault (RBAC), Storage Account, App Service Plan, Minimal API Web App.
@@ -14,6 +15,7 @@ Lightweight pattern for spinning up (and explicitly tearing down) per‑pull‑r
 - PowerShell 7.4 scripts for role assignment, test user creation/deletion, and Graph cleanup.
 
 ## 📁 Repository Structure
+
 ```
 bicepconfig.json            # Extensibility + Graph extension aliases
 infra/
@@ -35,6 +37,7 @@ README.md                   # (This file) concise overview
 ```
 
 ## 🧱 Architecture (High Level)
+
 1. PR opened → workflow deploys Bicep: identity + infra.
 2. Web API published (zip deploy) with app settings (`AzureAd__TenantId`, `AzureAd__Audience`, `AzureAd__ClientId`).
 3. Role assignment script grants `Swagger.Admin` to tester group; optional test users created and added to group.
@@ -43,6 +46,7 @@ README.md                   # (This file) concise overview
 6. Label "Destroy" applied → cleanup job deletes users, role assignments, group, service principal, application, resource group.
 
 ## 🔍 Smoke Tests (What They Prove)
+
 | Check | Purpose |
 |-------|---------|
 | /healthz (Swagger.Admin) | App role assignment & role claim propagation |
@@ -51,7 +55,8 @@ README.md                   # (This file) concise overview
 | Storage RBAC | Data-plane container list via AAD |
 
 ## 🔐 Security & Governance
-- OIDC only (no client secrets) for GitHub Actions: https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect
+
+- OIDC only (no client secrets) for GitHub Actions: <https://learn.microsoft.com/azure/developer/github/connect-from-azure-openid-connect>
 - Key Vault RBAC model (`enableRbacAuthorization=true`); no access policies.
 - Tokens not written to logs/artifacts; only success/status fields are stored.
 - Least privilege roles (e.g., Key Vault Secrets User) recommended; sample uses roleDefinitionId parameter.
@@ -59,6 +64,7 @@ README.md                   # (This file) concise overview
 - Preview caution: Pin Bicep & validate Graph beta types when upgrading.
 
 ## 🚀 Quick Start (Conceptual)
+
 1. Ensure Azure login/OIDC secrets are configured (client-id, tenant-id, subscription-id) in repo.
 2. Open a PR → workflow provisions environment automatically.
 3. Review smoke test summary & artifacts.
@@ -66,17 +72,20 @@ README.md                   # (This file) concise overview
 5. Apply "Destroy" label to trigger teardown when finished.
 
 ## 🧹 Teardown
+
 Explicit label triggers cleanup: removes app role assignments → deletes group/SP/app → deletes resource group. No implicit auto-remove (keeps environment for iterative PR testing until explicitly destroyed).
 
 ## 📚 References
-- Applications (Bicep): https://learn.microsoft.com/graph/templates/bicep/reference/applications?view=graph-bicep-beta
-- Service Principals (Bicep): https://learn.microsoft.com/graph/templates/bicep/reference/serviceprincipals?view=graph-bicep-beta
-- Access tokens & claims: https://learn.microsoft.com/azure/active-directory/develop/access-tokens
-- Key Vault RBAC: https://learn.microsoft.com/azure/key-vault/general/rbac-guide
-- Role assignments cmdlets: https://learn.microsoft.com/powershell/module/az.resources/new-azroleassignment?view=azps-latest
-- Workload identity federation: https://learn.microsoft.com/azure/active-directory/develop/workload-identity-federation
+
+- Applications (Bicep): <https://learn.microsoft.com/graph/templates/bicep/reference/applications?view=graph-bicep-beta>
+- Service Principals (Bicep): <https://learn.microsoft.com/graph/templates/bicep/reference/serviceprincipals?view=graph-bicep-beta>
+- Access tokens & claims: <https://learn.microsoft.com/azure/active-directory/develop/access-tokens>
+- Key Vault RBAC: <https://learn.microsoft.com/azure/key-vault/general/rbac-guide>
+- Role assignments cmdlets: <https://learn.microsoft.com/powershell/module/az.resources/new-azroleassignment?view=azps-latest>
+- Workload identity federation: <https://learn.microsoft.com/azure/active-directory/develop/workload-identity-federation>
 
 ## ⚠️ Disclaimer
+
 This is a demonstration scaffold. Before production: harden logging, add Pester coverage, implement federated credentials (GraphFederation.ps1), enforce TTL sweeps, and review role scopes.
 
 ---

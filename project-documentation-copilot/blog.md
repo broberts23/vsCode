@@ -1,107 +1,189 @@
-# Building a Documentation Copilot: From Scaffold to Live Azure DevOps Wiki Generation
+# Building a Documentation Copilot: From Repository Scan to Live Wiki Page
 
-> A narrative walkthrough of building an AI-powered documentation agent that generates Azure DevOps Wiki entries from Python source code, deployed on Azure AI Foundry using a **two-tier architecture**: a local CLI that scans the repository and a Foundry Hosted Agent that generates prose and publishes to the wiki via service principal authentication backed by Key Vault.
+A developer clones a repository, makes a change to a function signature, and types `python wikicopilot.py --target AuthService --mode publish`. Eight seconds later, the Azure DevOps Wiki page for `AuthService` has been updated with the correct parameters, return types, decorators, and a Mermaid class diagram showing the inheritance hierarchy. No markdown was written by hand. No wiki page was opened in a browser. No pull request was sent to a documentation repo that nobody maintains.
 
----
+This project fills a gap that Microsoft's official Azure DevOps MCP Server leaves open. The MCP Server connects AI assistants to work items, pull requests, builds, pipelines, and test plans — it is a capable tool for sprint standups and code review workflows. What it does not expose is Wiki page management. There is no endpoint in its tool roster for creating, reading, updating, or deleting wiki pages. That gap is where the Documentation Copilot lives.
 
-## Premise: Why this project exists
+The project is a Foundry Hosted Agent paired with a local CLI that automates the most tedious part of developer documentation: keeping wiki entries in sync with live code. The CLI scans the repository on the developer's machine. The agent, running in Azure, generates prose, builds diagrams, and publishes the result through the Azure DevOps Wiki REST API. The boundary between them is clean. The developer never needs a PAT, never needs access to Key Vault, and never needs to know what a service principal is.
 
-Every developer knows the drill. You write a function, ship the PR, and then someone asks: "Is the wiki updated?" The answer is almost always no — because writing documentation is tedious, time-consuming, and perpetually out of sync with the code. The documentation rots while the code evolves.
-
-The Documentation Copilot exists to break this cycle. It turns a natural-language request — "update the wiki for `calculate_total` to capture the latest changes" — into a live Azure DevOps Wiki page that reflects the current state of the code, including function signatures, parameter types, dependencies, and workflow diagrams. No manual markdown crafting. No copy-paste from docstrings. Just a prompt and a published page.
-
-The project is part of the same family as `project-identity-security-copilot-v2`, adopting its exact agent creation, testing, and deployment workflow. But where the Identity Security Copilot answers policy and governance questions, the Documentation Copilot writes and publishes wiki entries. Different domain, same proven pipeline.
+[Screenshot: Terminal output showing "Published 2 wiki page(s) for AuthService" with page paths]
 
 ---
 
-## Purpose: The problem we solve
+## Azure AI Foundry
 
-### The documentation decay cycle
+Azure AI Foundry is Microsoft's platform for building, deploying, and operating AI applications. It provides a project-based resource model where each project has its own endpoint, model deployments, role-based access control, and service infrastructure. The Documentation Copilot uses three Foundry capabilities.
 
-Codebases change constantly. Functions get new parameters. Classes gain methods. Dependencies shift. But documentation — when it exists at all — is written once at creation time and rarely touched again. The result: wikis full of stale signatures, missing parameters, and diagrams that describe code from three releases ago.
+A Foundry Hosted Agent is a containerised Python application that the platform runs and manages. You provide source code, a runtime version, and an entry point. Foundry packages the code, provisions the container, and exposes a Responses-protocol endpoint that the `azure-ai-projects` SDK can call. The agent runs as a platform-assigned managed identity, separate from the developer's user identity, which allows it to authenticate to Azure services like Key Vault without storing credentials. The agent's health is monitored through HTTP readiness probes on port 8088. If the agent fails, Foundry restarts it.
 
-### What the Documentation Copilot does
+The model deployment provides the reasoning capacity for prose generation. `Deepseek-v4-Flash` is deployed as a serverless endpoint within the Foundry project, configured with the `GlobalStandard` SKU for pay-per-token billing. The agent calls this model through the `azure-ai-projects` SDK, using the same `AIProjectClient` that the CLI uses to invoke the agent. The model never sees raw source code. It receives structured metadata — function names, parameter types, return annotations, docstrings — and produces narrative descriptions suitable for a developer audience.
 
-1. **Accepts natural-language prompts** from the developer's terminal via `wikicopilot.py` — a local CLI that scans the repository, packages the code metadata as JSON, and sends it to the Foundry agent
-2. **Scans the locally cloned repository** using Python's AST module for static code analysis — no code execution, no import side effects, no network needed on the developer workstation
-3. **Extracts structured metadata**: function signatures, parameter types, return types, decorators, docstrings, class hierarchies, and import dependencies
-4. **Packages the metadata** as JSON using `src/ado/module_serializer.py`, base64-encodes it, and invokes the Foundry agent via `azd ai agent invoke "__SCAN__:..."` — the agent detects the marker, deserialises the data, and proceeds to generation + publishing
-5. **Generates comprehensive wiki content**: overview prose (via deepseek-v4-flash), formatted parameter tables, dependency lists, and Mermaid workflow diagrams
-6. **Publishes to Azure DevOps Wiki** via REST API with service principal authentication: the agent's managed identity reads the SP client ID and secret from Key Vault, then exchanges them for a Microsoft Entra Bearer token
+The Foundry project owns the security boundary. Every API call, whether to the model or to the agent, goes through the project's endpoint and is authenticated by `DefaultAzureCredential` using either the caller's Azure CLI session or the agent's managed identity. Role assignment controls which operations each caller can perform. The agent's managed identity has `Key Vault Secrets User` access to read the service principal's client ID and secret, and the developer's identity has `Foundry User` to invoke the agent and the model.
 
-### The developer experience
+---
 
-```text
-$ python -m src.app --prompt "update the wiki for AuthService to capture the latest changes" --mode auto
+## Azure Developer CLI
 
-Target: AuthService | Mode: auto
-INFO: Scanning repository: 47 Python files found, 2 matching AuthService
-INFO: Generating wiki content for src/auth/service.py
-INFO: Publishing page: API-Reference/AuthService/auth_service
-INFO: Wiki published successfully.
+The Azure Developer CLI, or `azd`, is Microsoft's tool for provisioning and deploying Azure applications from a project template. It reads an `azure.yaml` file and an `infra/` directory to understand the project structure and infrastructure requirements. The Foundry Toolkit extension adds agent-specific commands.
 
-Published 1 wiki page(s):
-  https://dev.azure.com/myorg/myproject/_wiki/wikis/myproject.wiki?pagePath=API-Reference/AuthService/auth_service
+The deployment lifecycle for this project follows five `azd` commands that run in sequence. `azd ai agent init` scaffolds the project with the Foundry agent template. It creates the `documentation-copilot/` directory with a sample `agent.yaml` and sets up the `azure.yaml` manifest. The init command accepts a manifest URL from the Foundry samples repository, a project resource ID, a runtime version, an entry point, and a deployment mode. The deployment mode is `code`, meaning the source is uploaded as a zip rather than packaged in a container image.
+
+`azd provision` creates the Azure infrastructure. It calls the Bicep templates in `infra/main.bicep` to provision the Foundry project, the Cognitive Services account with a custom domain name, the `Deepseek-v4-Flash` model deployment, the Log Analytics workspace, and the Application Insights instance. Provisioning takes about five minutes. The output includes the project endpoint URL that all subsequent commands use.
+
+Environment variables are set after provisioning through `azd env set`. The project endpoint, the DevOps organization URL, the wiki ID, the Key Vault URL and name, and the Azure tenant ID are all stored in the `azd` environment so that `agent.yaml`'s `${VAR}` substitution syntax resolves them at deploy time.
+
+`azd deploy` packages the source code, uploads it to the agent service, and polls until the version reaches `active` status. The deploy output includes the agent's portal link and the responses endpoint URL. When the status changes from `creating` to `active`, the agent is ready to receive requests.
+
+`azd ai agent invoke` sends a prompt to the deployed agent and displays the response. It routes through the Foundry runtime's authentication infrastructure, which is separate from the user-facing REST endpoint. The body format is `{"input": "...", "stream": false}`.
+
+```powershell
+azd ai agent init -m "<manifest-url>" --no-prompt --project-id "<id>" --deploy-mode code --runtime python_3_13 --entry-point main.py --agent-name "documentation-copilot"
+azd provision
+azd env set AZURE_AI_PROJECT_ENDPOINT "<endpoint>"
+azd env set AZURE_DEVOPS_ORG_URL "https://dev.azure.com/myorg"
+azd env set AZURE_DEVOPS_PROJECT "myproject"
+azd env set AZURE_DEVOPS_WIKI_ID "myproject.wiki"
+azd env set KEY_VAULT_URL "https://kv-doccopilot-dev1.vault.azure.net/"
+azd env set KEY_VAULT_NAME "kv-doccopilot-dev1"
+azd env set AZURE_TENANT_ID "<tenant-id>"
+azd deploy
 ```
 
-Five seconds. One command. The wiki is current.
+---
+
+## The Two-Tier Architecture
+
+The Documentation Copilot is not a monolithic agent. It is two systems that communicate across a well-defined interface.
+
+The local tier is `wikicopilot.py`, a 266-line CLI that runs on the developer workstation. It does everything that requires access to the file system: scanning Python files with the `ast` module, extracting function and class metadata, resolving import dependencies, and serialising the results to JSON. This tier has zero network dependencies and completes in milliseconds. The developer does not need a PAT, Key Vault access, or Foundry credentials.
+
+The cloud tier is the Foundry Hosted Agent, a single-container Python HTTP server running in Azure. It does everything that requires network access or secrets: deserialising scan data, calling `Deepseek-v4-Flash` for prose generation, building Mermaid diagrams, and publishing wiki pages through the Azure DevOps REST API. It authenticates to ADO using a two-step service principal flow: the agent's platform-assigned managed identity reads the service principal's client ID and secret from Key Vault, then exchanges them for a Microsoft Entra Bearer token via the OAuth 2.0 client credentials grant.
+
+The data interface between them is JSON. The CLI serialises `ModuleInfo` objects to dicts, the agent deserialises them back, and the round-trip is lossless. No file paths are shared. No repository structure is transmitted. The agent receives structured metadata and returns structured results.
 
 ---
 
-## The two Azure services powering the copilot
+## The Agent Modules
 
-### Azure AI Foundry + deepseek-v4-flash
+The agent's Python code is organised into six modules under `src/`, each with a single responsibility.
 
-The copilot is deployed as a **Foundry Hosted Agent** — a containerised Python application that runs on the Foundry Agent Service. The reasoning model is **deepseek-v4-flash**, deployed as a serverless API endpoint with a 1-million-token context window and text/JSON response formats.
+**Scanner** (`src/scanner/`) walks the repository and extracts code metadata. `python_parser.py` uses Python's built-in `ast` module to parse each file without executing it. It overrides `visit_FunctionDef`, `visit_ClassDef`, and the import visitors to accumulate `FunctionInfo`, `ClassInfo`, and `ParamInfo` dataclasses. The parser handles type annotations, decorators, default parameter values, and docstrings. It skips files with syntax errors and logs a warning instead of crashing. `repo_walker.py` recurses through a directory tree with `Path.rglob('*.py')`, excluding virtual environments, build directories, and cache folders. It produces a flat list of `ModuleInfo` objects. `dependency_resolver.py` classifies each import as internal or external based on namespace prefix matching, supporting both the internal scan path and the pre-scanned data path.
 
-Key architectural decision: deepseek-v4-flash does **not** support tool calling. This means the model cannot invoke functions mid-conversation. The copilot handles this by performing all non-LLM work in Python code — code scanning, dependency resolution, diagram generation, and DevOps API calls — and passing only structured metadata to the model for prose generation. The LLM's job is purely to write readable documentation paragraphs from structured facts. The pattern echoes the v1 Identity Security Copilot, where retrieval happens before the LLM is called.
+**RAG** (`src/rag/`) constructs the prompts that drive the LLM. `chat.py` defines `DOCUMENTATION_SYSTEM_PROMPT`, a set of guidelines that tell the model to write clear, technically accurate descriptions without placeholder text. For each function and class, it builds a prompt that includes the name, parameters, return type, decorators, and docstring. The system prompt and the user input are sent to `complete_with_foundry()`, which calls the model deployment through the `azure-ai-projects` SDK.
+
+**Wiki** (`src/wiki/`) builds the markdown that goes into the Azure DevOps Wiki. `generator.py` orchestrates the pipeline: it calls the RAG layer for prose descriptions, formats parameter tables, resolves dependencies, and decides whether to include Mermaid diagrams based on module complexity. `formatter.py` renders `WikiEntry` and `WikiSection` objects into ADO-compatible markdown with correct heading hierarchy. `mermaid_builder.py` generates `classDiagram` and `sequenceDiagram` strings using Azure DevOps Wiki-compatible Mermaid syntax. Diagrams use `graph TD` instead of `flowchart TD`, use `---->` instead of `-->>` for sequence arrows, and avoid HTML tags and Font Awesome icons. Each diagram is wrapped in `::: mermaid` fence blocks.
+
+**ADO** (`src/ado/`) connects to the Azure DevOps Wiki REST API v7.1. `client.py` implements `AdoWikiClient`, which wraps `requests.Session` with typed dataclasses. `get_page()` returns `WikiPage` with an ETag version or `None` if the page does not exist. `create_or_update_page()` sends a PUT request with an `If-Match` header for safe concurrent editing. Every response is validated by content type — HTML responses are treated as authentication failures, logged with context, and returned as typed `WikiPageResult` errors. `wiki_service.py` orchestrates the full lifecycle: it calls `update_wiki_for_target()` for the local-scan path (legacy) or `update_wiki_for_target_from_data()` for the pre-scanned data path (preferred). Both functions call the same `_publish_modules()` core, which iterates matching modules, generates content, ensures ancestor pages exist, and publishes each page. `auth.py` implements the three-tier authentication hierarchy that the agent uses to authenticate to ADO.
+
+The first tier of ADO auth tries service principal authentication backed by Key Vault. The agent's managed identity acquires a Microsoft Entra token for scope `https://app.vssps.visualstudio.com/.default` and uses it to read `AdoServicePrincipalClientId`, `AdoServicePrincipalSecret`, and `AdoServicePrincipalObjectId` from the Key Vault. These credentials are exchanged for a Bearer token through the OAuth 2.0 client credentials flow. The resulting token authenticates all ADO Wiki REST API calls. No long-lived secrets enter the agent's environment variables.
+
+The second tier falls back to managed identity direct authentication if the Key Vault is unreachable. The agent uses its platform-assigned identity to acquire a token for the same ADO scope. This path requires the managed identity to be added as a user in Azure DevOps with Wiki permissions.
+
+The third tier uses a Personal Access Token from the `AZURE_DEVOPS_PAT` environment variable. This is the local development fallback used when the agent runs outside Azure.
+
+[Screenshot: auth.py code showing the three-tier authentication flow]
+
+**Foundry** (`src/foundry/`) connects the agent to the Foundry project. `project_client.py` provides `open_project_client()`, a context manager that creates an `AIProjectClient` with `DefaultAzureCredential`. It exposes `complete_with_foundry()` for single-turn model completions and `list_deployment_names()` for verifying that the configured model deployment exists.
+
+**Module Serializer** (`src/ado/module_serializer.py`) provides the JSON round-trip that bridges the two tiers. `module_info_to_dict()` converts a `ModuleInfo` tree to a JSON-serialisable dict, handling the recursive `FunctionInfo` → `ParamInfo` and `ClassInfo` → method → `FunctionInfo` nesting. `dict_to_module_info()` reconstructs the full tree from a dict. The serialisation is lossless: every field in every dataclass survives the round trip.
+
+**Skills** (`skills/`) are Foundry skill files that are uploaded to the project and attached to the agent at deploy time. `wiki-authoring/SKILL.md` encodes content quality standards: markdown compatibility rules, page path conventions, and Mermaid diagram constraints. `code-analysis/SKILL.md` defines the agent's standards for code extraction, dependency resolution, and metadata completeness. At agent startup, Foundry injects both skill files into the agent's system prompt. Skills are versioned and uploaded via `azd ai skill create`.
+
+---
+
+## How the CLI Works
+
+`wikicopilot.py` at the project root is the developer's entry point. It imports from the same `src/` modules that the agent uses, which means the scanner and the serialiser produce identical results whether they run on the developer's laptop or inside the agent's container.
+
+When invoked with `--target AuthService --mode publish`, the CLI runs four operations.
+
+First, it resolves the project endpoint from the `--project-endpoint` flag, the `AZURE_AI_PROJECT_ENDPOINT` environment variable, or a hardcoded default. Then it creates an `AIProjectClient` with `DefaultAzureCredential`, which acquires a token from the developer's `az login` session. The `allow_preview=True` parameter enables the preview SDK surface that supports agent invocation.
 
 ```python
-# The LLM is called once, with all the context it needs:
-from src.foundry.project_client import complete_with_foundry
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
 
-description = complete_with_foundry(
-    system_prompt=DOCUMENTATION_SYSTEM_PROMPT,
-    user_input=(
-        f"Describe the following Python function:\n"
-        f"Function: {func.name}({params})\n"
-        f"Return Type: {func.return_type}\n"
-        f"Docstring: {func.docstring}"
-    ),
-    settings=settings,
+project = AIProjectClient(
+    endpoint=project_endpoint,
+    credential=DefaultAzureCredential(),
+    allow_preview=True,
+)
+openai_client = project.get_openai_client(agent_name="documentation-copilot")
+```
+
+Second, it binds an OpenAI client to the agent via `get_openai_client(agent_name=...)`. This configures the client to route all requests through the Foundry infrastructure to the specific agent's responses endpoint. The SDK handles authentication internally, using the same credential but routing through Foundry's gateway rather than the user-facing REST API.
+
+Third, it serialises the scanned module metadata to JSON and passes it as `extra_body` to `responses.create()`.
+
+```python
+response = openai_client.responses.create(
+    input=f"update the wiki for {target_name}",
+    stream=False,
+    extra_body={
+        "mode": mode,
+        "scan_data": scan_data,
+    },
 )
 ```
 
-### Azure DevOps Wiki REST API
+The JSON body that reaches the agent's `do_POST` handler contains the `input` field, the `scan_data` array of serialised modules, and the `mode` field. The agent extracts all three, deserialises the modules, and proceeds to generation and publishing. No base64 encoding is involved. No gzip compression is needed. No command-line argument length limit applies because the data travels in the HTTP body.
 
-The copilot's custom connector (`src/ado/`) wraps the Azure DevOps Wiki REST API v7.1. It handles:
+Fourth, it extracts the agent's response from the OpenAI Responses envelope. The Foundry ingress wraps the agent's custom JSON inside the standard OpenAI format before returning it to the SDK. The agent's output lives at `response.output[0].content[0].text`. The `_extract_agent_output()` function navigates this nesting with `getattr` calls and returns the raw JSON string.
 
-- **Get page:** `GET .../pages?path={path}&api-version=7.1&includeContent=true` — returns page content and `ETag` version
-- **Create/Update:** `PUT .../pages?path={path}&api-version=7.1` — with `If-Match` header for safe concurrent editing
-- **Authentication:** PAT-based Basic auth, scoped to Wiki Read & Write only, or Microsoft Entra ID Bearer tokens from the agent's platform-assigned managed identity (the production path)
-- **Error handling:** Graceful degradation with typed `WikiPageResult` objects
+The full payload from CLI to agent is:
 
-The page path convention is `API-Reference/{TargetName}/{ModuleName}`, making wiki navigation predictable and browsable.
+```json
+{
+  "input": "update the wiki for AuthService",
+  "stream": false,
+  "mode": "publish",
+  "scan_data": [
+    {
+      "file_path": "src/auth/service.py",
+      "functions": [
+        {
+          "name": "login",
+          "file_path": "src/auth/service.py",
+          "line_number": 25,
+          "docstring": "Authenticate user with credentials.",
+          "decorators": [],
+          "parameters": [
+            {"name": "self", "type_annotation": null, "default_value": null},
+            {"name": "credentials", "type_annotation": "dict", "default_value": null}
+          ],
+          "return_type": "AuthToken"
+        }
+      ],
+      "classes": [],
+      "imports": ["datetime", "src.models.token"]
+    }
+  ]
+}
+```
 
-#### Why a custom connector instead of the Azure DevOps MCP Server?
+The full response from agent to CLI is:
 
-Microsoft publishes an [official Azure DevOps MCP Server](https://learn.microsoft.com/en-us/azure/devops/mcp-server/mcp-server-overview?view=azure-devops) that connects AI assistants to Azure DevOps data — work items, pull requests, builds, pipelines, and test plans. It is a valuable tool for sprint planning, code review workflows, and standup preparation, and it runs locally via stdio with no external data leakage.
+```json
+{"status": "success", "target": "AuthService", "pages_published": 1, "pages": ["API-Reference/AuthService/auth_service"], "correlation_id": "a1b2c3d4-..."}
+```
 
-What the Azure DevOps MCP Server does **not** cover is Wiki page management. The server has no tools for creating, reading, updating, or deleting Wiki pages. The documented capability surface is limited to project metadata, work item tracking, PR status, CI/CD results, and test coverage — there is no Wiki endpoint in its tool roster. That gap is exactly the problem the Documentation Copilot solves.
+The CLI then prints a human-readable summary or, with the `--json` flag, the raw JSON.
 
-Rather than extend the official MCP server (which would require upstream contributions to a Node.js codebase governed by Microsoft's release cycle), this project builds a purpose-specific, Python-native connector as an MCP toolbox surface (`mcp/wiki-publisher/`). The connector is thin, typed, and focused on one job: Wiki page CRUD. In production, both servers coexist — the Azure DevOps MCP Server handles your daily standup and PR reviews, and the Documentation Copilot keeps your Wiki current.
+[Screenshot: wikicopilot.py help output showing all CLI flags]
 
-#### The authentication evolution: PAT → service principal via Key Vault
+---
 
-The scaffold originally used a Personal Access Token (PAT) stored in the `AZURE_DEVOPS_PAT` environment variable for Azure DevOps API authentication. This was adequate for local development but unsuitable for production — the PAT is a long-lived secret that must be rotated manually, and embedding it in environment variables violates zero-trust principles.
+## Deployment Walkthrough
 
-The production deployment uses a **two-step service principal authentication** flow:
+The deployment journey from a clean state to a running agent takes about fifteen minutes and follows this sequence.
 
-1. **Key Vault secret retrieval:** The agent's platform-assigned managed identity uses `DefaultAzureCredential` to read the `AdoServicePrincipalClientId` and `AdoServicePrincipalSecret` secrets from `kv-doccopilot-dev1`. The managed identity was granted `Key Vault Secrets User` RBAC on the vault.
+A Foundry project is created under a Cognitive Services account. The account is provisioned with `az cognitiveservices account create`, specifying a custom subdomain name. The project is created under the account with `az cognitiveservices account project create`. The project name `doccopilot` appears in all subsequent resource IDs and endpoint URLs.
 
-2. **OAuth 2.0 client credentials grant:** The retrieved client ID and secret are exchanged for a Microsoft Entra Bearer token at `https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` with scope `https://app.vssps.visualstudio.com/.default`. This Bearer token authenticates all ADO Wiki REST API calls.
+A dedicated service principal is registered in Microsoft Entra ID for ADO authentication. Its client ID and secret are stored in Key Vault under stable names: `AdoServicePrincipalClientId`, `AdoServicePrincipalSecret`, and `AdoServicePrincipalObjectId`. The client secret never enters an environment variable. It is fetched from Key Vault at runtime by the agent's managed identity.
 
-The service principal (`doc-copilot-ado-sp`) was registered in Azure DevOps with Basic access level and Wiki Read & Write permissions on the target project. No long-lived secret ever enters the agent's environment variables — only the Key Vault URL and tenant ID are configured:
+The service principal is added to Azure DevOps as a user by a Project Collection Administrator. It receives a Basic access level and Wiki Read and Write permissions on the target project. This is a one-time operation performed through the Azure DevOps portal or the ServicePrincipalEntitlements REST API.
+
+The agent is initialised with `azd ai agent init`, which scaffolds the project directory and creates the `agent.yaml` configuration. The environment variables in `azd env` are set to point at the project endpoint, the ADO organization and wiki ID, and the Key Vault details. The `agent.yaml` environment variables block must declare these vars with `${VAR}` substitution so the agent's container has them at startup.
 
 ```yaml
 environment_variables:
@@ -111,581 +193,73 @@ environment_variables:
       value: ${KEY_VAULT_NAME}
     - name: AZURE_TENANT_ID
       value: ${AZURE_TENANT_ID}
+    - name: AZURE_AI_PROJECT_ENDPOINT
+      value: ${AZURE_AI_PROJECT_ENDPOINT}
+    - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+      value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+    - name: AZURE_DEVOPS_ORG_URL
+      value: ${AZURE_DEVOPS_ORG_URL}
+    - name: AZURE_DEVOPS_PROJECT
+      value: ${AZURE_DEVOPS_PROJECT}
+    - name: AZURE_DEVOPS_WIKI_ID
+      value: ${AZURE_DEVOPS_WIKI_ID}
 ```
 
-**Known bug: the `KEY_VAULT_NAMEse` typo.** The `agent.yaml` originally declared `KEY_VAULT_NAMEse` (note the trailing `se`) instead of `KEY_VAULT_NAME`. This caused `auth.py`'s `_service_principal_configured()` check to return `False` because the env var `KEY_VAULT_NAME` was never set inside the container — only `KEY_VAULT_NAMEse` was. The agent silently fell back to the platform-assigned managed identity, which was never added to Azure DevOps and returned HTML sign-in pages for every ADO API call. Simply renaming the env var from `KEY_VAULT_NAMEse` to `KEY_VAULT_NAME` (and adding `KEY_VAULT_URL` for direct resolution) fixed the entire authentication chain.
+Infrastructure is provisioned with `azd provision`, which creates the Foundry project, model deployment, monitoring resources, and the agent's managed identity. The managed identity is granted `Key Vault Secrets User` RBAC on the Key Vault.
 
-The PAT approach remains as a local-development fallback for when the agent runs outside of Azure on a developer workstation. The `auth.py` `get_auth_header()` function checks for `AZURE_DEVOPS_PAT` if managed identity and Key Vault are both unavailable.
-
-**Another bug: missing `_secret_client` attribute.** The `ServicePrincipalAuth` class in `auth.py` initialised `_kv_credential`, `_tenant_id`, `_client_id`, and `_client_secret` in `__init__`, but omitted `_secret_client`. The `_ensure_secret_client()` method checks `if self._secret_client is not None` before creating a `SecretClient`, but since the attribute was never declared, it raised `AttributeError` at runtime. Fix: added `self._secret_client: object | None = None` to `__init__`.
+The agent is deployed with `azd deploy`. The tool packages the source into a zip, uploads it to the Foundry Agent Service, and polls until the version reaches `active` status. Each deployment creates a new version number. The agent version, status, and endpoint URL are visible through `azd ai agent show`.
 
 ---
 
-## Full build process: From scaffold to running agent
+## Using the Documentation Copilot
 
-### Phase 0 — Verify scaffold (pass)
+A developer who wants to update wiki documentation runs two commands. The first sets the Python path so the CLI can import the shared scanner modules. The second invokes the CLI with the target function or class name.
 
-The project scaffold is the blueprint. Before any implementation, the scaffold must prove it can hold the right shape. Running the scaffolded tests (now 26 after adding `module_serializer`):
-
-```pwsh
-PS> pytest tests/ -v
-
-tests/test_python_parser.py::test_parse_function_with_type_annotations PASSED
-tests/test_python_parser.py::test_parse_class_with_methods PASSED
-tests/test_python_parser.py::test_parse_extracts_imports PASSED
-tests/test_python_parser.py::test_parse_skips_syntax_errors PASSED
-tests/test_mermaid_builder.py::test_build_class_diagram_includes_class_and_methods PASSED
-tests/test_mermaid_builder.py::test_build_class_diagram_includes_inheritance PASSED
-tests/test_mermaid_builder.py::test_build_sequence_diagram_assigns_participants PASSED
-tests/test_mermaid_builder.py::test_wrap_mermaid_diagram_adds_fence PASSED
-tests/test_mermaid_builder.py::test_wrap_mermaid_diagram_empty_string PASSED
-tests/test_wiki_generator.py::test_format_wiki_markdown_renders_sections PASSED
-tests/test_wiki_generator.py::test_format_input_output_table_with_params PASSED
-tests/test_wiki_generator.py::test_format_input_output_table_empty PASSED
-tests/test_wiki_generator.py::test_format_dependency_list_both_types PASSED
-tests/test_wiki_generator.py::test_format_dependency_list_empty PASSED
-tests/test_ado_client.py::test_get_page_returns_none_for_404 PASSED
-tests/test_ado_client.py::test_create_or_update_page_returns_created PASSED
-tests/test_ado_client.py::test_create_or_update_page_handles_error PASSED
-tests/test_chat_routing.py::test_extract_target_from_update_wiki_prompt PASSED
-tests/test_chat_routing.py::test_extract_target_from_create_wiki_prompt PASSED
-tests/test_chat_routing.py::test_extract_target_from_document_command PASSED
-tests/test_chat_routing.py::test_extract_target_no_match_returns_none PASSED
-tests/test_chat_routing.py::test_extract_target_from_function_keyword PASSED
-tests/test_repo_walker.py::test_walk_repository_discovers_python_files PASSED
-tests/test_repo_walker.py::test_walk_repository_excludes_venv PASSED
-tests/test_repo_walker.py::test_scan_target_finds_matching_function PASSED
-
-================= 24 passed in 0.18s =================
-```
-
-Twenty-four tests. Every core data contract — parser, diagram builder, formatter, ADO client, routing, repo walker — has at least one test proving it produces the right output from known input. No live Azure services needed.
-
-### Phase 1 — Local scanner (code analysis)
-
-The scanner is the foundation. It must extract accurate metadata from real Python code without executing it.
-
-**Implementation:** `src/scanner/python_parser.py` subclasses `ast.NodeVisitor` and overrides `visit_FunctionDef`, `visit_ClassDef`, `visit_Import`, and `visit_ImportFrom`. Each visitor extracts structured metadata: function name, parameter types, return annotations, decorators, docstrings, and line numbers.
-
-```python
-class _CodeVisitor(ast.NodeVisitor):
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        func = FunctionInfo(
-            name=node.name,
-            file_path=self.file_path,
-            line_number=node.lineno,
-            docstring=ast.get_docstring(node),
-            decorators=[self._decorator_name(d) for d in node.decorator_list],
-            parameters=self._extract_params(node.args),
-            return_type=self._annotation_str(node.returns),
-        )
-        self.functions.append(func)
-        self.generic_visit(node)
-```
-
-**Result:** Running `--mode scan-only` against a real repository:
-
-```text
-$ python -m src.app --prompt "find the load_config function" --mode scan-only
-
---- src/config.py ---
-  def load_config(path: str = 'config.json') -> dict
-  def validate_settings(data: dict) -> bool
-
---- src/utils/config_helpers.py ---
-  def load_config(env: str = 'dev') -> Config
-
-Found 2 matching module(s).
-```
-
-The scanner discovers the target function across multiple files, shows signatures with type annotations and default values, and filters out non-matching modules.
-
-### Phase 2 — Wiki generation
-
-With metadata extracted, the wiki generator (`src/wiki/generator.py`) orchestrates the full documentation pipeline:
-
-1. Build a `WikiEntry` with sections for Overview, Module Path, Dependencies, Functions, Classes, and Workflow Diagrams
-2. For each function and class, call the Foundry LLM for narrative descriptions
-3. Format parameter tables and dependency lists
-4. Generate Mermaid diagrams for modules with 3+ functions or 2+ classes
-
-**Mermaid builder** (`src/wiki/mermaid_builder.py`) produces Azure DevOps Wiki-compatible diagrams:
-
-```text
-::: mermaid
-classDiagram
-    class AuthService {
-        +login(credentials: dict) AuthToken
-        +logout(token: str) None
-        +validate_session(token: str) bool
-    }
-    class BaseService {
-        +log(message: str) None
-    }
-    BaseService <|-- AuthService
-:::
-```
-
-Key constraints enforced:
-
-- Uses `graph TD` instead of `flowchart TD` (Azure DevOps Wiki Mermaid renderer limitation)
-- Uses `---->` instead of `-->>` for sequence arrows
-- No HTML tags or Font Awesome icons inside diagrams
-- Wraps every diagram in `::: mermaid` fence blocks
-
-**Formatter** (`src/wiki/formatter.py`) transforms `WikiEntry` objects into Azure DevOps Wiki-compatible markdown with proper heading hierarchy, table formatting, and section separation.
-
-### Phase 3 — Azure DevOps connector
-
-The ADO connector (`src/ado/`) is the integration layer between the copilot and the wiki:
-
-**Authentication** (`auth.py`):
-
-- Reads `AZURE_DEVOPS_PAT` from environment
-- Constructs `Basic` auth header with base64-encoded PAT
-- Fails fast with a descriptive error if the PAT is missing
-- The PAT is scoped to **Wiki Read & Write** only — least privilege by design
-
-**Client** (`client.py`):
-
-- `AdoWikiClient` wraps `requests.Session` with typed dataclasses
-- `get_page()` returns `WikiPage | None` — `None` signals a new page
-- `create_or_update_page()` sends `If-Match` header when updating to prevent conflicts
-- `list_pages()` supports full recursion for wiki inventory
-
-**Service** (`wiki_service.py`):
-
-- `update_wiki_for_target()` orchestrates the full lifecycle: scan → find → generate → publish
-- Returns list of published page paths
-- Logs every operation with correlation IDs for provenance tracking
-
-### Phase 4 — Foundry integration
-
-The Foundry integration (`src/foundry/project_client.py`) connects the agent to the deepseek-v4-flash deployment:
-
-```python
-def complete_with_foundry(system_prompt: str, user_input: str, settings: AppConfig) -> str:
-    """Send a single-turn completion to the Foundry model deployment."""
-    deployments = set(list_deployment_names(settings))
-    if settings.azure_ai_chat_deployment not in deployments:
-        raise RuntimeError(
-            f'Configured deployment {settings.azure_ai_chat_deployment} '
-            f'was not found in the Foundry project. Available: {sorted(deployments)}'
-        )
-    with open_project_client(settings) as project_client, \
-            project_client.get_openai_client() as openai_client:
-        response = openai_client.responses.create(
-            model=settings.azure_ai_chat_deployment,
-            instructions=system_prompt,
-            input=user_input,
-        )
-        return response.output_text or 'No response text was returned by the model.'
-```
-
-The **RAG layer** (`src/rag/chat.py`) constructs well-structured prompts that give the model everything it needs in a single call. No iterative tool-calling loops. The system prompt encodes the documentation quality guidelines (also present in the `wiki-authoring` skill):
-
-```python
-DOCUMENTATION_SYSTEM_PROMPT = """You are a technical documentation copilot. Your task is to produce
-high-quality Azure DevOps Wiki markdown entries for Python code modules.
-
-Guidelines:
-- Write clear, concise descriptions suitable for a developer audience.
-- Use proper Markdown formatting compatible with Azure DevOps Wiki.
-- When describing function parameters and return values, be precise.
-- Identify potential edge cases, error conditions, and usage patterns.
-- Never include placeholder text like "TODO" or "implement this".
-- If the code metadata is incomplete, describe what is observable.
-- Keep prose technical and direct. Avoid marketing language.
-"""
-```
-
-### Phase 5 — Agent deployment
-
-The agent (`agents/documentation-copilot/main.py`) is packaged as a Foundry Hosted Agent with a local HTTP server:
-
-```python
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', '8088'))
-    server = HTTPServer(('0.0.0.0', port), AgentHandler)
-    logger.info('Documentation Copilot agent listening on port %d', port)
-    server.serve_forever()
-```
-
-Deployment follows the standard `azd` journey borrowed from `project-identity-security-copilot-v2`:
-
-```pwsh
-azd ai agent init -m "<manifest-url>" --no-prompt
-azd provision
-azd ai skill create wiki-authoring --file ./skills/wiki-authoring/SKILL.md --no-prompt
-azd ai skill create code-analysis --file ./skills/code-analysis/SKILL.md --no-prompt
-azd ai toolbox publish
-```
-
----
-
-## Local testing procedures
-
-The project supports four levels of testing:
-
-### 1. Unit tests (pytest)
-
-```pwsh
-pytest tests/ -v
-```
-
-Twenty-six tests covering:
-
-- AST parser accuracy (function extraction, class extraction, imports)
-- Mermaid diagram generation (class diagrams, sequence diagrams, fence wrapping)
-- Wiki markdown formatting (section rendering, parameter tables, dependency lists)
-- ADO client behaviour (404 handling, creation, error propagation)
-- Prompt routing (target extraction from natural language)
-- Repository walking (file discovery, exclusion patterns, target filtering)
-
-### 2. Scan-only mode with wikicopilot.py (no Azure services needed)
-
-```pwsh
+```powershell
 $env:PYTHONPATH = "C:\Repo\vsCode\project-documentation-copilot\documentation-copilot"
-python wikicopilot.py --target walk_repository --repo "C:\Repo\vsCode\myproject" --mode scan-only
+$env:AZURE_AI_PROJECT_ENDPOINT = "https://cog-doccopilot-dev01.services.ai.azure.com/api/projects/doccopilot"
+python wikicopilot.py --target AuthService --mode publish
 ```
 
-This exercises the full local scanning pipeline — AST analysis, target matching, and serialisation — without touching the Foundry model or DevOps API. Ideal for rapid iteration on the parser and dependency resolver. The scan completes in milliseconds; no network access is required.
+The CLI scans the repository, serialises the matching modules, and sends them to the Foundry agent. The agent generates wiki content, publishes the pages, and returns the results. The developer sees a summary of which pages were created or updated.
 
-### 3. Two-tier full pipeline (requires deployed Foundry agent)
+Scan-only mode shows what the scanner would find without publishing anything.
 
-```pwsh
-$env:PYTHONPATH = "C:\Repo\vsCode\project-documentation-copilot\documentation-copilot"
-python wikicopilot.py --target parse_python_file --repo "C:\Repo\vsCode\myproject" --mode publish
+```powershell
+python wikicopilot.py --target AuthService --mode scan-only
 ```
 
-The CLI scans locally, serialises the matching modules, base64-encodes the payload, and calls `azd ai agent invoke "__SCAN__:..."`. The Foundry agent deserialises the data, generates wiki prose via deepseek-v4-flash, builds Mermaid diagrams, and publishes to ADO Wiki using the service principal auth chain (Key Vault → SP Bearer token). No PAT or local Key Vault access is needed.
+This exercises the full local pipeline without touching any Azure service. The scanner walks the repository, extracts function and class metadata, and prints a summary of what it found. The scan completes in milliseconds.
 
-### 4. Local agent invocation (requires Foundry project, legacy path)
+Natural-language prompts are supported for target extraction. The CLI uses regex heuristics to identify function and class names in prompts like "update the wiki for walk_repository function" or "scan for AuthService class". If the target cannot be extracted, the CLI asks the user to specify `--target` explicitly.
 
-```pwsh
-# Terminal 1
-azd ai agent run --no-inspector
-
-# Terminal 2
-azd ai agent invoke --local "update the wiki for load_config function"
+```powershell
+python wikicopilot.py "document the parse_config function"
+python wikicopilot.py --repo C:\git\myproject --target AuthService --mode publish
 ```
 
-The agent's `main.py` starts an HTTP server on port 8088. Requests trigger the full pipeline: code scan → LLM generation → wiki publish. This exercises the original single-container path where the agent scans its own container at `TARGET_REPO_ROOT=/app`. Use this for validating the local-scan code path before `azd deploy`.
+The developer does not need a PAT, Key Vault access, or LLM credentials. The SDK uses `DefaultAzureCredential` from the `az login` session. The Foundry agent handles everything beyond the local file scan using its service principal auth chain.
 
-### 5. Full integration test (requires Azure resources)
+[Screenshot: Azure DevOps Wiki page showing the generated documentation for AuthService with parameter table and class diagram]
 
-```pwsh
-azd ai agent invoke "update the wiki for AuthService to capture the latest changes"
-azd ai agent invoke "create a new wiki for DataPipeline class"
-```
+### Conclusion
 
-These commands invoke the deployed agent against the live Foundry project and a real Azure DevOps wiki, using the legacy local-scan path (agent scans `/app`). The two-tier path via `wikicopilot.py` is the preferred production workflow.
+The Documentation Copilot bridges a narrow but painful gap in the developer workflow: the space between a changed function signature and the wiki page that never gets updated because writing documentation by hand feels like overhead, not engineering. The current implementation targets individual functions and classes within a single repository, scanning their AST metadata, generating wiki prose via `Deepseek-v4-Flash`, and publishing the result to Azure DevOps Wiki through a service-principal authenticated REST API.
 
----
+This is a proof of concept, and its constraints are intentional. The wiki page structure follows a fixed template with sections for Overview, Module Path, Dependencies, Functions, Classes, and Workflow Diagrams. The AI prompt is a single-turn completion with no conversational memory, no retrieval-augmented generation pipeline, and no ability to refine its output based on follow-up requests. The supported documentation scope is limited to what the AST scanner can extract from Python source files — function signatures, class hierarchies, parameter types, decorators, and docstrings. Cross-module relationships, architectural patterns, and design rationale are not captured.
 
-## Deployment steps: The full azd journey
+Extending the scope to cover entire code domains, shared libraries, or full project modules requires advancing the target resolution mechanism. The current regex-based approach extracts a single function or class name from the prompt. A hierarchical target resolver could accept paths like `lib/authentication/providers` or `domains/billing` by maintaining a module tree index that maps logical namespaces to their constituent source files. The scanner already produces flat `ModuleInfo` lists; a tree-based filter that selects all modules under a given prefix would let the CLI process a directory or package in a single invocation. The agent would generate one wiki page per matching module and link them through a parent index page that the wiki service creates automatically. For shared libraries published as pip packages, the scanner would need a counterpart that reads from installed wheel metadata rather than a local checkout, or from a documentation manifest that the library maintainer controls.
 
-### Prerequisites (one-time)
+The base wiki template is designed for extension. The `WikiSection` model in `formatter.py` is a heading-and-body pair that maps cleanly to any markdown structure. Adding a Changelog section that the generator populates from git commit history between two tags requires two changes: a call to `git log` in the scanner layer that produces structured change entries, and a `WikiSection` renderer in the formatter that formats them as a dated list. Adding a Usage Examples section requires the RAG prompt to include the function's call sites, which the scanner can collect by searching `grep -r` across the repository for imports and invocations. Adding cross-reference links between related modules requires the dependency resolver to emit inbound references alongside outbound imports, which the wiki generator can format as a "Referenced By" table. The template can also be swapped entirely: a team that prefers Notion or Confluence would replace `formatter.py` with that platform's markdown dialect and keep every other module unchanged.
 
-```pwsh
-az login
-azd version                    # 1.25.3+
-azd ext install microsoft.foundry
-azd ext install azure.ai.skills
-```
+Custom documentation formats are handled at the formatter boundary. The `WikiEntry` dataclass and its `WikiSection` children are platform-agnostic. An ADO-specific formatter applies the `::: mermaid` fence style for diagrams. A GitHub Wiki formatter would use triple-backtick fences instead. A MkDocs formatter would emit YAML front matter and page-level navigation configuration. The choice is a single function signature swap. The same pipeline — scan, generate, format, publish — operates against any target with a different formatter and a different API client.
 
-### Step 1: Scaffold the agent
+Tailoring outputs to team conventions follows the same pattern. The `DOCUMENTATION_SYSTEM_PROMPT` in `rag/chat.py` controls the model's tone, depth, and structure. A team that wants architecture decision records alongside function documentation would extend the prompt to request them and add a `WikiSection` for ADRs in the generator. A team that wants security-sensitive parameters flagged in red would add a post-processing step in the formatter that detects environment variable names, private key references, or secret patterns and wraps them in inline warning callouts. Every customisation lives in a single module and leaves the rest of the pipeline untouched.
 
-```pwsh
-azd ai agent init `
-  -m "https://github.com/microsoft-foundry/foundry-samples/blob/main/samples/python/hosted-agents/agent-framework/responses/01-basic/agent.manifest.yaml" `
-  --no-prompt
-
-azd env set AZURE_SUBSCRIPTION_ID "<subscription-id>"
-azd env set AZURE_LOCATION eastus2
-```
-
-Replace the generated `main.py` with `agents/documentation-copilot/main.py` and update `agent.manifest.yaml` with the environment variable declarations.
-
-### Step 2: Provision infrastructure
-
-```pwsh
-azd provision
-```
-
-Creates the resource group, Foundry project, deepseek-v4-flash deployment, Log Analytics workspace, and Application Insights instance. Also creates the platform-assigned managed identity for the agent, which is then granted `Key Vault Secrets User` RBAC on the Key Vault so it can read the service principal's client ID and secret.
-
-Set the Key Vault and tenant environment variables for the deployment:
-
-```pwsh
-azd env set KEY_VAULT_URL "https://kv-doccopilot-dev1.vault.azure.net/"
-azd env set KEY_VAULT_NAME "kv-doccopilot-dev1"
-azd env set AZURE_TENANT_ID "<your-tenant-id>"
-```
-
-**Critical:** The `agent.yaml` `environment_variables` block must declare these vars with `${VAR}` substitution. A typo (`KEY_VAULT_NAMEse` instead of `KEY_VAULT_NAME`) caused the service principal auth path to silently fail, forcing the agent to fall back to managed identity direct auth (which returned HTML sign-in pages from ADO). Verify the env var names in `agent.yaml` match exactly what `auth.py` reads.
-
-Deployment verification:
-
-```pwsh
-azd ai agent show
-```
-
-Expected: `Status: creating` → `Status: active` (within 2-4 minutes for source-code deployment).
-
-### Step 3: Upload skills
-
-```pwsh
-azd ai skill create wiki-authoring --file ./skills/wiki-authoring/SKILL.md --no-prompt -o json
-azd ai skill create code-analysis --file ./skills/code-analysis/SKILL.md --no-prompt -o json
-azd ai skill list -o table
-```
-
-### Step 4: Publish MCP toolbox
-
-```pwsh
-azd provision
-azd ai toolbox publish
-```
-
-### Step 5: Deploy the agent
-
-```pwsh
-azd deploy
-```
-
-Expected output:
-
-```text
-Deploying services (azd deploy)
-
-  Done: Deploying service documentation-copilot
-  - Agent playground (portal): https://ai.azure.com/.../build/agents/documentation-copilot/build?version=1
-  - Agent endpoint: https://ai-account-<name>.services.ai.azure.com/api/projects/<project>/agents/documentation-copilot/versions/1
-```
-
-### Step 6: Poll status
-
-```pwsh
-azd ai agent show
-```
-
-Wait for `Status: active` for the `documentation-copilot` agent.
-
-### Step 7: Invoke
-
-```pwsh
-azd ai agent invoke "update the wiki for calculate_total to capture the latest changes"
-```
-
-### Step 8: Tear down
-
-```pwsh
-azd down
-```
-
-Deletes all resources. Rebuild from scratch with `azd provision && azd deploy`.
-
----
-
-## Final inference testing results
-
-### Test prompt 1: Update existing function documentation
-
-```text
-Input:  "update the wiki for load_config to capture the latest changes"
-
-Target: load_config
-Mode:   auto
-Result: Published 1 page at API-Reference/load_config/config
-
-Wiki page contents at API-Reference/load_config/config:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Module: config
-
-## Overview
-Python module with 2 function(s). Provides configuration loading and validation
-for the application runtime. The module reads JSON configuration files and
-validates settings against a predefined schema.
-
-## Module Path
-`src/config.py`
-
-## Dependencies
-**Internal Dependencies:**
-- `src.models.settings`
-
-**External Dependencies:**
-- `json`
-- `pathlib.Path`
-
-## Functions
-### `load_config()`
-
-Loads application configuration from a JSON file and returns a validated
-settings dictionary. Raises FileNotFoundError if the configuration file
-does not exist at the specified path.
-
-- **Line:** 15
-- **Decorators:** None
-- **Return Type:** `dict`
-
-**Parameters:**
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `path` | `str` | Default: `config.json` |
-| `env` | `str` | Default: `dev` |
-
-## Workflow Diagrams
-### Workflow Diagram
-::: mermaid
-sequenceDiagram
-    title Config Loading Workflow
-    participant p0 as load_config (Function)
-    participant p1 as validate_settings (Function)
-    p0->>+p1: invoke
-:::
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-### Test prompt 2: Create new wiki for a class
-
-```text
-Input:  "create a new wiki for AuthService class"
-
-Target: AuthService
-Mode:   auto
-Result: Published 1 page at API-Reference/AuthService/auth
-
-Wiki page contents at API-Reference/AuthService/auth:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Module: auth
-
-## Overview
-Python module with 1 class(es). Implements authentication and session
-management services for the application. Handles user login, token
-generation, session validation, and secure logout.
-
-## Module Path
-`src/services/auth.py`
-
-## Dependencies
-**Internal Dependencies:**
-- `src.models.token`
-- `src.security.hashing`
-
-**External Dependencies:**
-- `datetime`
-- `uuid`
-
-## Classes
-### `AuthService`
-
-Handles all authentication operations including credential verification,
-token issuance, session management, and logout. Extends BaseService for
-logging and error handling capabilities.
-
-- **Line:** 25
-- **Base Classes:** `BaseService`
-
-**Methods:**
-| Method | Parameters | Return Type |
-| --- | --- | --- |
-| `login` | `self, credentials: dict` | `AuthToken` |
-| `logout` | `self, token: str` | `None` |
-| `validate_session` | `self, token: str` | `bool` |
-| `refresh_token` | `self, token: str` | `AuthToken` |
-
-## Workflow Diagrams
-### Class Diagram
-::: mermaid
-classDiagram
-    class AuthService {
-        +login(credentials: dict) AuthToken
-        +logout(token: str) None
-        +validate_session(token: str) bool
-        +refresh_token(token: str) AuthToken
-    }
-    BaseService <|-- AuthService
-:::
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
-
-### Test prompt 3: No target found (error handling)
-
-```text
-Input:  "update the wiki for something"
-
-Target: something
-Mode:   auto
-Result: No wiki pages were published for target: something
-
-INFO: No code found matching target: something
-```
-
-Graceful handling when the target function or class doesn't exist in the scanned repository.
-
-### Test prompt 4: Scan-only mode
-
-```text
-Input:  "find the parse_config function"
-Mode:   scan-only
-
---- src/parsers/config_parser.py ---
-  def parse_config(path: str = 'config.yaml') -> dict
-  def validate_yaml_schema(data: dict) -> bool
-
---- src/legacy/parser.py ---
-  def parse_config(filepath: str) -> ConfigObject
-
-Found 2 matching module(s).
-```
-
-No Azure services consumed. The scan-only mode is pure local execution and completes in milliseconds.
-
----
-
-## Observability: Provenance tracking
-
-Every operation is tracked through the provenance recorder (`src/workflow/provenance.py`). Each event carries a `correlation_id` that joins scan, generation, and publish operations into a single trace:
-
-```json
-{"event_type": "request_received", "correlation_id": "a1b2c3d4-...", "prompt": "update the wiki for load_config", "mode": "auto", "timestamp_ms": 1717948800123}
-{"event_type": "scan_started", "correlation_id": "a1b2c3d4-...", "target": "load_config", "timestamp_ms": 1717948800145}
-{"event_type": "scan_completed", "correlation_id": "a1b2c3d4-...", "total_modules": 47, "matching_modules": 1, "timestamp_ms": 1717948800234}
-{"event_type": "publish_started", "correlation_id": "a1b2c3d4-...", "target": "load_config", "timestamp_ms": 1717948800456}
-{"event_type": "publish_completed", "correlation_id": "a1b2c3d4-...", "pages_published": 1, "timestamp_ms": 1717948801789}
-```
-
-When deployed to Foundry, these events are ingested by Application Insights and queryable in the Foundry portal under **Investigate > Transaction Search**.
-
----
-
-## From demo to platform
-
-The Documentation Copilot started as a scaffold — no code, just a contract. The phased implementation plan in `OUTLINE.md` §10 defines the order: verify scaffold, implement scanner, build wiki generator, wire ADO connector, integrate Foundry, deploy agent, write blog.
-
-Along the way, the architecture underwent its most important evolution. The initial design was a **single-agent, single-container** approach where all scanning, generation, and publishing happened inside the Foundry container. The agent used `TARGET_REPO_ROOT=/app` to scan its own deployed source tree — which worked for the demo but was useless in practice. A developer couldn't point the agent at their own repository.
-
-The **two-tier refactor** split the workload: a local CLI (`wikicopilot.py`) handles the file-system scanning using the same `src/scanner/` modules, serialises the metadata to JSON, and sends it to the Foundry agent via a base64-encoded `__SCAN__:` protocol embedded in the `azd ai agent invoke` prompt. The agent deserialises the data, generates wiki content, and publishes — all with its service principal auth backed by Key Vault. No PAT, Key Vault access, or LLM credentials are needed on the developer workstation.
-
-The project deliberately inherits the deployment workflow from `project-identity-security-copilot-v2` — the same `azd ai agent init` → `azd provision` → `azd deploy` → `azd ai agent invoke` journey. This means any engineer who has worked with the Identity Security Copilot family can pick up the Documentation Copilot and deploy it on the same day.
-
-The agent architecture remains intentionally single-container. Unlike the v2 Identity Security Copilot's coordinator + specialists topology, the Documentation Copilot's workflow is linear: deserialise → generate → publish. No handoffs. No agent-to-agent envelopes. One container, one deploy. This keeps the operational surface small and the debugging surface flat. The local CLI (`wikicopilot.py`) is a thin orchestration layer — it imports the same `src/scanner/` modules that the agent itself uses, so there is no code duplication or behavioural drift between tiers.
-
-For engineers who want to extend the copilot, the MCP toolbox surfaces (`code-scanner`, `wiki-publisher`, `diagram-generator`) are already defined with tool schemas and manifest files. The toolbox enables future multi-agent topologies or external MCP client integration without architectural change — the same surfaces, exposed differently.
-
----
+Stay tuned for future updates as I explore more advanced RAG techniques, multi-turn conversations, and support for additional documentation targets beyond Azure DevOps Wiki. 🚀
 
 ## References
 
-- [OUTLINE.md](./OUTLINE.md) — the full design contract and implementation phases
-- [docs/feasibility-research.md](./docs/feasibility-research.md) — technical feasibility analysis
-- [docs/connector-design.md](./docs/connector-design.md) — Azure DevOps REST API connector design
-- [docs/azd-journey.md](./docs/azd-journey.md) — end-to-end azd deployment commands
-- [docs/wiki-documentation-schema.md](./docs/wiki-documentation-schema.md) — wiki entry format specification
-- [Azure DevOps MCP Server documentation](https://learn.microsoft.com/en-us/azure/devops/mcp-server/mcp-server-overview?view=azure-devops) — official Microsoft MCP server for Azure DevOps (work items, PRs, builds, test plans; no Wiki support)
-- [Azure DevOps Wiki REST API (Pages)](https://learn.microsoft.com/en-us/rest/api/azure/devops/wiki/pages)
-- [Azure AI Foundry documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/)
-- [Mermaid syntax reference](https://mermaid.js.org/)
-- [project-identity-security-copilot-v2](../project-identity-security-copilot-v2/) — bootstrap template
+- Foundry Hosted Agent deployment guide: <https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/deploy-hosted-agent-code>
+- Azure DevOps Wiki REST API (Pages): <https://learn.microsoft.com/en-us/rest/api/azure/devops/wiki/pages>
+- Azure Developer CLI: <https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/>
