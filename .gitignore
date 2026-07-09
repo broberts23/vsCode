@@ -8,3 +8,21 @@ project-bicep-graph/src/WebApi/obj
 todo.md
 scratch.md
 scratch2.md
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual Environments & Settings
+.env
+.venv
+env/
+venv/
+.pytest_cache/
+.vscode/
+.idea/
