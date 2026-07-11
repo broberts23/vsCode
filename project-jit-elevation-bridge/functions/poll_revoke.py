@@ -5,23 +5,24 @@ import logging
 import azure.functions as func
 from datetime import datetime, timedelta, timezone
 from services.arc_orchestrator import ArcOrchestrator
-from clients.table import get_table_service_client
+from clients.table import get_table_service_client, get_table_client
 
 logging.basicConfig(level=logging.INFO)
 orchestrator = ArcOrchestrator()
 table_service_client = get_table_service_client()
+table_client = get_table_client()
 
 bp = func.Blueprint()
 
 
-@bp.timer_trigger(arg_name="mytimer", schedule="0 */5 * * * *", run_on_startup=True)
+@bp.timer_trigger(arg_name="mytimer", schedule="0 */5 * * * *", run_on_startup=False)
 def poll_and_revoke_trigger(mytimer: func.TimerRequest) -> None:
     logging.info("Running cleanup of expired JIT requests.")
     current_time = datetime.now(timezone.utc)
     query = f"PartitionKey eq 'JitActiveList' and ExpirationTime le '{current_time.isoformat()}'"
     try:
 
-        entities = table_service_client.query_entities(query_filter=query)
+        entities = table_client.query_entities(query_filter=query)
         for entity in entities:
             expiration_time_str = entity.get("ExpirationTime")
             dmsa_name = entity.get("DmsaName")

@@ -5,11 +5,12 @@ import logging
 import azure.functions as func
 from datetime import datetime, timedelta, timezone
 from services.arc_orchestrator import ArcOrchestrator
-from clients.table import get_table_service_client
+from clients.table import get_table_service_client, get_table_client
 
 logging.basicConfig(level=logging.INFO)
 orchestrator = ArcOrchestrator()
 table_service_client = get_table_service_client()
+table_client = get_table_client()
 
 bp = func.Blueprint()
 
