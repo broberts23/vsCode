@@ -4,4 +4,5 @@
 
 azure-functions
 azure-identity
-azure-mgmt-hybridcompute
+azure-mgmt-hybridcompute>=9.1.0b4
+azure-data-tables

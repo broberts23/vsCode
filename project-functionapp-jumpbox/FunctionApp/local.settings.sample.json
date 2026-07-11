@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "powershell",
+    "FUNCTIONS_WORKER_RUNTIME_VERSION": "7.4",
+    "REQUIRED_ROLE": "Role.LegacyCommand.Invoke",
+    "MANAGEMENT_HOST_FQDN": "legacyjump-mgmt-dev.contoso.local",
+    "MANAGEMENT_HOST_PORT": "5986",
+    "MANAGEMENT_CREDENTIAL_JSON": "{\"username\":\"CONTOSO\\\\svc-legacyjump\",\"password\":\"REPLACE_WITH_SERVICE_ACCOUNT_PASSWORD\"}",
+    "WINRM_CERTIFICATE_BASE64": "REPLACE_WITH_BASE64_ENCODED_CER"
+  }
+}

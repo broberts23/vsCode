@@ -1,0 +1,29 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "powershell",
+
+    "WORK_QUEUE_NAME": "governance-workitems",
+    "LIFECYCLE_QUEUE_NAME": "governance-lifecycle",
+    "WorkQueue": "UseDevelopmentStorage=true",
+
+    "DEDUPE_ENABLED": "false",
+    "DEDUPE_TABLE_NAME": "DedupeKeys",
+    "DEDUPE_STORAGE_ACCOUNT_NAME": "<storage-account-name>",
+    "DEDUPE_ENDPOINT_SUFFIX": "core.windows.net",
+    "DEDUPE_TABLE_ENDPOINT": "",
+
+    "TENANT_ID": "<your-tenant-id>",
+    "CLIENT_ID": "<app-registration-client-id>",
+    "CLIENT_SECRET": "<client-secret> (do not commit)",
+
+    "GRAPH_CLIENT_STATE": "<random-shared-secret>",
+    "GRAPH_SUBSCRIPTION_RENEWAL_MINUTES": "60",
+
+    "POLICY_PATH": "policy/policy.json",
+
+    "MODE": "detect",
+    "LOG_LEVEL": "Information"
+  }
+}
