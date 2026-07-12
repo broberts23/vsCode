@@ -31,16 +31,19 @@ Run the following PowerShell commands locally on the Domain Controller to establ
 
 ```powershell
 # 1. Create target OU and Privileged Admin Group
-New-ADOrganizationalUnit -Name "dMSA_Management" -Path "DC=corp,DC=local"
-New-ADGroup -Name "JIT_AppAdmins" -GroupScope Global -Path "OU=dMSA_Management,DC=corp,DC=local"
+New-ADOrganizationalUnit -Name "dMSA_Management" -Path "DC=contoso,DC=local"
+New-ADGroup -Name "JIT_AppAdmins" -GroupScope Global -Path "OU=dMSA_Management,DC=contoso,DC=local"
 
 # 2. Create the Predecessor Account (The legacy account identity used for permissions mapping)
-New-ADUser -Name "svc_deploy_legacy" -SamAccountName "svc_deploy_legacy" -Path "OU=dMSA_Management,DC=corp,DC=local" -Enabled $true
+New-ADUser -Name "svc_deploy_legacy" -SamAccountName "svc_deploy_legacy" -Path "OU=dMSA_Management,DC=contoso,DC=local" -Enabled $true -PasswordNotRequired
 
 # 3. Create the Windows Server 2025 dMSA linked to the predecessor account
-New-ADServiceAccount -Name "dmsa_deploy_prod" -DelegatedMSA -PredecessorAccount "svc_deploy_legacy" -Path "OU=dMSA_Management,DC=corp,DC=local"
-
+New-ADServiceAccount -Name "dmsa_deploy_pr" -DNSHostname "dmsa_deploy_pr.contoso.local" -CreateDelegatedServiceAccount
 ```
+
+Gotchas:
+the arc HybridComputeManagementClient requires the `api_version="2026-06-16-preview"` to successfully invoke the `runCommand`. The default API version will fail with a 400 Bad Request error.
+the arc HybridComputeManagementClient runs under the local `NT AUTHORITY\SYSTEM`, the Windows Server machine account must have delegated permissions to the Active Directory to add/remove group memberships.
 
 ---
 
@@ -72,7 +75,7 @@ To strictly conform to the KISS (Keep It Simple, Stupid) principle, data exchang
 
 ```json
 {
-    "dmsa_name": "dmsa_deploy_prod",
+    "dmsa_name": "dmsa_deploy_pr",
     "target_group": "JIT_AppAdmins",
     "action": "elevate" 
 }
@@ -86,7 +89,7 @@ To strictly conform to the KISS (Keep It Simple, Stupid) principle, data exchang
 ```json
 {
     "status": "success",
-    "message": "Action 'elevate' successfully executed for dmsa_deploy_prod.",
+    "message": "Action 'elevate' successfully executed for dmsa_deploy_pr.",
     "execution_id": "c4d3b2a1-e5f6-7a8b-9c0d-1e2f3a4b5c6d"
 }
 
@@ -113,7 +116,6 @@ To strictly conform to the KISS (Keep It Simple, Stupid) principle, data exchang
 azure-functions
 azure-identity
 azure-mgmt-hybridcompute
-
 ```
 
 ### Local Environment Variables (`local.settings.json`)
@@ -263,5 +265,5 @@ To run and step through this codebase locally using the Azure Functions Core Too
 1. **Open Project:** Open the root `jit_elevation_bridge` directory in VS Code.
 2. **Authenticate Locally:** Run `az login` via your local terminal and select the subscription hosting the Arc-enabled VM. The `DefaultAzureCredential()` object in the Python script automatically intercepts your active Azure CLI login context to sign requests while debugging.
 3. **Configure Environments:** Verify your local environment properties match your real-world identifiers inside `local.settings.json`.
-4. **Launch Instance:** Press `F5` or execute `func start` in the directory. Core Tools builds the runtime server locally and exposes a target endpoint resembling: `http://localhost:7071/api/jit/modify`.
+4. **Launch Instance:** Press `F5` or execute `func start` in the directory. Core Tools builds the runtime server locally and exposes a target endpoint resembling: `http://localhost:7071/api/jit/elevate`.
 5. **Simulate Request:** Use an API client (like Postman or cURL) to verify performance by passing an elevation block directly to your locally hosted instance.

@@ -45,7 +45,6 @@ def jit_elevate_access(req: func.HttpRequest) -> func.HttpResponse:
             "message": f"Elevation request for {dmsa_name} to {target_group} has been processed.",
             "execution_id": execution_id
         }
-        return func.HttpResponse(json.dumps(response_data), status_code=200, mimetype="application/json")
     except Exception as e:
         logging.error(f"Failed to execute Azure Arc deployment task: {str(e)}")
         return func.HttpResponse(
@@ -57,17 +56,17 @@ def jit_elevate_access(req: func.HttpRequest) -> func.HttpResponse:
     # Record State inside Azure Table Storage with a 60-minute lifetime expiration
     try:
         expiration_time = datetime.now(timezone.utc) + timedelta(minutes=60)
-        table_service_client.create_entity(
-            entity={
-                "PartitionKey": "JitActiveList",
-                "RowKey": f"{dmsa_name}_{target_group}",
-                "DmsaName": dmsa_name,
-                "TargetGroup": target_group,
-                "Action": "elevate",
-                "Timestamp": datetime.now(timezone.utc).isoformat(),
-                "ExpirationTime": expiration_time.isoformat()
-            }
-        )
+        jit_entity = {
+            "PartitionKey": "JitActiveList",
+            "RowKey": f"{dmsa_name}_{target_group}",
+            "DmsaName": dmsa_name,
+            "TargetGroup": target_group,
+            "Action": "elevate",
+            "GrantedAt": datetime.now(timezone.utc).isoformat(),
+            "ExpirationTime": expiration_time.isoformat()
+        }
+        table_client.create_entity(entity=jit_entity)
+
         return func.HttpResponse(
             json.dumps({
                 "status": "success",

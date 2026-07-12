@@ -18,9 +18,9 @@ def get_table_service_client() -> TableServiceClient:
         conn_str=STORAGE_CONNECTION_STRING, table_name=TABLE_NAME)
 
     try:
-        table_service_client.create_table()
+        table_service_client.create_table_if_not_exists(table_name=TABLE_NAME)
     except Exception as e:
         logging.info(
-            f"Table '{TABLE_NAME}' already exists or could not be created: {str(e)}")
+            f"Table '{TABLE_NAME}' could not be created: {str(e)}")
 
     return table_service_client

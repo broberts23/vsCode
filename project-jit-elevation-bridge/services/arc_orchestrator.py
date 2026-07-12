@@ -14,9 +14,10 @@ class ArcOrchestrator:
         self.subscription_id = os.environ["AZURE_SUBSCRIPTION_ID"]
         self.resource_group = os.environ["AZURE_RESOURCE_GROUP"]
         self.machine_name = os.environ["ARC_MACHINE_NAME"]
+        
 
         self.client = HybridComputeManagementClient(
-            self.credential, self.subscription_id)
+            self.credential, self.subscription_id, api_version="2026-06-16-preview")
 
     def execute_ad_change(self, dmsa_name: str, target_group: str, action: str) -> str:
         """

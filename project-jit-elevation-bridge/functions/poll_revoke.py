@@ -34,7 +34,7 @@ def poll_and_revoke_trigger(mytimer: func.TimerRequest) -> None:
             try:
                 orchestrator.execute_ad_change(
                     dmsa_name, target_group, "revoke")
-                table_service_client.delete_entity(
+                table_client.delete_entity(
                     partition_key=entity["PartitionKey"], row_key=entity["RowKey"])
                 logging.info(
                     f"Successfully revoked access and removed database state for {dmsa_name}.")
