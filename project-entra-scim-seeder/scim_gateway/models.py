@@ -1,22 +1,46 @@
-"""SQLAlchemy ORM models for local identity state tracking."""
+"""Pydantic document model for local identity state stored in Cosmos DB."""
 
-from sqlalchemy import Boolean, Integer, String
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from datetime import datetime, timezone
+from uuid import uuid4
 
-
-class Base(DeclarativeBase):
-    pass
+from pydantic import BaseModel, Field
 
 
-class LocalUser(Base):
-    """Tracks identity state synced from Entra ID via SCIM."""
+class LocalUser(BaseModel):
+    """Tracks identity state synced from Entra ID via SCIM.
 
-    __tablename__ = "local_users"
+    Stored as a JSON document in Cosmos DB. `userName` is the partition key.
+    """
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    entra_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
-    username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    given_name: Mapped[str] = mapped_column(String, nullable=False)
-    family_name: Mapped[str] = mapped_column(String, nullable=False)
-    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    userName: str
+    givenName: str
+    familyName: str
+    displayName: str | None = None
+    active: bool = True
+    entraId: str | None = None
+    created: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    lastModified: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+    def to_scim(self, location_root: str = "/scim/v2/Users") -> dict:
+        """Render the stored document as a SCIM 2.0 User response dict."""
+        return {
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "id": self.id,
+            "userName": self.userName,
+            "name": {
+                "formatted": f"{self.givenName} {self.familyName}",
+                "givenName": self.givenName,
+                "familyName": self.familyName,
+            },
+            "displayName": self.displayName,
+            "active": self.active,
+            "meta": {
+                "resourceType": "User",
+                "created": self.created,
+                "lastModified": self.lastModified,
+                "location": f"{location_root}/{self.id}",
+            },
+        }

@@ -1,19 +1,17 @@
-"""SCIM User Endpoint CRUD engine."""
+"""SCIM User Endpoint CRUD engine backed by Azure Cosmos DB."""
 
 import logging
 import re
-import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query, Response
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 
-from scim_gateway.database import get_db_session
+from scim_gateway.database import get_container
 from scim_gateway.models import LocalUser
 from scim_gateway.schemas import (
     ListResponse,
     PatchRequest,
-    ScimError,
-    ScimMeta,
     ScimUserCreate,
     ScimUserResponse,
 )
@@ -22,22 +20,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["SCIM Users"])
 
 
-def _user_to_scim(user: LocalUser) -> ScimUserResponse:
-    """Convert a LocalUser ORM instance to a SCIM response payload."""
-    return ScimUserResponse(
-        id=str(user.id),
-        userName=user.username,
-        name={
-            "formatted": f"{user.given_name} {user.family_name}",
-            "givenName": user.given_name,
-            "familyName": user.family_name,
+def _scim_error(status: int, detail: str, scim_type: str | None = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status,
+        content={
+            "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+            "status": str(status),
+            "detail": detail,
+            **({"scimType": scim_type} if scim_type else {}),
         },
-        displayName=user.display_name,
-        active=user.active,
-        meta=ScimMeta(
-            resourceType="User",
-            location=f"/scim/v2/Users/{user.id}",
-        ),
     )
 
 
@@ -52,28 +43,52 @@ def _parse_scim_filter(filter_str: str) -> tuple[str, str] | None:
     return None
 
 
+def _query_user(container, attr: str, value: str) -> dict | None:
+    """Run a point-lookup query against Cosmos by a SCIM attribute."""
+    attr_map = {
+        "username": "c.userName",
+        "externalid": "c.entraId",
+        "displayname": "c.displayName",
+    }
+    field = attr_map.get(attr.lower())
+    if not field:
+        return None
+    query = f"SELECT * FROM c WHERE {field} = @value"
+    items = list(
+        container.query_items(
+            query=query,
+            parameters=[{"name": "@value", "value": value}],
+            enable_cross_partition_query=True,
+        )
+    )
+    return items[0] if items else None
+
+
 @router.get("/Users", response_model=ListResponse)
 def get_users(
     filter: str | None = Query(None),
-    db: Session = Depends(get_db_session),
+    container=Depends(get_container),
 ) -> ListResponse:
     """Handle directory queries. Parses SCIM filter expressions."""
-    query = db.query(LocalUser)
-
     if filter:
         parsed = _parse_scim_filter(filter)
-        if parsed:
-            attr, value = parsed
-            if attr.lower() == "username":
-                query = query.filter(LocalUser.username == value)
-            elif attr.lower() == "externalid":
-                query = query.filter(LocalUser.entra_id == value)
-            elif attr.lower() == "displayname":
-                query = query.filter(LocalUser.display_name == value)
+        if not parsed:
+            return ListResponse(totalResults=0, itemsPerPage=0, startIndex=1, Resources=[])
+        attr, value = parsed
+        doc = _query_user(container, attr, value)
+        resources = [ScimUserResponse(**LocalUser(**doc).to_scim())] if doc else []
+        return ListResponse(
+            totalResults=len(resources),
+            itemsPerPage=len(resources),
+            startIndex=1,
+            Resources=resources,
+        )
 
-    users = query.all()
-    resources = [_user_to_scim(u) for u in users]
-
+    items = list(container.query_items(
+        query="SELECT * FROM c",
+        enable_cross_partition_query=True,
+    ))
+    resources = [ScimUserResponse(**LocalUser(**doc).to_scim()) for doc in items]
     return ListResponse(
         totalResults=len(resources),
         itemsPerPage=len(resources),
@@ -85,55 +100,64 @@ def get_users(
 @router.get("/Users/{user_id}", response_model=ScimUserResponse)
 def get_user_by_id(
     user_id: str,
-    db: Session = Depends(get_db_session),
+    userName: str = Query(..., description="Partition key (userName) for the target user"),
+    container=Depends(get_container),
 ) -> ScimUserResponse:
     """Lookup by ID. Returns 404 SCIM error if not found."""
-    user = db.query(LocalUser).filter(LocalUser.id == int(user_id)).first()
-    if not user:
-        return ScimError(status="404", detail=f"User {user_id} not found")
-    return _user_to_scim(user)
+    try:
+        doc = container.read_item(item=user_id, partition_key=userName)
+    except Exception:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+                "status": "404",
+                "detail": f"User {user_id} not found",
+            },
+        )
+    return ScimUserResponse(**LocalUser(**doc).to_scim())
 
 
 @router.post("/Users", response_model=ScimUserResponse, status_code=201)
 def create_user(
     body: ScimUserCreate,
-    db: Session = Depends(get_db_session),
+    container=Depends(get_container),
 ) -> ScimUserResponse:
-    """Provision a new user in the local SQLite store."""
-    existing = db.query(LocalUser).filter(LocalUser.username == body.userName).first()
+    """Provision a new user in Cosmos DB."""
+    existing = _query_user(container, "userName", body.userName)
     if existing:
-        return ScimError(
-            status="409",
-            detail=f"User with userName {body.userName} already exists",
-            scimType="uniqueness",
+        return _scim_error(
+            409,
+            f"User with userName {body.userName} already exists",
+            scim_type="uniqueness",
         )
 
     user = LocalUser(
-        username=body.userName,
-        given_name=body.name.givenName,
-        family_name=body.name.familyName,
-        display_name=body.displayName or f"{body.name.givenName} {body.name.familyName}",
+        userName=body.userName,
+        givenName=body.name.givenName,
+        familyName=body.name.familyName,
+        displayName=body.displayName or f"{body.name.givenName} {body.name.familyName}",
         active=body.active,
     )
-
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    logger.info("Created SCIM user: %s (id=%d)", body.userName, user.id)
-    return _user_to_scim(user)
+    container.create_item(body=user.model_dump())
+    logger.info("Created SCIM user: %s (id=%s)", body.userName, user.id)
+    return ScimUserResponse(**user.to_scim())
 
 
 @router.patch("/Users/{user_id}", response_model=ScimUserResponse)
 def patch_user(
     user_id: str,
     body: PatchRequest,
-    db: Session = Depends(get_db_session),
+    userName: str = Query(..., description="Partition key (userName) for the target user"),
+    container=Depends(get_container),
 ) -> ScimUserResponse:
     """Process SCIM PATCH operations (e.g., active -> false)."""
-    user = db.query(LocalUser).filter(LocalUser.id == int(user_id)).first()
-    if not user:
-        return ScimError(status="404", detail=f"User {user_id} not found")
+    try:
+        doc = container.read_item(item=user_id, partition_key=userName)
+    except Exception:
+        return _scim_error(404, f"User {user_id} not found")
+
+    user = LocalUser(**doc)
 
     for operation in body.Operations:
         op = operation.op.lower()
@@ -146,29 +170,31 @@ def patch_user(
                 elif isinstance(operation.value, dict):
                     user.active = operation.value.get("active", user.active)
             elif path == "displayName":
-                user.display_name = str(operation.value)
+                user.displayName = str(operation.value)
             elif path == "name.givenName":
-                user.given_name = str(operation.value)
+                user.givenName = str(operation.value)
             elif path == "name.familyName":
-                user.family_name = str(operation.value)
+                user.familyName = str(operation.value)
+            elif path == "userName":
+                user.userName = str(operation.value)
 
-    db.commit()
-    db.refresh(user)
-
+    user.lastModified = datetime.now(timezone.utc).isoformat()
+    container.upsert_item(body=user.model_dump())
     logger.info("Patched SCIM user: %s", user_id)
-    return _user_to_scim(user)
+    return ScimUserResponse(**user.to_scim())
 
 
 @router.delete("/Users/{user_id}", status_code=204)
 def delete_user(
     user_id: str,
-    db: Session = Depends(get_db_session),
+    userName: str = Query(..., description="Partition key (userName) for the target user"),
+    container=Depends(get_container),
 ) -> Response:
-    """Deprovision user by removing from local store."""
-    user = db.query(LocalUser).filter(LocalUser.id == int(user_id)).first()
-    if user:
-        db.delete(user)
-        db.commit()
+    """Deprovision user by removing from Cosmos DB."""
+    try:
+        container.delete_item(item=user_id, partition_key=userName)
         logger.info("Deleted SCIM user: %s", user_id)
+    except Exception:
+        logger.warning("Delete failed for user %s (already absent?)", user_id)
 
     return Response(status_code=204)
