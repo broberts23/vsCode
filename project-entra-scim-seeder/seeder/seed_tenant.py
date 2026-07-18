@@ -14,11 +14,61 @@ from msgraph.generated.models.password_profile import PasswordProfile
 from msgraph.generated.models.group import Group
 from msgraph.generated.models.reference_create import ReferenceCreate
 
-from seeder.auth import get_graph_client
-from seeder.generator import generate_synthetic_users, generate_synthetic_groups
+from generator import generate_synthetic_users, generate_synthetic_groups
+from auth import get_graph_client
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
+
+# Eventual-consistency retry tuning. Graph directory writes propagate across
+# distributed replicas within seconds; the parameters below cover the typical
+# convergence window (5-30s, occasionally up to ~1m on a fresh tenant).
+MAX_RETRIES = 5
+INITIAL_BACKOFF_SECONDS = 2.0
+MAX_BACKOFF_SECONDS = 30.0
+# Settling pause after group creation before membership $ref writes begin.
+POST_CREATE_SETTLING_SECONDS = 10
+
+
+async def _retry_with_backoff(
+    coro_factory,
+    *,
+    operation_desc: str,
+    max_retries: int = MAX_RETRIES,
+    initial_backoff: float = INITIAL_BACKOFF_SECONDS,
+    max_backoff: float = MAX_BACKOFF_SECONDS,
+):
+    """Execute a coroutine with exponential backoff for Graph eventual consistency.
+
+    Args:
+        coro_factory: Zero-arg callable returning a fresh coroutine each attempt.
+            Graph SDK coroutines are single-use, so we must rebuild per attempt.
+        operation_desc: Human-readable label for logging.
+
+    Returns:
+        The awaited result on success.
+
+    Raises:
+        The last exception if all attempts are exhausted.
+    """
+    last_exc: Exception | None = None
+    backoff = initial_backoff
+    for attempt in range(1, max_retries + 1):
+        try:
+            return await coro_factory()
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_retries:
+                break
+            wait = min(backoff, max_backoff)
+            logger.warning(
+                "%s failed (attempt %d/%d): %s - retrying in %.1fs",
+                operation_desc, attempt, max_retries, exc, wait,
+            )
+            await asyncio.sleep(wait)
+            backoff *= 2
+    raise last_exc  # type: ignore[misc]
+
 
 
 async def create_users_batch(
@@ -54,11 +104,16 @@ async def create_users_batch(
         )
 
         try:
-            created = await client.users.post(user_obj)
+            created = await _retry_with_backoff(
+                lambda: client.users.post(user_obj),
+                operation_desc=f"Create user {payload['mailNickname']}",
+            )
             user_map[payload["mailNickname"]] = created.id
-            logger.info("Created user: %s (%s)", payload["mailNickname"], created.id)
+            logger.info("Created user: %s (%s)",
+                        payload["mailNickname"], created.id)
         except Exception:
-            logger.exception("Failed to create user: %s", payload["mailNickname"])
+            logger.exception("Failed to create user: %s",
+                             payload["mailNickname"])
 
     return user_map
 
@@ -87,11 +142,16 @@ async def create_groups_batch(
         )
 
         try:
-            created = await client.groups.post(group_obj)
+            created = await _retry_with_backoff(
+                lambda: client.groups.post(group_obj),
+                operation_desc=f"Create group {payload['displayName']}",
+            )
             group_map[payload["displayName"]] = created.id
-            logger.info("Created group: %s (%s)", payload["displayName"], created.id)
+            logger.info("Created group: %s (%s)",
+                        payload["displayName"], created.id)
         except Exception:
-            logger.exception("Failed to create group: %s", payload["displayName"])
+            logger.exception("Failed to create group: %s",
+                             payload["displayName"])
 
     return group_map
 
@@ -142,7 +202,8 @@ async def assign_users_to_groups(
 
         group_id = group_map.get(target_group)
         if not group_id:
-            logger.warning("Target group %s not found, skipping %s", target_group, nickname)
+            logger.warning(
+                "Target group %s not found, skipping %s", target_group, nickname)
             continue
 
         ref_body = ReferenceCreate(
@@ -150,10 +211,14 @@ async def assign_users_to_groups(
         )
 
         try:
-            await client.groups.by_group_id(group_id).members.ref.post(ref_body)
+            await _retry_with_backoff(
+                lambda: client.groups.by_group_id(group_id).members.ref.post(ref_body),
+                operation_desc=f"Assign {nickname} -> {target_group}",
+            )
             logger.info("Assigned %s -> %s", nickname, target_group)
         except Exception:
-            logger.exception("Failed to assign %s to %s", nickname, target_group)
+            logger.exception("Failed to assign %s to %s",
+                             nickname, target_group)
 
 
 async def seed_tenant(user_count: int = 100) -> None:
@@ -181,6 +246,15 @@ async def seed_tenant(user_count: int = 100) -> None:
     group_map = await create_groups_batch(client, groups)
     logger.info("Created %d/%d groups", len(group_map), len(groups))
 
+    # Allow Graph directory replicas to converge on the newly created groups
+    # before issuing membership $ref writes. Eliminates the vast majority of
+    # the 404 retries that would otherwise fire against unconverged replicas.
+    logger.info(
+        "Settling %ds for directory replication before $ref assignment...",
+        POST_CREATE_SETTLING_SECONDS,
+    )
+    await asyncio.sleep(POST_CREATE_SETTLING_SECONDS)
+
     logger.info("Assigning users to groups...")
     await assign_users_to_groups(client, user_map, group_map, users)
 
@@ -191,7 +265,8 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Seed Entra ID tenant")
-    parser.add_argument("--users", type=int, default=100, help="Number of users to create")
+    parser.add_argument("--users", type=int, default=100,
+                        help="Number of users to create")
     args = parser.parse_args()
 
     asyncio.run(seed_tenant(user_count=args.users))

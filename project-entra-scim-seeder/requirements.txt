@@ -2,7 +2,7 @@
 azure-identity>=1.16.0
 msgraph-sdk>=1.5.0
 faker>=25.0.0
-python-dotenv>=1.0.0
+python-dotenv>=1.2.0
 
 # SCIM Gateway dependencies
 fastapi>=0.111.0

@@ -7,8 +7,8 @@ from pydantic import BaseModel, Field
 
 class ScimName(BaseModel):
     formatted: str | None = None
-    familyName: str
-    givenName: str
+    familyName: str | None = None
+    givenName: str | None = None
 
 
 class ScimMeta(BaseModel):
@@ -21,9 +21,10 @@ class ScimMeta(BaseModel):
 class ScimUserBase(BaseModel):
     schemas: list[str] = ["urn:ietf:params:scim:schemas:core:2.0:User"]
     userName: str = Field(..., description="Unique UPN or email identifier")
-    name: ScimName
+    name: ScimName | None = None
     displayName: str | None = None
     active: bool = True
+    externalId: str | None = None
 
 
 class ScimUserCreate(ScimUserBase):

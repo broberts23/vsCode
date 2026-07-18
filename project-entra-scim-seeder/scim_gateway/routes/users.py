@@ -43,6 +43,36 @@ def _parse_scim_filter(filter_str: str) -> tuple[str, str] | None:
     return None
 
 
+def _derive_names(body: ScimUserCreate) -> tuple[str, str, str]:
+    """Derive (given_name, family_name, display_name) from a SCIM create payload.
+
+    Entra ID frequently omits the structured `name` object, sending only
+    `displayName`. Falls back through: name.givenName -> name.formatted ->
+    displayName -> userName.
+    """
+    given_name = ""
+    family_name = ""
+    display_name = body.displayName or ""
+
+    if body.name:
+        given_name = body.name.givenName or ""
+        family_name = body.name.familyName or ""
+        if not given_name and not family_name and body.name.formatted:
+            parts = body.name.formatted.split(None, 1)
+            given_name = parts[0] if parts else ""
+            family_name = parts[1] if len(parts) > 1 else ""
+
+    if not given_name and not family_name and display_name:
+        parts = display_name.split(None, 1)
+        given_name = parts[0] if parts else ""
+        family_name = parts[1] if len(parts) > 1 else ""
+
+    if not display_name:
+        display_name = f"{given_name} {family_name}".strip() or body.userName
+
+    return given_name, family_name, display_name
+
+
 def _query_user(container, attr: str, value: str) -> dict | None:
     """Run a point-lookup query against Cosmos by a SCIM attribute."""
     attr_map = {
@@ -132,12 +162,15 @@ def create_user(
             scim_type="uniqueness",
         )
 
+    given_name, family_name, display_name = _derive_names(body)
+
     user = LocalUser(
         userName=body.userName,
-        givenName=body.name.givenName,
-        familyName=body.name.familyName,
-        displayName=body.displayName or f"{body.name.givenName} {body.name.familyName}",
+        givenName=given_name,
+        familyName=family_name,
+        displayName=display_name,
         active=body.active,
+        entraId=body.externalId,
     )
     container.create_item(body=user.model_dump())
     logger.info("Created SCIM user: %s (id=%s)", body.userName, user.id)
