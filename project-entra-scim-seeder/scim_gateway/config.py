@@ -5,23 +5,23 @@ import os
 
 from pydantic_settings import BaseSettings
 
+from scim_gateway.database import get_credential
+
 logger = logging.getLogger(__name__)
 
 
 def _fetch_keyvault_secret(vault_url: str, secret_name: str) -> str | None:
-    """Attempt to read a secret from Azure Key Vault using DefaultAzureCredential.
+    """Attempt to read a secret from Azure Key Vault using Managed Identity.
 
     Returns None if the SDK is unavailable or the read fails (local dev).
     """
     try:
-        from azure.identity import DefaultAzureCredential
         from azure.keyvault.secrets import SecretClient
 
-        credential = DefaultAzureCredential()
-        client = SecretClient(vault_url=vault_url, credential=credential)
+        client = SecretClient(vault_url=vault_url, credential=get_credential())
         return client.get_secret(secret_name).value
     except Exception:
-        logger.debug("Key Vault secret fetch skipped (local dev or SDK unavailable)")
+        logger.exception("Key Vault secret fetch failed")
         return None
 
 

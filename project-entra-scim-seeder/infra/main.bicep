@@ -260,7 +260,10 @@ resource containerApp 'Microsoft.App/containerApps@2026-01-01' = {
       containers: [
         {
           name: 'scim-gateway'
+          image: imageName != '' ? imageName : '${acr.properties.loginServer}/scim-gateway:v1'
+
           env: [
+            { name: 'AZURE_CLIENT_ID', value: scimMi.properties.clientId }
             { name: 'KEY_VAULT_URL', value: keyVault.properties.vaultUri }
             { name: 'SCIM_BEARER_TOKEN_SECRET_NAME', value: scimBearerTokenSecretName }
             { name: 'COSMOS_ENDPOINT', value: cosmos.properties.documentEndpoint }
@@ -293,16 +296,16 @@ resource raMiKeyVault 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 }
 
 // MI -> Cosmos DB Built-in Data Contributor (keyless Cosmos CRUD)
-resource cosmosDBRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2026-03-15' = {
-  name: guid(scimMi.name, cosmosDb.id, cosmosDbBuiltInDataContributorRoleId)
+// Cosmos DB has its own data-plane RBAC system (separate from Azure RBAC).
+// Built-in role definition 00000000-0000-0000-0000-000000000002 is auto-provisioned
+// on every account; we only need to create an assignment referencing its full ID.
+resource cosmosDBRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2023-11-15' = {
+  name: guid(scimMi.name, cosmos.id, cosmosDbBuiltInDataContributorRoleId)
   parent: cosmos
   properties: {
     principalId: scimMi.properties.principalId
-    roleDefinitionId: subscriptionResourceId(
-      'resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${cosmos.name}/sqlRoleDefinitions',
-      cosmosDbBuiltInDataContributorRoleId
-    )
-    scope: '/'
+    roleDefinitionId: '${cosmos.id}/sqlRoleDefinitions/${cosmosDbBuiltInDataContributorRoleId}'
+    scope: cosmos.id
   }
 }
 

@@ -222,3 +222,4 @@ Fill out the variables inside `/seeder/.env` and execute `seed_tenant.py`. This 
 3. Set the **Tenant URL** to `https://<your-container-app-url>/scim/v2`.
 4. Fetch the verification secret token out of your Azure Key Vault and place it into the **Secret Token** field. Click **Test Connection** to validate the pipeline flow.
 
+az acr build --registry <your_acr> --image scim-gateway:v1 .
