@@ -52,10 +52,10 @@ param adminUserObjectId string = ''
 // Well-known role definition GUIDs
 // ---------------------------------------------------------------------------
 
-var keyVaultSecretsUserRoleId    = '4633458b-17d3-442b-9996-0bc71151c2c5' // Key Vault Secrets User
+var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6' // Key Vault Secrets User
 var keyVaultSecretsOfficerRoleId = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7' // Key Vault Secrets Officer
-var acrPullRoleId                = '7f951dda-4ed3-4680-a7ca-43fe172d538d' // AcrPull
-var cosmosDataContributorRoleId  = '00000000-0000-0000-0000-000000000002' // Cosmos DB Built-in Data Contributor
+var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d' // AcrPull
+var cosmosDbBuiltInDataContributorRoleId = '00000000-0000-0000-0000-000000000002' // Cosmos DB Built-in Data Contributor
 
 // ---------------------------------------------------------------------------
 // User-Assigned Managed Identity
@@ -73,19 +73,15 @@ resource scimMi 'Microsoft.ManagedIdentity/userAssignedIdentities@2025-05-31-pre
 resource keyVault 'Microsoft.KeyVault/vaults@2026-02-01' = {
   name: 'kv-${baseName}'
   location: location
-  sku: {
-    name: 'standard'
-    family: 'A'
-  }
   properties: {
     sku: {
       name: 'standard'
       family: 'A'
     }
     enableRbacAuthorization: true
-    enableSoftDelete: true
+    enableSoftDelete: false
     softDeleteRetentionInDays: 7
-    enablePurgeProtection: false
+    enablePurgeProtection: true
     publicNetworkAccess: 'enabled'
     tenantId: subscription().tenantId
   }
@@ -165,8 +161,8 @@ resource cosmosContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
       partitionKey: { paths: ['/userName'], kind: 'Hash' }
       indexingPolicy: {
         indexingMode: 'consistent'
-        includedPaths: [ { path: '/*' } ]
-        excludedPaths: [ { path: '/"_etag"/?' } ]
+        includedPaths: [{ path: '/*' }]
+        excludedPaths: [{ path: '/"_etag"/?' }]
       }
     }
   }
@@ -226,7 +222,6 @@ resource containerApp 'Microsoft.App/containerApps@2026-01-01' = {
       ingress: {
         external: externalIngress
         targetPort: 8000
-        exposedPort: 80
         transport: 'http'
         allowInsecure: false
         traffic: [
@@ -259,13 +254,12 @@ resource containerApp 'Microsoft.App/containerApps@2026-01-01' = {
     template: {
       revisionSuffix: ''
       scale: {
-        minReplicas: 0   // scale-to-zero: free when idle
+        minReplicas: 0 // scale-to-zero: free when idle
         maxReplicas: 1
       }
       containers: [
         {
           name: 'scim-gateway'
-          image: empty(imageName) ? '${acr.properties.loginServer}/scim-gateway:v1' : imageName
           env: [
             { name: 'KEY_VAULT_URL', value: keyVault.properties.vaultUri }
             { name: 'SCIM_BEARER_TOKEN_SECRET_NAME', value: scimBearerTokenSecretName }
@@ -299,13 +293,16 @@ resource raMiKeyVault 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 }
 
 // MI -> Cosmos DB Built-in Data Contributor (keyless Cosmos CRUD)
-resource raMiCosmos 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(scimMi.name, cosmos.id, cosmosDataContributorRoleId)
-  scope: cosmos
+resource cosmosDBRoleAssignment 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2026-03-15' = {
+  name: guid(scimMi.name, cosmosDb.id, cosmosDbBuiltInDataContributorRoleId)
+  parent: cosmos
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cosmosDataContributorRoleId)
     principalId: scimMi.properties.principalId
-    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId(
+      'resourceGroups/${resourceGroup().name}/providers/Microsoft.DocumentDB/databaseAccounts/${cosmos.name}/sqlRoleDefinitions',
+      cosmosDbBuiltInDataContributorRoleId
+    )
+    scope: '/'
   }
 }
 
