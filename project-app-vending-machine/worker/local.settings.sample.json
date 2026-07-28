@@ -1,0 +1,13 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "APP_VENDING_EXECUTION_MODE": "DryRun",
+    "AUTH_BYPASS": "true",
+    "OFFER_CATALOG_PATH": "../catalog/app-offerings.json",
+    "UTCM_OUTPUT_DIR": "../samples/utcm/generated",
+    "GRAPH_TENANT_ID": "00000000-0000-0000-0000-000000000000",
+    "REQUIRED_SUBMITTER_ROLES": "AppVending.Submitter,AppVending.Admin"
+  }
+}

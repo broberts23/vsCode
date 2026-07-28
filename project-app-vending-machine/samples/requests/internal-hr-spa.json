@@ -1,0 +1,10 @@
+{
+  "offeringId": "internal-hr-spa",
+  "displayName": "HR Internal Portal - Prod",
+  "owners": [
+    "11111111-1111-1111-1111-111111111111"
+  ],
+  "justification": "ServiceNow REQ001234",
+  "callbackUrl": "https://itsm.contoso.com/api/hooks/vend-complete",
+  "parameters": {}
+}

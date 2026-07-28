@@ -1,0 +1,71 @@
+{
+  "version": "2026-07-27",
+  "offerings": [
+    {
+      "offeringId": "internal-hr-spa",
+      "displayName": "Internal HR Web Application",
+      "description": "SPA using authorization code with PKCE, HR app roles, and compliant-device Conditional Access.",
+      "authProfile": {
+        "platform": "spa",
+        "oauthFlow": "authorizationCodePKCE",
+        "redirectUris": [
+          "https://hr.internal.contoso.com/auth/callback"
+        ]
+      },
+      "appRoles": [
+        {
+          "displayName": "HR.Read",
+          "value": "HR.Read",
+          "allowedMemberTypes": ["User"],
+          "description": "Read HR records."
+        },
+        {
+          "displayName": "HR.Write",
+          "value": "HR.Write",
+          "allowedMemberTypes": ["User"],
+          "description": "Write HR records."
+        }
+      ],
+      "credentialStrategy": "none",
+      "conditionalAccess": {
+        "template": "require-compliant-device",
+        "mode": "reportOnly",
+        "state": "enabledForReportingButNotEnforced"
+      },
+      "utcmMonitor": {
+        "template": "entra-conditionalAccessPolicy",
+        "baselineRef": "samples/utcm/hr-compliant-device.monitor.json"
+      }
+    },
+    {
+      "offeringId": "aks-graph-workload",
+      "displayName": "AKS Workload - Microsoft Graph",
+      "description": "Service-to-service workload identity for AKS with Graph API permissions and IP-restricted Conditional Access.",
+      "authProfile": {
+        "platform": "web",
+        "oauthFlow": "clientCredentials",
+        "redirectUris": [],
+        "federatedCredential": {
+          "issuer": "https://oidc.aks.azure.com",
+          "subject": "{{parameters.aksServiceAccount}}"
+        }
+      },
+      "graphApplicationPermissions": [
+        "User.Read.All"
+      ],
+      "credentialStrategy": "certificate",
+      "conditionalAccess": {
+        "template": "workload-ip-location-restrict",
+        "mode": "reportOnly",
+        "state": "enabledForReportingButNotEnforced",
+        "parameters": {
+          "allowedIpRanges": "{{parameters.allowedIpRanges}}"
+        }
+      },
+      "utcmMonitor": {
+        "template": "entra-conditionalAccessPolicy",
+        "baselineRef": "samples/utcm/aks-graph-ip-restrict.monitor.json"
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "offeringId": "aks-graph-workload",
+  "displayName": "AKS Order Service - Graph Reader",
+  "owners": [
+    "22222222-2222-2222-2222-222222222222"
+  ],
+  "justification": "ServiceNow REQ005678",
+  "callbackUrl": "https://itsm.contoso.com/api/hooks/vend-complete",
+  "parameters": {
+    "aksServiceAccount": "system:serviceaccount:orders:order-api",
+    "allowedIpRanges": "10.0.0.0/8"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "displayName": "Entra Conditional Access guardrail - AKS Graph workload",
+  "description": "Detects drift in the AKS workload Conditional Access policy with IP restrictions.",
+  "status": "active",
+  "mode": "monitorOnly",
+  "monitorRunFrequencyInHours": 6,
+  "baseline": {
+    "displayName": "AKS Graph workload Conditional Access baseline",
+    "description": "Desired Conditional Access posture for the AKS Graph workload identity.",
+    "resources": [
+      {
+        "displayName": "Conditional Access policy: AKS Graph workload IP restriction",
+        "resourceType": "microsoft.entra.conditionalaccesspolicy",
+        "properties": {
+          "DisplayName": "CA - AKS Graph Workload - Workload IP Restriction",
+          "State": "enabledForReportingButNotEnforced",
+          "Ensure": "Present"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+[project]
+name = "app-vending-machine"
+version = "0.1.0"
+description = "Application Registration Vending Machine"
+requires-python = ">=3.11"
+dependencies = [
+    "azure-data-tables>=12.5.0",
+    "azure-identity>=1.15.0",
+    "azure-storage-queue>=12.9.0",
+    "fastapi>=0.109.0",
+    "httpx>=0.26.0",
+    "msal>=1.26.0",
+    "pydantic>=2.5.0",
+    "uvicorn[standard]>=0.27.0",
+]
+
+[project.optional-dependencies]
+worker = [
+    "azure-functions>=1.18.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

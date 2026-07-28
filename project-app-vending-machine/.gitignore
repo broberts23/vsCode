@@ -1,0 +1,10 @@
+.azurite/
+__pycache__/
+*.pyc
+.venv/
+.env
+local.settings.json
+samples/utcm/generated/*.json
+!samples/utcm/generated/.gitkeep
+.python_packages/
+*.egg-info/
