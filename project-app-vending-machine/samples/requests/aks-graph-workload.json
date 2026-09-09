@@ -2,10 +2,10 @@
   "offeringId": "aks-graph-workload",
   "displayName": "AKS Order Service - Graph Reader",
   "owners": [
-    "22222222-2222-2222-2222-222222222222"
+    "REPLACE_WITH_USER_OR_SP_OBJECT_ID"
   ],
-  "justification": "ServiceNow REQ005678",
-  "callbackUrl": "https://itsm.contoso.com/api/hooks/vend-complete",
+  "justification": "ServiceNow REQ005678 - live tenant test of AKS Graph workload SKU",
+  "callbackUrl": "https://webhook.site/REPLACE_WITH_YOUR_ID",
   "parameters": {
     "aksServiceAccount": "system:serviceaccount:orders:order-api",
     "allowedIpRanges": "10.0.0.0/8"

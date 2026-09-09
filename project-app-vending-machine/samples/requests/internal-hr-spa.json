@@ -2,9 +2,9 @@
   "offeringId": "internal-hr-spa",
   "displayName": "HR Internal Portal - Prod",
   "owners": [
-    "11111111-1111-1111-1111-111111111111"
+    "REPLACE_WITH_USER_OR_SP_OBJECT_ID"
   ],
-  "justification": "ServiceNow REQ001234",
-  "callbackUrl": "https://itsm.contoso.com/api/hooks/vend-complete",
+  "justification": "ServiceNow REQ001234 - live tenant test of internal HR SPA SKU",
+  "callbackUrl": "https://webhook.site/REPLACE_WITH_YOUR_ID",
   "parameters": {}
 }

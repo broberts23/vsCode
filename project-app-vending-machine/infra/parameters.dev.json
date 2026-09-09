@@ -8,11 +8,11 @@
     "tenantId": {
       "value": "00000000-0000-0000-0000-000000000000"
     },
-    "easyAuthClientId": {
-      "value": "00000000-0000-0000-0000-000000000000"
-    },
     "executionMode": {
       "value": "DryRun"
+    },
+    "assignWorkerGraphPermissions": {
+      "value": true
     }
   }
 }

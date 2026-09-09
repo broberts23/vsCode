@@ -50,12 +50,20 @@ def create_application(token: str, application_body: dict[str, Any]) -> dict[str
     created = _graph_request("POST", f"{GRAPH_BASE}/applications", token=token, json_body=application_body)
 
     for owner_id in owners:
-        _graph_request(
-            "POST",
-            f"{GRAPH_BASE}/applications/{created['id']}/owners/$ref",
-            token=token,
-            json_body={"@odata.id": f"{GRAPH_BASE}/directoryObjects/{owner_id}"},
-        )
+        try:
+            _graph_request(
+                "POST",
+                f"{GRAPH_BASE}/applications/{created['id']}/owners/$ref",
+                token=token,
+                json_body={"@odata.id": f"{GRAPH_BASE}/directoryObjects/{owner_id}"},
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Skipping owner assignment for %s on application %s: %s",
+                owner_id,
+                created.get("id"),
+                exc,
+            )
 
     if federated:
         _graph_request(
@@ -130,12 +138,20 @@ def execute_live_vend(
     service_principal = create_service_principal(token, application["appId"], display_name)
 
     credential_result = None
-    if plan.get("credential"):
+    credential_plan = plan.get("credential")
+    if credential_plan and offering.get("credentialStrategy") == "secret":
         credential_result = create_client_secret(
             token,
             application["id"],
-            plan["credential"]["displayName"],
+            credential_plan["displayName"],
         )
+    elif credential_plan and offering.get("credentialStrategy") == "certificate":
+        credential_result = {
+            "strategy": "certificate",
+            "status": "planned",
+            "message": "Upload or generate a certificate and register it on the application; federated credentials are preferred for AKS.",
+            "displayName": credential_plan.get("displayName"),
+        }
 
     ca_policy_plan = build_policy_from_offering(
         offering,

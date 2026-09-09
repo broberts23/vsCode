@@ -8,3 +8,5 @@ samples/utcm/generated/*.json
 !samples/utcm/generated/.gitkeep
 .python_packages/
 *.egg-info/
+infra/*.json
+!infra/parameters.*.json
