@@ -3,6 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from app_vending.catalog import resolve_offering
+from app_vending.graph_ca import build_policy_from_offering
 
 # Well-known Microsoft Graph application permission role IDs.
 # Source: https://learn.microsoft.com/graph/permissions-reference
@@ -56,6 +57,26 @@ def build_app_registration_plan(
         "owners": owners,
         "appRoles": app_roles,
     }
+
+    token_version = auth_profile.get("requestedAccessTokenVersion")
+    cae = auth_profile.get("cae") or {}
+    if cae.get("enabled") and token_version is None:
+        token_version = 2
+    if token_version is not None:
+        application["api"] = {"requestedAccessTokenVersion": token_version}
+
+    if cae.get("enabled"):
+        application["optionalClaims"] = {
+            "accessToken": [
+                {
+                    "name": "xms_cc",
+                    "essential": False,
+                    "source": None,
+                }
+            ],
+            "idToken": [],
+            "saml2Token": [],
+        }
 
     if platform == "spa":
         application["spa"] = {"redirectUris": redirect_uris}
@@ -122,6 +143,12 @@ def build_vend_plan(
     resolved = resolve_offering(offering, parameters)
     app_plan = build_app_registration_plan(resolved, display_name, owners)
     credential_plan = build_credential_plan(resolved)
+    ca_policy = build_policy_from_offering(
+        resolved,
+        display_name=display_name,
+        application_id="application-client-id-placeholder",
+        service_principal_object_id="service-principal-placeholder",
+    )
 
     return {
         "justification": justification,
@@ -133,7 +160,7 @@ def build_vend_plan(
             "dependsOn": "application",
         },
         "credential": credential_plan,
-        "conditionalAccess": resolved.get("conditionalAccess"),
+        "conditionalAccess": ca_policy or resolved.get("conditionalAccess"),
         "utcmMonitor": resolved.get("utcmMonitor"),
         "authProfile": resolved.get("authProfile"),
         "parameters": parameters,

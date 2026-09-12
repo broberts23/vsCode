@@ -43,6 +43,7 @@ def process_vend_request(payload: dict[str, Any], *, request_id: str) -> dict[st
             resolved_offering,
             display_name=display_name,
             service_principal_object_id="service-principal-placeholder",
+            application_id="application-client-id-placeholder",
         )
         result = {
             "applicationObjectId": "dry-run-app-object-id",

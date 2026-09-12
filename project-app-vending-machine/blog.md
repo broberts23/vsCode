@@ -1,5 +1,9 @@
 # The Application Registration Vending Machine
 
+It been been a hot minute between blogs. Since the last blog, I've studing for the new [Microsoft 365 Certified: Microsoft 365 and AI Services Administrator Associate (beta) AB-650](https://learn.microsoft.com/en-us/credentials/certifications/ai-services-administrator-associate/?wt.mc_id=credentials_AB650_blog_wwl\&practice-assessment-type=certification) - still waiting to here if i passed 🫤 - studying for and passing the new [Microsoft Certified: Cloud and AI Security Engineer Associate SC-500](https://learn.microsoft.com/en-us/credentials/certifications/cloud-and-ai-security-engineer-associate/?practice-assessment-type=certification) exam and renewing my [GCP Associate Cloud Engineer](https://cloud.google.com/learn/certification/cloud-engineer) certification for another 12 months.
+
+But now it's back into the practical work!
+
 Every identity engineer has lived through the same Tuesday afternoon. A ServiceNow ticket lands in the queue asking for a new application registration. The requester wants HR.Read and HR.Write app roles, a redirect URI that might or might not be correct, and somewhere in the comments someone wrote "needs MFA" without specifying whether that means user MFA, compliant device, or something else entirely. You open the Entra portal, click through six blades, paste a redirect URI, create two app roles by hand, generate a client secret because the team asked for one, and then realize nobody thought about Conditional Access until production week.
 
 This project exists because that workflow does not scale, and more importantly, it does not teach you the patterns you need for a serious identity engineering career.
@@ -118,6 +122,45 @@ The matching Conditional Access policy should appear in report-only mode with th
 
 ![Report-only Conditional Access policy for HR portal](docs/screenshots/08-entra-ca-report-only.png)
 
+## CAE and a one-hour session for payroll
+
+Default Entra access tokens last a variable sixty to ninety minutes. That window is the blast radius of a stolen bearer token if nothing else is watching. Continuous Access Evaluation changes the bargain. When a client declares the `cp1` capability and the resource is CAE-aware, Entra can issue a long-lived token, often measured in hours rather than minutes, because critical events such as a disabled account, a password change, or a Conditional Access location change can revoke access near real time through a claims challenge. Without a session ceiling, a privileged payroll API that opts into CAE would actually hold tokens longer than the default.
+
+That is why the `privileged-payroll-api` SKU does two things at once. The vended application is stamped for CAE with access token version two and the optional claim `xms_cc`, so tokens can carry the client capability that makes claims challenges possible. The Conditional Access policy that accompanies the app requires a compliant device, scopes itself to that application rather than every cloud app in the tenant, and sets session controls that identity engineers can see in the portal: a one-hour sign-in frequency and Continuous Access Evaluation in `strictEnforcement` mode.
+
+```json
+{
+  "offeringId": "privileged-payroll-api",
+  "displayName": "Payroll API - Prod",
+  "owners": ["11111111-1111-1111-1111-111111111111"],
+  "justification": "ServiceNow REQ009001",
+  "callbackUrl": "https://itsm.contoso.com/api/hooks/vend-complete",
+  "parameters": {}
+}
+```
+
+The catalog does not invent a directory `tokenLifetimePolicy`. Microsoft's current guidance points operators at Conditional Access session management for how often users must re-authenticate, and at CAE for event-driven revocation. Token lifetime policies are Graph-only with no Entra admin center blade. Sign-in frequency lives on the same Conditional Access policy the identity team already reviews, and Graph v1.0 expresses it in hours or days, so this SKU uses one hour rather than a fifteen-minute JWT `exp`. Sub-hour access-token lifetimes would require the token lifetime policy this project deliberately avoids.
+
+```json
+"sessionControls": {
+  "signInFrequency": {
+    "isEnabled": true,
+    "type": "hours",
+    "value": 1,
+    "frequencyInterval": "timeBased"
+  },
+  "continuousAccessEvaluation": {
+    "mode": "strictEnforcement"
+  }
+}
+```
+
+The vending machine prepares the resource app. Callers still have to declare `cp1` when they request tokens, for example with MSAL client capabilities, and the payroll API still has to handle a 401 claims challenge. DryRun shows the optional claim and the session controls in the receipt. Live mode creates the application, then posts the Conditional Access policy through the Graph beta endpoint so the Continuous Access Evaluation block is not dropped.
+
+![Privileged payroll Conditional Access Session blade](docs/screenshots/11-cae-signin-frequency.png)
+
+![Payroll app optional claim xms_cc](docs/screenshots/12-app-xms-cc-optional-claim.png)
+
 ## Walkthrough: AKS Graph workload
 
 The second SKU covers a different real-world shape entirely:
@@ -164,6 +207,6 @@ The shared code in `src/app_vending/` follows a strict KISS rule: plain function
 
 ## What this teaches for your career
 
-OAuth 2.0 and PKCE show up in the client token script and in the SPA SKU definition. App roles and Easy Auth appear in the API authorization path. Managed identity and least-privilege Graph permissions matter in Live mode. Conditional Access templates cover both user-facing apps and workload identities. Microsoft Graph Bicep makes the prerequisite identity plane reviewable in pull requests. UTCM ties provisioning to ongoing compliance. The async queue-and-callback pattern mirrors how real enterprise integrations work with ServiceNow, BMC, and other ITSM platforms.
+OAuth 2.0 and PKCE show up in the client token script and in the SPA SKU definition. App roles and Easy Auth appear in the API authorization path. Managed identity and least-privilege Graph permissions matter in Live mode. Conditional Access templates cover user-facing apps, privileged sessions with Continuous Access Evaluation, and workload identities. Microsoft Graph Bicep makes the prerequisite identity plane reviewable in pull requests. UTCM ties provisioning to ongoing compliance. The async queue-and-callback pattern mirrors how real enterprise integrations work with ServiceNow, BMC, and other ITSM platforms.
 
 That is a full identity engineering pipeline in one repo, runnable on your laptop, deployable to cheap Azure resources, and visible in the Entra portal when Live mode does the work that used to consume your Tuesday afternoon.

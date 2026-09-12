@@ -170,6 +170,8 @@ After a Live vend, capture evidence in these blades:
 | 8 | Entra | Conditional Access → Policies | Report-only CA policy for the vended app |
 | 9 | Azure | Web App → Authentication | Easy Auth Microsoft provider + 401 action |
 | 10 | VS Code | `samples/utcm/generated/` | Emitted UTCM monitor JSON |
+| 11 | Entra | CA policy → Session | 1-hour sign-in frequency + CAE strict enforcement |
+| 12 | Entra | App registration → Token configuration | Optional claim `xms_cc` on payroll API |
 
 ## Catalog SKUs
 
@@ -177,6 +179,7 @@ After a Live vend, capture evidence in these blades:
 |-----|----------|
 | `internal-hr-spa` | SPA with PKCE, `HR.Read`/`HR.Write` app roles, compliant-device CA |
 | `aks-graph-workload` | AKS workload identity, Graph API permissions, IP-restricted CA |
+| `privileged-payroll-api` | CAE-capable payroll API, `Payroll.Read`/`Payroll.Write`, compliant device + 1-hour SIF + CAE strict enforcement |
 
 See [catalog/app-offerings.json](catalog/app-offerings.json).
 

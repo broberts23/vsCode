@@ -8,3 +8,4 @@ Use these JSON files with Swagger (`POST /v1/requests`) or curl.
 - Replace `REPLACE_WITH_YOUR_ID` in `callbackUrl` with a temporary [webhook.site](https://webhook.site) URL (or leave the field out if you prefer polling).
 - For DryRun local testing, placeholder owner IDs are fine because Graph is never called.
 - For the AKS SKU, set `aksServiceAccount` to your Kubernetes service account subject and `allowedIpRanges` to the egress CIDR you want the Conditional Access template to encode.
+- For `privileged-payroll-api`, no extra parameters are required. The catalog stamps CAE (`xms_cc` / `cp1`) on the app and encodes a one-hour sign-in frequency plus CAE strict enforcement on the Conditional Access policy. Clients that call the API must still declare the `cp1` client capability when requesting tokens.

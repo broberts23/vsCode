@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 from azure.identity import DefaultAzureCredential
 
-from app_vending.graph_ca import build_policy_from_offering
+from app_vending.graph_ca import build_policy_from_offering, policy_requires_beta
 from app_vending.settings import get_graph_tenant_id
 from app_vending.vend_plan import build_vend_plan
 
@@ -108,10 +108,16 @@ def create_client_secret(token: str, application_object_id: str, display_name: s
     )
 
 
-def create_conditional_access_policy(token: str, policy_body: dict[str, Any]) -> dict[str, Any]:
+def create_conditional_access_policy(
+    token: str,
+    policy_body: dict[str, Any],
+    *,
+    use_beta: bool = False,
+) -> dict[str, Any]:
+    base = BETA_GRAPH_BASE if use_beta else GRAPH_BASE
     return _graph_request(
         "POST",
-        f"{GRAPH_BASE}/identity/conditionalAccess/policies",
+        f"{base}/identity/conditionalAccess/policies",
         token=token,
         json_body=policy_body,
     )
@@ -157,10 +163,15 @@ def execute_live_vend(
         offering,
         display_name=display_name,
         service_principal_object_id=service_principal["id"],
+        application_id=application["appId"],
     )
     ca_policy = None
     if ca_policy_plan:
-        ca_policy = create_conditional_access_policy(token, ca_policy_plan)
+        ca_policy = create_conditional_access_policy(
+            token,
+            ca_policy_plan,
+            use_beta=policy_requires_beta(ca_policy_plan),
+        )
 
     return {
         "applicationObjectId": application["id"],

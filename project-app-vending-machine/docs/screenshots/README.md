@@ -14,5 +14,7 @@ Capture images into this folder using the filenames referenced from `blog.md`:
 | `08-entra-ca-report-only.png` | Report-only Conditional Access policy |
 | `09-azure-easy-auth.png` | Web App Authentication / Easy Auth |
 | `10-utcm-monitor-artifact.png` | Generated UTCM JSON in VS Code |
+| `11-cae-signin-frequency.png` | Entra CA policy Session blade (1-hour SIF + CAE) |
+| `12-app-xms-cc-optional-claim.png` | App registration Token configuration / `xms_cc` |
 
 Keep screenshots cropped tightly to the blade or terminal content. Prefer dark or light theme consistently across the set.

@@ -66,6 +66,58 @@
         "template": "entra-conditionalAccessPolicy",
         "baselineRef": "samples/utcm/aks-graph-ip-restrict.monitor.json"
       }
+    },
+    {
+      "offeringId": "privileged-payroll-api",
+      "displayName": "Privileged Payroll API",
+      "description": "CAE-capable payroll API with Payroll app roles, compliant-device Conditional Access, one-hour sign-in frequency, and CAE strict enforcement.",
+      "authProfile": {
+        "platform": "web",
+        "oauthFlow": "authorizationCodePKCE",
+        "redirectUris": [
+          "https://payroll.internal.contoso.com/auth/callback"
+        ],
+        "requestedAccessTokenVersion": 2,
+        "cae": {
+          "enabled": true,
+          "clientCapability": "cp1"
+        }
+      },
+      "appRoles": [
+        {
+          "displayName": "Payroll.Read",
+          "value": "Payroll.Read",
+          "allowedMemberTypes": ["User"],
+          "description": "Read payroll records."
+        },
+        {
+          "displayName": "Payroll.Write",
+          "value": "Payroll.Write",
+          "allowedMemberTypes": ["User"],
+          "description": "Write payroll records."
+        }
+      ],
+      "credentialStrategy": "none",
+      "conditionalAccess": {
+        "template": "require-compliant-device-privileged-session",
+        "mode": "reportOnly",
+        "state": "enabledForReportingButNotEnforced",
+        "sessionControls": {
+          "signInFrequency": {
+            "isEnabled": true,
+            "type": "hours",
+            "value": 1,
+            "frequencyInterval": "timeBased"
+          },
+          "continuousAccessEvaluation": {
+            "mode": "strictEnforcement"
+          }
+        }
+      },
+      "utcmMonitor": {
+        "template": "entra-conditionalAccessPolicy",
+        "baselineRef": "samples/utcm/payroll-cae-session.monitor.json"
+      }
     }
   ]
 }

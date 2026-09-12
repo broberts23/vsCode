@@ -32,3 +32,29 @@ def test_aks_graph_workload_dry_run():
 
     assert result["status"] == "completed"
     assert "utcmMonitorArtifact" in result["result"]
+
+
+def test_privileged_payroll_api_dry_run():
+    payload = {
+        "offeringId": "privileged-payroll-api",
+        "displayName": "Payroll API - Prod",
+        "owners": ["33333333-3333-3333-3333-333333333333"],
+        "justification": "REQ009001",
+        "parameters": {},
+    }
+    result = process_vend_request(payload, request_id="test-payroll-001")
+
+    assert result["status"] == "completed"
+    assert result["offeringId"] == "privileged-payroll-api"
+
+    dry_run = result["result"]["dryRunPlan"]
+    optional_claims = dry_run["application"]["optionalClaims"]["accessToken"]
+    assert any(claim["name"] == "xms_cc" for claim in optional_claims)
+    assert dry_run["application"]["api"]["requestedAccessTokenVersion"] == 2
+
+    ca_policy = result["result"]["conditionalAccessPolicy"]
+    sif = ca_policy["sessionControls"]["signInFrequency"]
+    assert sif["value"] == 1
+    assert sif["type"] == "hours"
+    assert ca_policy["sessionControls"]["continuousAccessEvaluation"]["mode"] == "strictEnforcement"
+    assert any(role["value"] == "Payroll.Write" for role in result["result"]["appRoles"])

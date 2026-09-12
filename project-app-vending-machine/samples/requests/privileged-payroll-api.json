@@ -1,0 +1,10 @@
+{
+  "offeringId": "privileged-payroll-api",
+  "displayName": "Payroll API - Prod",
+  "owners": [
+    "REPLACE_WITH_USER_OR_SP_OBJECT_ID"
+  ],
+  "justification": "ServiceNow REQ009001 - live tenant test of CAE privileged payroll SKU",
+  "callbackUrl": "https://webhook.site/REPLACE_WITH_YOUR_ID",
+  "parameters": {}
+}
