@@ -10,6 +10,14 @@ def _load_template(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
+def _artifact_path_for_result(artifact_path: Path, project_root: Path) -> str:
+    """Prefer a repo-relative path; fall back to absolute when output is outside root."""
+    try:
+        return str(artifact_path.resolve().relative_to(project_root.resolve())).replace("\\", "/")
+    except ValueError:
+        return str(artifact_path.resolve())
+
+
 def render_utcm_monitor(
     offering: dict[str, Any],
     *,
@@ -41,6 +49,6 @@ def render_utcm_monitor(
         json.dump(monitor, handle, indent=2)
 
     return {
-        "artifactPath": str(artifact_path.relative_to(project_root)).replace("\\", "/"),
+        "artifactPath": _artifact_path_for_result(artifact_path, project_root),
         "monitor": monitor,
     }

@@ -2,10 +2,10 @@
   "offeringId": "aks-graph-workload",
   "displayName": "AKS Order Service - Graph Reader",
   "owners": [
-    "REPLACE_WITH_USER_OR_SP_OBJECT_ID"
+    "00000000-0000-0000-0000-000000000001"
   ],
   "justification": "ServiceNow REQ005678 - live tenant test of AKS Graph workload SKU",
-  "callbackUrl": "https://webhook.site/REPLACE_WITH_YOUR_ID",
+  "callbackUrl": "https://webhook.site/[WEBHOOK_SITE_ID]",
   "parameters": {
     "aksServiceAccount": "system:serviceaccount:orders:order-api",
     "allowedIpRanges": "10.0.0.0/8"

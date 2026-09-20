@@ -53,11 +53,11 @@ var submitterRoleId = guid(resourceGroup().id, baseName, 'AppVending.Submitter')
 var adminRoleId = guid(resourceGroup().id, baseName, 'AppVending.Admin')
 var apiAudience = 'api://${apiAppUniqueName}'
 
-// Well-known Microsoft Graph application permission role IDs
-// https://learn.microsoft.com/graph/permissions-reference
-var graphApplicationReadWriteOwnedByRoleId = '18a4783c-866b-4cc7-a460-3d5e5662c884'
-var graphPolicyReadAllRoleId = '246ddfdf-e6c3-4d72-b48f-42b9744a17ce'
-var graphPolicyReadWriteConditionalAccessRoleId = '01c0a623-fc9b-48e9-b794-0756f8e8f067'
+// Built-in Azure RBAC role definition IDs
+var roleStorageBlobDataOwner = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
+var roleStorageQueueDataContributor = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
+var roleStorageTableDataContributor = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3'
+var roleMonitoringMetricsPublisher = '3913510d-42f4-4e42-8a64-420c390055eb'
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
@@ -70,6 +70,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
+    allowSharedKeyAccess: false
     supportsHttpsTrafficOnly: true
     networkAcls: {
       bypass: 'AzureServices'
@@ -85,6 +86,7 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = {
   kind: 'web'
   properties: {
     Application_Type: 'web'
+    DisableLocalAuth: true
   }
 }
 
@@ -167,8 +169,20 @@ resource microsoftGraphServicePrincipal 'Microsoft.Graph/servicePrincipals@v1.0'
   appId: '00000003-0000-0000-c000-000000000000'
 }
 
+// Resolve role IDs from the Graph SP appRoles collection (do not hardcode GUIDs).
+var graphAppReadWriteOwnedByRoleId = filter(microsoftGraphServicePrincipal.appRoles, role => role.value == 'Application.ReadWrite.OwnedBy')[0].id
+var graphAppReadAllRoleId = filter(microsoftGraphServicePrincipal.appRoles, role => role.value == 'Application.Read.All')[0].id
+var graphPolicyReadAllRoleId = filter(microsoftGraphServicePrincipal.appRoles, role => role.value == 'Policy.Read.All')[0].id
+var graphPolicyReadWriteConditionalAccessRoleId = filter(microsoftGraphServicePrincipal.appRoles, role => role.value == 'Policy.ReadWrite.ConditionalAccess')[0].id
+
 resource workerGraphAppReadWriteOwnedBy 'Microsoft.Graph/appRoleAssignedTo@v1.0' = if (assignWorkerGraphPermissions) {
-  appRoleId: graphApplicationReadWriteOwnedByRoleId
+  appRoleId: graphAppReadWriteOwnedByRoleId
+  principalId: workerIdentity.properties.principalId
+  resourceId: microsoftGraphServicePrincipal.id
+}
+
+resource workerGraphAppReadAll 'Microsoft.Graph/appRoleAssignedTo@v1.0' = if (assignWorkerGraphPermissions) {
+  appRoleId: graphAppReadAllRoleId
   principalId: workerIdentity.properties.principalId
   resourceId: microsoftGraphServicePrincipal.id
 }
@@ -191,7 +205,7 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
   tags: tags
   kind: 'functionapp,linux'
   identity: {
-    type: 'UserAssigned'
+    type: 'SystemAssigned, UserAssigned'
     userAssignedIdentities: {
       '${workerIdentity.id}': {}
     }
@@ -213,16 +227,30 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: '~4'
         }
         {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+          // API enqueue uses plain JSON; default Functions queue encoding is Base64.
+          name: 'AzureFunctionsJobHost__extensions__queues__messageEncoding'
+          value: 'none'
         }
         {
-          name: 'WEBSITE_RUN_FROM_PACKAGE'
-          value: '1'
+          // Identity-based host storage (system-assigned MI; omit __clientId).
+          name: 'AzureWebJobsStorage__accountName'
+          value: storageAccount.name
+        }
+        {
+          name: 'AzureWebJobsStorage__credential'
+          value: 'managedidentity'
+        }
+        {
+          name: 'STORAGE_ACCOUNT_NAME'
+          value: storageAccount.name
         }
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: applicationInsights.properties.ConnectionString
+        }
+        {
+          name: 'APPLICATIONINSIGHTS_AUTHENTICATION_STRING'
+          value: 'Authorization=AAD'
         }
         {
           name: 'APP_VENDING_EXECUTION_MODE'
@@ -241,8 +269,21 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: 'AppVending.Submitter,AppVending.Admin'
         }
         {
-          name: 'AZURE_CLIENT_ID'
+          // Graph control plane uses the user-assigned identity only.
+          name: 'WORKER_CLIENT_ID'
           value: workerIdentity.properties.clientId
+        }
+        {
+          name: 'WORKER_PRINCIPAL_ID'
+          value: workerIdentity.properties.principalId
+        }
+        {
+          name: 'UTCM_OUTPUT_DIR'
+          value: '/home/data/utcm'
+        }
+        {
+          name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
+          value: 'true'
         }
       ]
     }
@@ -254,6 +295,9 @@ resource apiApp 'Microsoft.Web/sites@2023-12-01' = {
   location: location
   tags: tags
   kind: 'app,linux'
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     serverFarmId: apiPlan.id
     httpsOnly: true
@@ -261,14 +305,35 @@ resource apiApp 'Microsoft.Web/sites@2023-12-01' = {
       linuxFxVersion: 'Python|3.11'
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
+      appCommandLine: 'python -m gunicorn -w 2 -k uvicorn.workers.UvicornWorker api.main:app --bind=0.0.0.0:8000'
       appSettings: [
         {
           name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
-          value: 'true'
+          value: 'false'
         }
         {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
+          name: 'ENABLE_ORYX_BUILD'
+          value: 'false'
+        }
+        {
+          name: 'WEBSITES_PORT'
+          value: '8000'
+        }
+        {
+          name: 'PYTHONPATH'
+          value: '/home/site/wwwroot:/home/site/wwwroot/.python_packages/lib/site-packages'
+        }
+        {
+          name: 'AzureWebJobsStorage__accountName'
+          value: storageAccount.name
+        }
+        {
+          name: 'AzureWebJobsStorage__credential'
+          value: 'managedidentity'
+        }
+        {
+          name: 'STORAGE_ACCOUNT_NAME'
+          value: storageAccount.name
         }
         {
           name: 'APP_VENDING_EXECUTION_MODE'
@@ -303,6 +368,9 @@ resource apiAuthSettings 'Microsoft.Web/sites/config@2023-12-01' = {
       requireAuthentication: true
       unauthenticatedClientAction: 'Return401'
       redirectToProvider: 'azureactivedirectory'
+      excludedPaths: [
+        '/health'
+      ]
     }
     login: {
       tokenStore: {
@@ -328,12 +396,110 @@ resource apiAuthSettings 'Microsoft.Web/sites/config@2023-12-01' = {
   }
 }
 
+// Disable SCM/FTP basic publishing credentials (AAD deploy only).
+resource functionAppScmBasicAuth 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01' = {
+  parent: functionApp
+  name: 'scm'
+  properties: {
+    allow: false
+  }
+}
+
+resource functionAppFtpBasicAuth 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01' = {
+  parent: functionApp
+  name: 'ftp'
+  properties: {
+    allow: false
+  }
+}
+
+resource apiAppScmBasicAuth 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01' = {
+  parent: apiApp
+  name: 'scm'
+  properties: {
+    allow: false
+  }
+}
+
+resource apiAppFtpBasicAuth 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01' = {
+  parent: apiApp
+  name: 'ftp'
+  properties: {
+    allow: false
+  }
+}
+
+// Function system MI → Storage (host + app data plane)
+resource functionStorageBlobOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, functionApp.id, roleStorageBlobDataOwner)
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleStorageBlobDataOwner)
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionStorageQueueContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, functionApp.id, roleStorageQueueDataContributor)
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleStorageQueueDataContributor)
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource functionStorageTableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, functionApp.id, roleStorageTableDataContributor)
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleStorageTableDataContributor)
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// API system MI → Storage (queue + table only)
+resource apiStorageQueueContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, apiApp.id, roleStorageQueueDataContributor)
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleStorageQueueDataContributor)
+    principalId: apiApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource apiStorageTableContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, apiApp.id, roleStorageTableDataContributor)
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleStorageTableDataContributor)
+    principalId: apiApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Function system MI → App Insights AAD ingestion
+resource functionAppInsightsMetricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(applicationInsights.id, functionApp.id, roleMonitoringMetricsPublisher)
+  scope: applicationInsights
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roleMonitoringMetricsPublisher)
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
 output storageAccountName string = storageAccount.name
 output functionAppName string = functionApp.name
+output functionAppPrincipalId string = functionApp.identity.principalId
 output workerIdentityName string = workerIdentity.name
 output workerIdentityClientId string = workerIdentity.properties.clientId
 output workerIdentityPrincipalId string = workerIdentity.properties.principalId
 output apiAppName string = apiApp.name
+output apiAppPrincipalId string = apiApp.identity.principalId
 output apiAppHostname string = 'https://${apiApp.properties.defaultHostName}'
 output applicationInsightsName string = applicationInsights.name
 output apiAppRegistrationClientId string = apiAppRegistration.appId

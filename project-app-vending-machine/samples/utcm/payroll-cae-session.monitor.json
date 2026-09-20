@@ -1,6 +1,6 @@
 {
   "displayName": "Entra Conditional Access guardrail - Payroll CAE session",
-  "description": "Detects drift in the privileged payroll Conditional Access policy with one-hour sign-in frequency and CAE strict enforcement.",
+  "description": "Detects drift in the privileged payroll Conditional Access policy with one-hour sign-in frequency (CAE via app xms_cc).",
   "status": "active",
   "mode": "monitorOnly",
   "monitorRunFrequencyInHours": 6,
@@ -13,7 +13,7 @@
         "resourceType": "microsoft.entra.conditionalaccesspolicy",
         "properties": {
           "DisplayName": "CA - Payroll API - Prod - Privileged Session",
-          "State": "enabledForReportingButNotEnforced",
+          "State": "enabled",
           "Ensure": "Present"
         }
       }

@@ -1,26 +1,28 @@
 # The Application Registration Vending Machine
 
-It been been a hot minute between blogs. Since the last blog, I've studing for the new [Microsoft 365 Certified: Microsoft 365 and AI Services Administrator Associate (beta) AB-650](https://learn.microsoft.com/en-us/credentials/certifications/ai-services-administrator-associate/?wt.mc_id=credentials_AB650_blog_wwl\&practice-assessment-type=certification) - still waiting to here if i passed 🫤 - studying for and passing the new [Microsoft Certified: Cloud and AI Security Engineer Associate SC-500](https://learn.microsoft.com/en-us/credentials/certifications/cloud-and-ai-security-engineer-associate/?practice-assessment-type=certification) exam and renewing my [GCP Associate Cloud Engineer](https://cloud.google.com/learn/certification/cloud-engineer) certification for another 12 months.
+It's been been a hot minute between blogs. Since my last blog, I've been studing for the new [Microsoft 365 Certified: Microsoft 365 and AI Services Administrator Associate
+(beta) AB-650](https://learn.microsoft.com/en-us/credentials/certifications/ai-services-administrator-associate/?wt.mc_id=credentials_AB650_blog_wwl&practice-assessment-type=certification) Exam (still waiting to hear if I passed 🫤 ), studying for the new [Microsoft Certified: Cloud and AI Security Engineer Associate SC-500](https://learn.microsoft.com/en-us/credentials/certifications/cloud-and-ai-security-engineer-associate/?practice-assessment-type=certification) Exam (I passed! 🎉) and
+renewing my [GCP Associate Cloud Engineer](https://cloud.google.com/learn/certification/cloud-engineer) certification for another 12 months.
 
-But now it's back into the practical work!
+But now it's back into some practical work! Let's build a vending machine for application registrations! 🚀
 
-Every identity engineer has lived through the same Tuesday afternoon. A ServiceNow ticket lands in the queue asking for a new application registration. The requester wants HR.Read and HR.Write app roles, a redirect URI that might or might not be correct, and somewhere in the comments someone wrote "needs MFA" without specifying whether that means user MFA, compliant device, or something else entirely. You open the Entra portal, click through six blades, paste a redirect URI, create two app roles by hand, generate a client secret because the team asked for one, and then realize nobody thought about Conditional Access until production week.
+Every identity engineer has lived through the same Tuesday afternoon. A ticket lands in the queue asking for a new application registration. The requester wants HR.Read and HR.Write app roles, a redirect URI that might or might not be correct, and somewhere in the ticket notes someone typed "needs MFA" without specifying whether that means user MFA, compliant device, or something else entirely. You open the Entra portal, click through six blades, paste a redirect URI, expose and API or two, add the two app roles by hand, generate a client secret because the team asked for one, and then realize nobody thought about Conditional Access until production week.
 
-This project exists because that workflow does not scale, and more importantly, it does not teach you the patterns you need for a serious identity engineering career.
+Manual directory administration does not scale. When application provisioning happens through ad-hoc portal clicks, security drift is inevitable. Redirect URIs end up wildcarded, client secrets get generated with two-year lifespans and emailed across Slack or Teams, and Conditional Access policies never get assigned to the resulting service principals. Handcrafted identity configurations turn enterprise tenants into unmanageable collections of orphaned credentials and unmonitored endpoints.
 
-## Why a vending machine
+## Why a vending machine?
 
-The core idea is borrowed from a pattern you already know if you have worked with cloud platform teams: callers do not design infrastructure from scratch. They pick a SKU. The SKU encodes the security posture. The vending service enforces it.
+The solution borrows a proven pattern from cloud platform automation: callers never design infrastructure from scratch. Instead, they choose a pre-approved SKU. The SKU encodes the organizational security posture, and the vending service enforces it during provisioning.
 
-An application registration vending machine applies the same discipline to Entra ID. Callers submit a small payload — an offering ID, a display name, owners, a justification, and instance-specific parameters. They do not choose arbitrary Graph permissions, arbitrary redirect URI patterns, or arbitrary Conditional Access grant controls. Those decisions live in a catalog file that identity engineering owns and reviews.
+An application registration vending machine brings that same operational discipline to Microsoft Entra ID. Callers submit a minimal JSON payload containing an offering ID, a display name, designated owners, an operational justification, and instance-specific parameters. They cannot specify arbitrary Graph permissions, rogue redirect URIs, or loose access controls. Those architecture decisions live inside a governed catalog file that the identity engineering team owns, reviews, and version-controls in Git.
 
-That constraint is the whole point. It is what makes the system governable, auditable, and safe to expose to an ITSM integration.
+That constraint is the foundation of the entire system. Restricting the caller to catalog-defined offerings makes identity provisioning governable, auditable, and safe to expose directly to enterprise IT service management systems.
 
-## Prerequisites as code, not portal clicks
+## Prerequisites as code, no ClickOps
 
-Here is the trap that kills most identity automation demos. You write a beautiful vending pipeline, then the README quietly says "first create an app registration, add two app roles, create a managed identity, grant Application.ReadWrite.OwnedBy and Policy.ReadWrite.ConditionalAccess, wire Easy Auth, and admin-consent everything." That is twenty portal clicks before the first request. It also contradicts the story you are selling. If the vending machine exists to stop handcrafting Entra objects, the foundation of the vending machine should not be handcrafted either.
+Most identity automation walkthroughs fall apart before you run a single script. They present an automated provisioning pipeline, but the documentation starts with a dozen manual prerequisites: register an API application by hand, define two app roles, build a managed identity, grant Graph permissions, configure Easy Auth, and manually trigger admin consent. Spending twenty minutes clicking through the Azure portal just to prepare an automation tool undermines the entire philosophy of systems engineering. If the vending machine exists to eliminate handcrafted Entra objects, the infrastructure running the vending machine must not be handcrafted either. To put it another way, the vending machine exists to eliminate ClickOps, the infrastructure running the vending machine must not be ClickOps either.
 
-The Bicep template in this repo uses the Microsoft Graph extension so the prerequisite identity plane is declared next to the Azure resources. One deployment creates the API application registration, stamps `AppVending.Submitter` and `AppVending.Admin` onto it, creates the enterprise application, provisions a user-assigned managed identity for the worker, and assigns the Graph application permissions that Live mode needs. Easy Auth on the Web App is wired to the generated client ID automatically. There is no leftover `easyAuthClientId` parameter for someone to paste from a screenshot.
+The Bicep deployment in this repository uses the Microsoft Graph Bicep extension to declare the prerequisite identity plane directly alongside the Azure resource definitions. A single deployment template creates the API application registration, defines the `AppVending.Submitter` and `AppVending.Admin` app roles, provisions the enterprise application, configures a dedicated user-assigned managed identity for Graph operations, enables system-assigned identities for Azure resource role assignments, and assigns the necessary Graph application permissions. Azure App Service Easy Auth on the Web App binds to the generated client ID automatically without requiring anyone to copy GUIDs between portal blades.
 
 ```bicep
 extension microsoftGraphV1
@@ -49,97 +51,320 @@ resource workerGraphAppReadWriteOwnedBy 'Microsoft.Graph/appRoleAssignedTo@v1.0'
 }
 ```
 
-After deployment, the Azure resource group should look like a complete platform slice rather than a half-finished lab: Web App, Function App, Storage Account, Application Insights, App Service plans, and the worker managed identity sitting together.
+Once the Bicep template finishes deploying, the Azure resource group contains a complete, self-contained platform: the API Web App, the Functions background worker, a storage account, Application Insights, hosting plans, and the worker user-assigned managed identity.
 
-![Azure resource group overview after Bicep deploy](docs/screenshots/01-azure-resource-group.png)
+![Azure resource group overview after Bicep deploy](docs/screenshots/01-azure-resource-group-overview.png)
 
-In the Entra admin center, the API app registration shows the two application roles that gate the ITSM API. Those roles are not decorative documentation. They become claims in the access token and the FastAPI dependency rejects callers that lack them.
+Inside the Entra admin center, the API application registration exposes the two custom application roles that govern the ingestion API. These roles are not passive metadata. They are emitted directly into caller security tokens, allowing the API backend to enforce strict role-based access control on every incoming request.
 
 ![Entra API app registration app roles](docs/screenshots/02-entra-api-app-roles.png)
 
-The worker identity's Microsoft Graph permissions should show `Application.ReadWrite.OwnedBy`, `Policy.Read.All`, and `Policy.ReadWrite.ConditionalAccess` with admin consent. That is the least-privilege set Live mode needs to create owned applications and report-only Conditional Access policies. If your deploying account cannot grant Graph application permissions, set `assignWorkerGraphPermissions=false` in the parameters file and run `scripts/Grant-WorkerGraphPermissions.ps1` with a privileged identity afterward.
+The worker user-assigned managed identity receives Microsoft Graph application permissions with tenant-wide admin consent: `Application.ReadWrite.OwnedBy`, `Policy.Read.All`, and `Policy.ReadWrite.ConditionalAccess`. This forms the precise least-privilege boundary required to vend application registrations, create service principals, and bind application-targeted Conditional Access policies without granting broad directory-wide administrative rights.
 
-![Worker managed identity Graph permissions](docs/screenshots/03-entra-worker-graph-permissions.png)
+![Worker managed identity Graph permissions](docs/screenshots/03-entra-worker-managed-identity-graph-permissions.png)
 
-## The ITSM contract
+## The defense in depth authentication stack
 
-Real ITSM systems do not wait around while you click through the Entra portal. They open a ticket, call an API, get an immediate acknowledgement, and move on. When provisioning finishes, they want a callback with the object IDs and next steps.
+Securing an identity provisioning service demands multiple distinct validation layers. A compromised vending endpoint would allow an attacker to mint arbitrary directory credentials, so the architecture enforces authentication and authorization at the network edge, the application framework, and the cloud data plane.
 
-The API implements exactly that pattern. `POST /v1/requests` validates the payload, writes the request to Azure Table Storage with status `accepted`, drops a message on a Storage Queue, and returns `202 Accepted` with a `requestId` and a `statusUrl`. The queue-triggered worker picks up the job, runs the vend pipeline, updates the table row, and POSTs the completion payload to the `callbackUrl` if one was supplied.
+Incoming requests hit Azure App Service Authentication first. Configured through Bicep using `authsettingsV2`, Easy Auth intercepts incoming HTTP traffic at the platform boundary before any application runtime code executes. Unauthenticated requests are rejected immediately with HTTP 401 Unauthorized, ensuring that unvetted internet traffic never reaches the Python web process.
 
-Callers that cannot receive webhooks can poll `GET /v1/requests/{requestId}` instead. Both paths read the same table row. The design is intentionally boring, which is a compliment.
+![Azure Web App Easy Auth configuration](docs/screenshots/04-azure-api-app-service-easy-auth.png)
 
-Swagger UI at `/docs` gives you an interactive surface for development and testing. In production, ServiceNow or another ITSM calls the same endpoints with a Bearer token obtained through OAuth 2.0 authorization code flow with PKCE.
+The API application registration defines a custom OAuth 2.0 delegated scope named `access_as_user` under its unique Application ID URI. Interactive clients obtain user-delegated tokens scoped specifically to this API, while administrative pre-authorization guarantees that callers cannot bypass organization consent controls.
 
-![Swagger POST /v1/requests returning 202 Accepted](docs/screenshots/04-swagger-202-accepted.png)
+![Entra API app registration Expose an API scope](docs/screenshots/05-entra-api-expose-oauth-scope.png)
 
-When the worker is running, the queue message disappears from `vend-jobs` and the Function host logs the vend job identifier. That terminal line is the proof that identity provisioning left the synchronous request path.
+To grant submitter privileges, directory administrators assign the user, caller group, or service principal directly to the `App Vending Submitter` role on the enterprise application service principal. This separates identity governance from software code; permissions are assigned and audited through standard Entra enterprise application access reviews.
 
-![Function worker dequeueing vend-jobs](docs/screenshots/05-function-worker-dequeue.png)
+![Entra Enterprise application user role assignment](docs/screenshots/06-entra-enterprise-app-user-role-assignment.png)
 
-## Authentication layers
+When an authorized client authenticates using OAuth 2.0 authorization code flow with PKCE, Entra ID includes the assigned application role directly in the access token. Inspecting the decoded JSON Web Token reveals the `roles` array populated with `AppVending.Submitter` alongside the `scp` scope claim.
 
-The auth model stacks four layers, each teaching a different exam and career skill.
+![Decoded JWT bearer token showing roles claim](docs/screenshots/07-decoded-jwt-bearer-token-roles.png)
 
-Callers authenticate with OAuth 2.0 authorization code plus PKCE. The included `scripts/get_token_pkce.py` script is deliberately small — MSAL, a localhost callback handler, and a printed Bearer token. No framework, no wrapper classes.
+Inside the FastAPI application, a lightweight dependency decodes the claims header injected by Easy Auth or checks the validated bearer token. If the caller lacks `AppVending.Submitter` or `AppVending.Admin`, the endpoint terminates the request with HTTP 403 Forbidden.
 
-The FastAPI Web App sits behind Easy Auth in Azure, configured through Bicep `authsettingsV2`. Easy Auth validates the JWT at the platform edge before your Python code runs. After deploy, the Authentication blade should show the Microsoft identity provider pointing at the Bicep-created application and returning HTTP 401 for unauthenticated clients.
+Data plane storage access operates entirely through Azure role-based access control. Both the API and the background worker Function App use system-assigned managed identities granted `Storage Queue Data Contributor` and `Storage Table Data Contributor` roles, while shared storage account keys are disabled at the ARM resource level. The worker Function App uses its separate user-assigned managed identity exclusively for Microsoft Graph operations via `ManagedIdentityCredential(client_id=WORKER_CLIENT_ID)`, preventing Graph privileges from mixing with internal storage access.
 
-![Azure Web App Easy Auth configuration](docs/screenshots/09-azure-easy-auth.png)
+## Inside the provisioning engine
 
-Inside the API, a dependency checks app role claims. Callers need `AppVending.Submitter` or `AppVending.Admin`. Roles come from the API's own app registration, not from group membership checked at runtime. That is RBAC done the Entra way.
+Establishing tight perimeter authentication and data plane controls makes the service resilient, but the real work happens in the engine that converts a caller's request into verified cloud identity resources. The engine avoids messy conditional branching by splitting the provisioning lifecycle into two distinct stages: compiling a catalog offering into an explicit execution plan, and then dispatching that plan across the Microsoft Graph API.
 
-The worker Function App uses a user-assigned managed identity to call Microsoft Graph in Live mode. No client secrets stored in configuration. `DefaultAzureCredential` resolves to that identity in Azure through `AZURE_CLIENT_ID`, and to your developer credential locally.
+The central source of truth is `catalog/app-offerings.json`. Rather than allowing callers to pass raw Microsoft Graph properties, the catalog establishes immutable profiles for each pattern the organization supports. An offering declares authentication types, allowed redirect URIs, application roles, required Graph permissions, credential strategies, and paired Conditional Access templates. To accommodate per-instance details like an AKS service account subject or corporate CIDR blocks, offering values can contain double-brace template tags.
 
-For local development, set `AUTH_BYPASS=true` and skip token acquisition until you are ready to test the full auth path.
+Inside `src/app_vending/catalog.py`, the engine reads the catalog file, extracts the requested SKU, and runs parameter interpolation. Instead of introducing heavy template dependencies, a simple regular expression finds template tags and substitutes values supplied by the caller, raising an immediate error if a required parameter is missing.
 
-## Walkthrough: internal HR SPA
+```python
+_TEMPLATE_PATTERN = re.compile(r"\{\{parameters\.([a-zA-Z0-9_]+)\}\}")
 
-A typical request looks like this:
+def merge_parameters(value: Any, parameters: dict[str, Any]) -> Any:
+    if isinstance(value, str):
+        def replace(match: re.Match[str]) -> str:
+            key = match.group(1)
+            if key not in parameters:
+                raise KeyError(f"Missing required parameter '{key}'.")
+            return str(parameters[key])
+        return _TEMPLATE_PATTERN.sub(replace, value)
+    if isinstance(value, list):
+        return [merge_parameters(item, parameters) for item in value]
+    if isinstance(value, dict):
+        return {key: merge_parameters(item, parameters) for key, item in value.items()}
+    return value
+```
+
+Once parameters are resolved, the engine hands the data to `src/app_vending/vend_plan.py`. This module acts as the compiler. It maps the offering's platform profile into the exact JSON schemas required by Microsoft Graph. For single-page applications, it places redirect URIs inside the `spa` collection; for web APIs, it places them in `web` and disables implicit grants. It generates fresh UUIDs for application roles, adds requested access token versions and optional claims for Continuous Access Evaluation, and translates human-friendly permission strings such as `User.Read.All` into Microsoft Graph's well-known role GUIDs.
+
+```python
+def build_app_registration_plan(
+    offering: dict[str, Any],
+    display_name: str,
+    owners: list[str],
+) -> dict[str, Any]:
+    auth_profile = offering.get("authProfile", {})
+    platform = auth_profile.get("platform", "web")
+    redirect_uris = auth_profile.get("redirectUris", [])
+
+    app_roles = [
+        {
+            "id": str(uuid.uuid4()),
+            "displayName": role["displayName"],
+            "value": role["value"],
+            "allowedMemberTypes": role.get("allowedMemberTypes", ["User"]),
+            "description": role.get("description", role["displayName"]),
+            "isEnabled": True,
+        }
+        for role in offering.get("appRoles", [])
+    ]
+
+    application = {
+        "displayName": display_name,
+        "signInAudience": "AzureADMyOrg",
+        "owners": owners,
+        "appRoles": app_roles,
+    }
+
+    if platform == "spa":
+        application["spa"] = {"redirectUris": redirect_uris}
+    else:
+        application["web"] = {
+            "redirectUris": redirect_uris,
+            "implicitGrantSettings": {"enableIdTokenIssuance": False},
+        }
+
+    return application
+```
+
+This separation of planning from execution produces a deterministic specification of what needs to happen. The compiler generates plans for the application registration, the companion service principal, credential bindings, and the Conditional Access policy. The pipeline transformation flows cleanly from the initial request through the catalog rules to the final directory state.
+
+```mermaid
+flowchart TD
+    Req[Incoming Vend Request] --> Resolver[Catalog Resolver]
+    Catalog[(catalog/app-offerings.json)] --> Resolver
+    Resolver --> Interpolate[Parameter Interpolation]
+    Interpolate --> PlanBuilder[Plan Builder]
+    PlanBuilder --> AppManifest[App Registration Manifest]
+    PlanBuilder --> SPBody[Service Principal Body]
+    PlanBuilder --> CAPolicy[Conditional Access Policy]
+    PlanBuilder --> UTCMConfig[UTCM Baseline Template]
+    AppManifest --> Router{Execution Mode}
+    SPBody --> Router
+    CAPolicy --> Router
+    Router -->|DryRun| Synthesis[Dry Run Receipt and Plan]
+    Router -->|Live| DirectoryExec[Microsoft Graph Engine]
+    DirectoryExec --> EntraLive[Entra Application and Policy Objects]
+```
+
+
+
+Connecting the ingestion API to the backend execution is an Azure Functions worker. The FastAPI route in `api/routes/requests.py` does not touch Microsoft Graph. It validates caller identity via the role check dependency, writes the request record to Azure Table Storage, drops a lightweight message containing the request ID onto the `vend-jobs` storage queue, and hands back HTTP 202.
+
+```python
+@router.post("", response_model=VendAcceptedResponse, status_code=status.HTTP_202_ACCEPTED)
+def create_vend_request(
+    body: VendRequestBody,
+    _claims: dict = Depends(require_submitter_role),
+) -> VendAcceptedResponse:
+    request_id = str(uuid.uuid4())
+    payload = body.model_dump(mode="json")
+    save_request(request_id, payload, status="accepted")
+    enqueue_request(request_id)
+
+    return VendAcceptedResponse(
+        requestId=request_id,
+        statusUrl=f"/v1/requests/{request_id}",
+    )
+```
+
+The background Azure Function in `worker/function_app.py` triggers immediately when the queue message arrives. It extracts the request ID, pulls the full payload from Table Storage, and invokes `process_vend_request`. Once execution completes, the worker updates the status table and posts the outcome to the caller's callback URL.
+
+```python
+@app.queue_trigger(arg_name="msg", queue_name="vend-jobs", connection="AzureWebJobsStorage")
+def process_vend_job(msg: func.QueueMessage) -> None:
+    message = json.loads(msg.get_body().decode("utf-8"))
+    request_id = message["requestId"]
+    payload_raw = get_request_payload(request_id)
+    outcome = process_vend_request(payload_raw, request_id=request_id)
+
+    update_request(
+        request_id,
+        status=outcome["status"],
+        result=outcome["result"],
+        execution_mode=outcome["executionMode"],
+    )
+
+    callback_url = payload_raw.get("callbackUrl")
+    if callback_url:
+        send_callback(
+            callback_url,
+            {
+                "requestId": request_id,
+                "status": outcome["status"],
+                "offeringId": outcome["offeringId"],
+                "executionMode": outcome["executionMode"],
+                "result": outcome["result"],
+            },
+            callback_secret=payload_raw.get("callbackSecret"),
+        )
+```
+
+When the service runs in Live mode, `src/app_vending/graph_apps.py` executes the compiled plan against the Microsoft Graph API. Graph operations have a critical security caveat: under the `Application.ReadWrite.OwnedBy` permission, the worker cannot manage an application registration unless the worker's own managed identity principal is listed as an owner. The code creates the application first, waits for directory read consistency, and explicitly adds the worker principal ID to the owners collection before provisioning the companion service principal, adding user owners, or attaching federated credentials. Exponential backoff loops handle Entra's distributed replication lag so transient directory delays do not derail the run.
+
+The interaction between the client, API, queue, worker, directory endpoints, and callback receiver unfolds across a structured sequence.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller as ITSM Client
+    participant API as FastAPI Gateway
+    participant Queue as Storage Queue vend-jobs
+    participant Table as Azure Table Storage
+    participant Worker as Function App Worker
+    participant Graph as Microsoft Graph API
+    participant Webhook as ITSM Callback Receiver
+
+    Caller->>API: POST /v1/requests with offeringId and parameters
+    API->>API: Validate Submitter role and request body
+    API->>Table: Insert row with status accepted
+    API->>Queue: Push message with requestId
+    API-->>Caller: 202 Accepted with statusUrl
+
+    Queue->>Worker: Trigger queue message
+    Worker->>Table: Fetch full request payload
+    Worker->>Worker: Resolve catalog SKU and parameters
+    Worker->>Worker: Build plan for App, SP, and CA Policy
+    alt ExecutionMode is Live
+        Worker->>Graph: POST /v1.0/applications
+        Worker->>Graph: POST /applications/{id}/owners/$ref with worker identity
+        Worker->>Graph: POST /v1.0/servicePrincipals
+        Worker->>Graph: POST /v1.0/identity/conditionalAccess/policies
+    else ExecutionMode is DryRun
+        Worker->>Worker: Synthesize dryRunPlan with mock identifiers
+    end
+    Worker->>Worker: Render UTCM drift monitor JSON
+    Worker->>Table: Update row with completed status and result
+    opt Callback URL supplied
+        Worker->>Webhook: POST completion payload with HMAC signature
+    end
+```
+
+
+
+
+
+## The asynchronous ITSM contract
+
+Enterprise IT service management platforms like ServiceNow or Jira Service Management cannot hang on synchronous HTTP calls while a backend system negotiates multiple Graph API transactions. Network timeouts, throttling, and intermittent directory retries make synchronous provisioning fragile. A resilient integration requires an asynchronous accept-and-callback pattern.
+
+The vending API adopts this asynchronous design. When a client calls `POST /v1/requests`, the API validates the incoming JSON body against Pydantic models, persists the request record to Azure Table Storage with an `accepted` status, enqueues the request ID into an Azure Storage Queue named `vend-jobs`, and immediately responds with HTTP 202 Accepted. The response body contains the unique request identifier and a relative status polling URL.
+
+![API request POST returning 202 Accepted](docs/screenshots/08-api-request-post-accepted-202.png)
+
+The background Azure Functions worker listens on the `vend-jobs` queue. As soon as a message arrives, the worker dequeues the job, loads the stored request payload, runs the provisioning engine, and updates the Azure Table Storage record with the final object metadata. If the caller provided a `callbackUrl` in the original request, the worker posts the completion payload directly back to the ITSM webhook endpoint, including an optional HMAC signature for payload verification.
+
+![Webhook callback receipt for completed provisioning](docs/screenshots/09-webhook-callback-hr-spa-completed.png)
+
+Clients unable to host public webhook endpoints can poll `GET /v1/requests/{requestId}` at regular intervals until the record transitions from `accepted` to `completed`. Both integration patterns query the exact same underlying Table Storage entity, keeping the API contract clean and predictable.
+
+## Single-page applications with governed role models
+
+The `internal-hr-spa` catalog offering demonstrates how to vend user-facing web applications that adhere to modern browser security standards. Single-page applications must never possess client secrets because client-side JavaScript code cannot keep secrets confidential.
 
 ```json
 {
   "offeringId": "internal-hr-spa",
   "displayName": "HR Internal Portal - Prod",
-  "owners": ["11111111-1111-1111-1111-111111111111"],
+  "owners": ["00000000-0000-0000-0000-000000000001"],
   "justification": "ServiceNow REQ001234",
-  "callbackUrl": "https://itsm.contoso.com/api/hooks/vend-complete",
+  "callbackUrl": "https://webhook.site/your-inbox-id",
   "parameters": {}
 }
 ```
 
-The `internal-hr-spa` SKU in the catalog defines a single-page application using authorization code with PKCE, two app roles (`HR.Read` and `HR.Write`), no client secret, and a Conditional Access template requiring compliant devices in report-only mode.
+When the worker processes this offering, it configures the Entra application registration with a Single-page application platform redirect URI, enabling authorization code flow with PKCE and completely omitting credential generation.
 
-In DryRun mode, which is the default, the worker never calls Graph. It returns a `dryRunPlan` showing exactly what would be created: the application body with app roles and SPA redirect URIs, the service principal plan, the Conditional Access policy object, and the UTCM monitor artifact path. You can review the plan in the callback payload or by polling the status endpoint.
+![Vended HR SPA authentication redirect URI](docs/screenshots/10-entra-vended-hr-spa-authentication-redirect.png)
 
-Switch `APP_VENDING_EXECUTION_MODE` to `Live` when you are ready. The worker creates the application, assigns owners when the object IDs are valid, creates the service principal, and posts the Conditional Access policy through Graph. Report-only state is the default so you can validate impact before enforcement.
+Application roles defined in the catalog are automatically stamped onto the vended app registration. For the HR portal, the worker registers `HR.Read` and `HR.Write`, allowing internal development teams to immediately implement fine-grained authorization within their React or Angular frontend without touching the Entra portal.
 
-After Live mode succeeds, open Microsoft Entra ID, find the new app registration by display name, and inspect the SPA redirect URI plus the `HR.Read` and `HR.Write` app roles. That portal blade is the moment the catalog stops being theory.
+![Vended HR SPA application roles](docs/screenshots/11-entra-vended-hr-app-roles.png)
 
-![Vended HR SPA app registration in Entra](docs/screenshots/06-entra-vended-hr-app.png)
+Provisioning does not stop at application settings. The vending engine immediately provisions a paired Microsoft Entra Conditional Access policy named `CA - HR Internal Portal - Prod - Compliant Device`. Scoped specifically to the newly created service principal, the policy requires users to authenticate from managed, compliant devices. By default, the policy is vended in `reportOnly` mode (`enabledForReportingButNotEnforced`), giving administrators time to observe sign-in telemetry before turning on hard enforcement.
 
-The matching Conditional Access policy should appear in report-only mode with the compliant device grant control. Leave it there while you review sign-in logs. Promotion to enabled is a deliberate second step, not an accidental side effect of vending.
+![Report-only Conditional Access policy for HR portal](docs/screenshots/12-entra-conditional-access-hr-compliant-device-report-only.png)
 
-![Report-only Conditional Access policy for HR portal](docs/screenshots/08-entra-ca-report-only.png)
+## Workload identity federation on Kubernetes
 
-## CAE and a one-hour session for payroll
+Service-to-service authentication in cloud environments has historically relied on long-lived client secrets or certificates stored in Kubernetes secrets stores. Those static credentials create significant operational risk: they expire unexpectedly, disrupt production workloads, and are frequently leaked in logs or source control. Entra Workload ID Federation replaces static credentials by establishing open OIDC trust between Kubernetes service accounts and Entra application registrations.
 
-Default Entra access tokens last a variable sixty to ninety minutes. That window is the blast radius of a stolen bearer token if nothing else is watching. Continuous Access Evaluation changes the bargain. When a client declares the `cp1` capability and the resource is CAE-aware, Entra can issue a long-lived token, often measured in hours rather than minutes, because critical events such as a disabled account, a password change, or a Conditional Access location change can revoke access near real time through a claims challenge. Without a session ceiling, a privileged payroll API that opts into CAE would actually hold tokens longer than the default.
+The `aks-graph-workload` catalog offering codifies this modern architecture. It allows containerized microservices running on Azure Kubernetes Service to authenticate directly against Entra ID and access Microsoft Graph without managing static secrets.
 
-That is why the `privileged-payroll-api` SKU does two things at once. The vended application is stamped for CAE with access token version two and the optional claim `xms_cc`, so tokens can carry the client capability that makes claims challenges possible. The Conditional Access policy that accompanies the app requires a compliant device, scopes itself to that application rather than every cloud app in the tenant, and sets session controls that identity engineers can see in the portal: a one-hour sign-in frequency and Continuous Access Evaluation in `strictEnforcement` mode.
+```json
+{
+  "offeringId": "aks-graph-workload",
+  "displayName": "AKS Order Service - Graph Reader",
+  "owners": ["00000000-0000-0000-0000-000000000001"],
+  "justification": "ServiceNow REQ005678",
+  "callbackUrl": "https://webhook.site/your-inbox-id",
+  "parameters": {
+    "aksServiceAccount": "system:serviceaccount:orders:order-api",
+    "allowedIpRanges": "135.235.242.0/24"
+  }
+}
+```
+
+During provisioning, the worker creates a federated identity credential linked to the AKS cluster OIDC issuer. The credential subject maps directly to the Kubernetes service account string supplied in the request parameters, while leaving the certificates and client secrets tabs completely empty.
+
+![AKS federated credential on vended application](docs/screenshots/13-entra-vended-aks-federated-identity-credential.png)
+
+Along with the federated credential, the vending pipeline creates a workload-scoped Conditional Access policy that restricts token issuance to designated enterprise IP ranges. The completion webhook delivers the full receipt back to the platform team, containing the application IDs, the planned certificate credential strategy, and the created Conditional Access policy metadata.
+
+![Webhook callback receipt for AKS workload](docs/screenshots/14-webhook-callback-aks-workload-completed.png)
+
+This separation of concerns keeps identity posture tight. The identity engineering team defines the allowed federated trust models and boundary policies in the catalog, while application teams bind their Kubernetes pods to the vended service account.
+
+## Continuous access evaluation and privileged session ceilings
+
+Standard Entra access tokens have an issuance lifetime of sixty to ninety minutes. If a token is stolen or a user account is compromised during that window, the attacker can use the bearer token until expiration. Continuous Access Evaluation changes this security dynamic. Under CAE, compliant clients and resources support near real-time revocation based on critical security events such as password changes, account termination, or user risk elevations.
+
+Because CAE provides event-driven revocation, identity providers often issue longer token lifetimes to CAE-enabled sessions. For privileged systems such as payroll APIs, relying solely on event triggers can create an unacceptable window if reauthentication is never enforced. The `privileged-payroll-api` offering solves this challenge by pairing CAE configuration with a strict Conditional Access session ceiling.
 
 ```json
 {
   "offeringId": "privileged-payroll-api",
   "displayName": "Payroll API - Prod",
-  "owners": ["11111111-1111-1111-1111-111111111111"],
+  "owners": ["00000000-0000-0000-0000-000000000001"],
   "justification": "ServiceNow REQ009001",
-  "callbackUrl": "https://itsm.contoso.com/api/hooks/vend-complete",
+  "callbackUrl": "https://webhook.site/your-inbox-id",
   "parameters": {}
 }
 ```
 
-The catalog does not invent a directory `tokenLifetimePolicy`. Microsoft's current guidance points operators at Conditional Access session management for how often users must re-authenticate, and at CAE for event-driven revocation. Token lifetime policies are Graph-only with no Entra admin center blade. Sign-in frequency lives on the same Conditional Access policy the identity team already reviews, and Graph v1.0 expresses it in hours or days, so this SKU uses one hour rather than a fifteen-minute JWT `exp`. Sub-hour access-token lifetimes would require the token lifetime policy this project deliberately avoids.
+The vended application registration is configured for access token version two and stamped with the optional claim `xms_cc`. This claim signals client capability support (`cp1`), enabling the payroll resource to trigger and process claims challenges when policy conditions change.
+
+![Payroll application optional claim xms\_cc](docs/screenshots/15-entra-vended-payroll-token-optional-claim-xms-cc.png)
+
+To prevent sessions from extending indefinitely, the provisioning engine creates an accompanying Conditional Access policy that enforces a strict one-hour sign-in frequency under its Session controls. The policy targets the specific payroll resource, requires a compliant device, and forces users to reauthenticate periodically.
 
 ```json
 "sessionControls": {
@@ -148,65 +373,32 @@ The catalog does not invent a directory `tokenLifetimePolicy`. Microsoft's curre
     "type": "hours",
     "value": 1,
     "frequencyInterval": "timeBased"
-  },
-  "continuousAccessEvaluation": {
-    "mode": "strictEnforcement"
   }
 }
 ```
 
-The vending machine prepares the resource app. Callers still have to declare `cp1` when they request tokens, for example with MSAL client capabilities, and the payroll API still has to handle a 401 claims challenge. DryRun shows the optional claim and the session controls in the receipt. Live mode creates the application, then posts the Conditional Access policy through the Graph beta endpoint so the Continuous Access Evaluation block is not dropped.
+Configuring sign-in frequency within the Conditional Access policy eliminates the need to maintain legacy directory token lifetime policies. The policy appears directly inside the Entra admin center with its session controls enabled, providing transparent administrative oversight.
 
-![Privileged payroll Conditional Access Session blade](docs/screenshots/11-cae-signin-frequency.png)
+![Privileged payroll Conditional Access session controls](docs/screenshots/16-entra-conditional-access-payroll-one-hour-session.png)
 
-![Payroll app optional claim xms_cc](docs/screenshots/12-app-xms-cc-optional-claim.png)
+## Drift detection with unified configuration management
 
-## Walkthrough: AKS Graph workload
+Provisioning an application and its access policies is only the initial step in the security lifecycle. In active enterprise environments, configurations drift. An administrator might temporarily disable a Conditional Access policy during a critical incident, modify a grant control, or delete an app role, forgetting to restore the baseline afterward.
 
-The second SKU covers a different real-world shape entirely:
+To prevent configuration erosion, the vending machine generates a Unified Configuration Management monitor artifact at the conclusion of every successful provisioning job. The worker loads a JSON monitor baseline template corresponding to the requested SKU, stamps the generated policy identifier into the document, and persists the artifact into the project repository.
 
-```json
-{
-  "offeringId": "aks-graph-workload",
-  "displayName": "AKS Order Service - Graph Reader",
-  "owners": ["22222222-2222-2222-2222-222222222222"],
-  "justification": "ServiceNow REQ005678",
-  "callbackUrl": "https://itsm.contoso.com/api/hooks/vend-complete",
-  "parameters": {
-    "aksServiceAccount": "system:serviceaccount:orders:order-api",
-    "allowedIpRanges": "10.0.0.0/8"
-  }
-}
-```
+These monitor artifacts are designed for automated compliance pipelines. Scheduled workflows read the generated monitor definitions, query Microsoft Graph to inspect the live policy state, and alert the identity team if the active policy deviates from the original vended configuration. Provisioning and continuous compliance operate as a unified lifecycle.
 
-This SKU provisions a web platform application configured for client credentials, a federated identity credential pointing at the AKS OIDC issuer, `User.Read.All` as an application permission, a certificate credential strategy, and a workload Conditional Access template with IP range restrictions. The `parameters` block fills template placeholders in the catalog — `{{parameters.aksServiceAccount}}` becomes the federated credential subject, and `{{parameters.allowedIpRanges}}` flows into the CA policy conditions.
+## Architectural simplicity
 
-That is the pattern for service-to-service identities in Kubernetes: the vending machine creates the Entra objects, and the platform team wires the federated credential subject to the service account. Identity engineering owns the posture. Platform engineering owns the pod.
+The shared Python codebase in `src/app_vending/` prioritizes maintainability by rejecting over-engineered abstractions. The modules consist of focused, top-level functions rather than layered service classes or artificial repository patterns. Pydantic models are used strictly at the API perimeter for request validation and OpenAPI schema generation, while Microsoft Graph interactions use standard `httpx` HTTP calls and official MSAL authentication libraries.
 
-![AKS federated credential on the vended application](docs/screenshots/07-entra-aks-federated-credential.png)
+Well-known Microsoft Graph permission GUIDs are stored in a simple dictionary mapping, guaranteeing that Live mode constructs valid `requiredResourceAccess` payloads. If an incoming request includes invalid owner object IDs, the provisioning engine logs a warning and proceeds with application creation rather than failing the entire transaction.
 
-## UTCM guardrails
+Local testing requires zero cloud spend. Developers can run Azurite for local table and queue emulation, launch the FastAPI API with Uvicorn, and start the background queue worker using Azure Functions Core Tools. Setting execution mode to `DryRun` allows the full request parsing, planning, and callback pipeline to run locally without touching Microsoft Graph. When directory testing is needed, setting execution mode to `Live` connects the worker to an active Entra tenant, transforming abstract catalog definitions into fully governed enterprise identities.
 
-Creating a Conditional Access policy is only half the job. Policies drift. Someone disables one during an incident and forgets to re-enable it. UTCM — Unified Configuration Management — gives you a monitor artifact that describes the desired state and runs on a schedule to detect drift.
+## Closing the ticket on manual identity
 
-After each vend job, `utcm.py` renders a monitor JSON file from the catalog's `baselineRef` template, stamps it with the policy display name from the vend result, and writes it to `samples/utcm/generated/`. The callback payload includes `utcmMonitorArtifact` with the relative path. You can feed that artifact into your existing UTCM deployment scripts to register ongoing monitoring.
+Treating identity architecture as a governed platform product changes how teams build and ship software. When developers can pick a pre-approved application pattern that delivers verified redirect URIs, structured app roles, and scoped Conditional Access in seconds, they stop hunting for workarounds. They stop asking for long-lived client secrets or waiting on manual portal reviews because the secure route is already the fastest path forward.
 
-![Generated UTCM monitor artifact in VS Code](docs/screenshots/10-utcm-monitor-artifact.png)
-
-Vending and drift detection become one pipeline instead of two disconnected processes.
-
-## Local development without Azure spend
-
-The entire DryRun path still runs locally with three terminals and zero Azure resources beyond what you already have installed. Start Azurite for queue and table emulation. Run the FastAPI API with `uvicorn api.main:app --reload`. Run the Functions worker with `func start` from the `worker/` directory. Post a request from Swagger or curl. Watch the worker dequeue the job, write the completed result to the emulated table, and optionally fire the callback.
-
-When you are ready for portal evidence, deploy the Bicep stack, leave execution mode on DryRun until Graph permissions show consent, then flip `APP_VENDING_EXECUTION_MODE` to Live and vend into a non-production tenant. The local loop teaches the contract. The Azure and Entra blades prove the contract survived contact with a real directory.
-
-## Python philosophy
-
-The shared code in `src/app_vending/` follows a strict KISS rule: plain functions in modules, no service classes, no repository abstractions. Pydantic models exist only at the API boundary for request validation and OpenAPI generation. Graph calls use `httpx` and `msal` directly. Well-known Microsoft Graph permission IDs are mapped in a small dictionary so Live `requiredResourceAccess` payloads stay valid. Invalid owner object IDs log a warning and are skipped instead of failing the whole vend job. If you can read one function top to bottom and understand what it does, the code is doing its job.
-
-## What this teaches for your career
-
-OAuth 2.0 and PKCE show up in the client token script and in the SPA SKU definition. App roles and Easy Auth appear in the API authorization path. Managed identity and least-privilege Graph permissions matter in Live mode. Conditional Access templates cover user-facing apps, privileged sessions with Continuous Access Evaluation, and workload identities. Microsoft Graph Bicep makes the prerequisite identity plane reviewable in pull requests. UTCM ties provisioning to ongoing compliance. The async queue-and-callback pattern mirrors how real enterprise integrations work with ServiceNow, BMC, and other ITSM platforms.
-
-That is a full identity engineering pipeline in one repo, runnable on your laptop, deployable to cheap Azure resources, and visible in the Entra portal when Live mode does the work that used to consume your Tuesday afternoon.
+That Tuesday afternoon ticket queue doesn't have to be the price of doing business in enterprise cloud environments. Codifying identity standards into a versioned catalog, guarding the ingestion API with defense-in-depth authorization, and driving Microsoft Graph operations through managed identities transforms identity engineering from a reactive bottleneck into an automated, auditable platform.

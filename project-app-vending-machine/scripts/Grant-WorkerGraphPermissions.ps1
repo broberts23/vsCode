@@ -9,8 +9,9 @@ Use this script when the Bicep Microsoft.Graph/appRoleAssignedTo resources canno
 deployed because the caller lacks AppRoleAssignment.ReadWrite.All, or when you need to
 re-apply consent after rotating the worker identity.
 
-Required Graph application permissions:
+Required Graph application permissions (resolved by value from the Graph SP):
 - Application.ReadWrite.OwnedBy
+- Application.Read.All (required when CA policies target specific applications)
 - Policy.Read.All
 - Policy.ReadWrite.ConditionalAccess
 
@@ -28,28 +29,18 @@ Preview assignments without writing to Graph.
 param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern('^[0-9a-fA-F-]{36}$')]
-    [string]$WorkerPrincipalId,
-
-    [switch]$WhatIf
+    [string]$WorkerPrincipalId
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $GraphAppId = '00000003-0000-0000-c000-000000000000'
-$RequiredRoles = @(
-    @{
-        Value = 'Application.ReadWrite.OwnedBy'
-        Id    = '18a4783c-866b-4cc7-a460-3d5e5662c884'
-    }
-    @{
-        Value = 'Policy.Read.All'
-        Id    = '246ddfdf-e6c3-4d72-b48f-42b9744a17ce'
-    }
-    @{
-        Value = 'Policy.ReadWrite.ConditionalAccess'
-        Id    = '01c0a623-fc9b-48e9-b794-0756f8e8f067'
-    }
+$RequiredRoleValues = @(
+    'Application.ReadWrite.OwnedBy'
+    'Application.Read.All'
+    'Policy.Read.All'
+    'Policy.ReadWrite.ConditionalAccess'
 )
 
 function Get-GraphToken {
@@ -86,7 +77,7 @@ function Invoke-GraphPost {
     return Invoke-RestMethod -Method Post -Uri $Uri -Headers $headers -Body $json
 }
 
-function Resolve-GraphServicePrincipalId {
+function Resolve-GraphServicePrincipal {
     param([Parameter(Mandatory = $true)][string]$Token)
 
     $filter = [System.Uri]::EscapeDataString("appId eq '$GraphAppId'")
@@ -95,7 +86,19 @@ function Resolve-GraphServicePrincipalId {
     if (-not $response.value -or $response.value.Count -eq 0) {
         throw 'Microsoft Graph service principal was not found in this tenant.'
     }
-    return $response.value[0].id
+    return $response.value[0]
+}
+
+function Resolve-AppRoleId {
+    param(
+        [Parameter(Mandatory = $true)]$GraphSp,
+        [Parameter(Mandatory = $true)][string]$RoleValue
+    )
+    $role = $GraphSp.appRoles | Where-Object { $_.value -eq $RoleValue } | Select-Object -First 1
+    if (-not $role) {
+        throw "Graph app role '$RoleValue' was not found on the Microsoft Graph service principal."
+    }
+    return $role.id
 }
 
 function Get-ExistingAssignment {
@@ -136,36 +139,40 @@ function Get-ExistingAssignment {
 }
 
 $token = Get-GraphToken
-$graphSpId = Resolve-GraphServicePrincipalId -Token $token
+$graphSp = Resolve-GraphServicePrincipal -Token $token
+$graphSpId = $graphSp.id
 
-foreach ($role in $RequiredRoles) {
+foreach ($roleValue in $RequiredRoleValues) {
+    $appRoleId = Resolve-AppRoleId -GraphSp $graphSp -RoleValue $roleValue
+    Write-Host "Resolved $roleValue -> $appRoleId"
+
     $existing = Get-ExistingAssignment `
         -ResourceSpId $graphSpId `
         -PrincipalId $WorkerPrincipalId `
-        -AppRoleId $role.Id `
+        -AppRoleId $appRoleId `
         -Token $token
 
     if ($existing) {
-        Write-Host "Already assigned: $($role.Value)"
+        Write-Host "Already assigned: $roleValue"
         continue
     }
 
-    if ($WhatIf) {
-        Write-Host "WhatIf: would assign $($role.Value) ($($role.Id)) to principal $WorkerPrincipalId"
+    if ($WhatIfPreference) {
+        Write-Host "WhatIf: would assign $roleValue ($appRoleId) to principal $WorkerPrincipalId"
         continue
     }
 
-    if ($PSCmdlet.ShouldProcess($WorkerPrincipalId, "Assign Graph app role $($role.Value)")) {
+    if ($PSCmdlet.ShouldProcess($WorkerPrincipalId, "Assign Graph app role $roleValue")) {
         $body = @{
             principalId = $WorkerPrincipalId
             resourceId  = $graphSpId
-            appRoleId   = $role.Id
+            appRoleId   = $appRoleId
         }
         $assignment = Invoke-GraphPost `
             -Uri "https://graph.microsoft.com/v1.0/servicePrincipals/$graphSpId/appRoleAssignedTo" `
             -Body $body `
             -Token $token
-        Write-Host "Assigned: $($role.Value) (assignmentId=$($assignment.id))"
+        Write-Host "Assigned: $roleValue (assignmentId=$($assignment.id))"
     }
 }
 

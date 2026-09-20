@@ -32,6 +32,12 @@ def test_aks_graph_workload_dry_run():
 
     assert result["status"] == "completed"
     assert "utcmMonitorArtifact" in result["result"]
+    ca_policy = result["result"]["conditionalAccessPolicy"]
+    assert "clientApplications" in ca_policy["conditions"]
+    assert "ipRanges" not in ca_policy["conditions"]
+    assert ca_policy["conditions"]["applications"]["includeApplications"] == ["All"]
+    assert "_namedLocation" in ca_policy
+    assert ca_policy["_namedLocation"]["ipRanges"][0]["cidrAddress"] == "10.0.0.0/8"
 
 
 def test_privileged_payroll_api_dry_run():
@@ -56,5 +62,7 @@ def test_privileged_payroll_api_dry_run():
     sif = ca_policy["sessionControls"]["signInFrequency"]
     assert sif["value"] == 1
     assert sif["type"] == "hours"
-    assert ca_policy["sessionControls"]["continuousAccessEvaluation"]["mode"] == "strictEnforcement"
+    # Graph 1138 rejects CAE strictEnforcement; SKU relies on app xms_cc + SIF.
+    assert "continuousAccessEvaluation" not in ca_policy["sessionControls"]
+    assert ca_policy["state"] == "enabled"
     assert any(role["value"] == "Payroll.Write" for role in result["result"]["appRoles"])

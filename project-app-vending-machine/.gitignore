@@ -3,7 +3,15 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.*
+!.env.example
 local.settings.json
+**/secrets*.json
+**/credentials*.json
+*.pem
+*.pfx
+*.key
+debug-*.log
 samples/utcm/generated/*.json
 !samples/utcm/generated/.gitkeep
 .python_packages/

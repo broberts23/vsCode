@@ -70,7 +70,7 @@
     {
       "offeringId": "privileged-payroll-api",
       "displayName": "Privileged Payroll API",
-      "description": "CAE-capable payroll API with Payroll app roles, compliant-device Conditional Access, one-hour sign-in frequency, and CAE strict enforcement.",
+      "description": "CAE-capable payroll API with Payroll app roles, compliant-device Conditional Access, and one-hour sign-in frequency (app stamped with xms_cc / cp1).",
       "authProfile": {
         "platform": "web",
         "oauthFlow": "authorizationCodePKCE",
@@ -100,17 +100,14 @@
       "credentialStrategy": "none",
       "conditionalAccess": {
         "template": "require-compliant-device-privileged-session",
-        "mode": "reportOnly",
-        "state": "enabledForReportingButNotEnforced",
+        "mode": "enabled",
+        "state": "enabled",
         "sessionControls": {
           "signInFrequency": {
             "isEnabled": true,
             "type": "hours",
             "value": 1,
             "frequencyInterval": "timeBased"
-          },
-          "continuousAccessEvaluation": {
-            "mode": "strictEnforcement"
           }
         }
       },

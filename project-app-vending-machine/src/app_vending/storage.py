@@ -2,31 +2,73 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from azure.core.credentials import TokenCredential
 from azure.data.tables import TableServiceClient, UpdateMode
+from azure.identity import DefaultAzureCredential
 from azure.storage.queue import QueueClient
 
 from app_vending.settings import (
     QUEUE_NAME,
     TABLE_NAME,
+    get_storage_account_name,
     get_storage_connection_string,
+    uses_storage_connection_string,
 )
+
+_credential: TokenCredential | None = None
+
+
+def _get_credential() -> TokenCredential:
+    global _credential
+    if _credential is None:
+        # System-assigned MI in Azure (no AZURE_CLIENT_ID); az login locally if needed.
+        _credential = DefaultAzureCredential()
+    return _credential
+
+
+def _table_service() -> TableServiceClient:
+    if uses_storage_connection_string():
+        cs = get_storage_connection_string()
+        assert cs is not None
+        return TableServiceClient.from_connection_string(cs)
+
+    account = get_storage_account_name()
+    if not account:
+        raise RuntimeError(
+            "STORAGE_ACCOUNT_NAME or AzureWebJobsStorage__accountName is required "
+            "when AzureWebJobsStorage is not a connection string."
+        )
+    return TableServiceClient(
+        endpoint=f"https://{account}.table.core.windows.net",
+        credential=_get_credential(),
+    )
 
 
 def _table_client():
-    return TableServiceClient.from_connection_string(
-        get_storage_connection_string()
-    ).get_table_client(TABLE_NAME)
+    return _table_service().get_table_client(TABLE_NAME)
 
 
 def _queue_client():
-    return QueueClient.from_connection_string(
-        get_storage_connection_string(),
-        QUEUE_NAME,
+    if uses_storage_connection_string():
+        cs = get_storage_connection_string()
+        assert cs is not None
+        return QueueClient.from_connection_string(cs, QUEUE_NAME)
+
+    account = get_storage_account_name()
+    if not account:
+        raise RuntimeError(
+            "STORAGE_ACCOUNT_NAME or AzureWebJobsStorage__accountName is required "
+            "when AzureWebJobsStorage is not a connection string."
+        )
+    return QueueClient(
+        account_url=f"https://{account}.queue.core.windows.net",
+        queue_name=QUEUE_NAME,
+        credential=_get_credential(),
     )
 
 
 def ensure_storage():
-    table_service = TableServiceClient.from_connection_string(get_storage_connection_string())
+    table_service = _table_service()
     try:
         table_service.create_table(TABLE_NAME)
     except Exception:
