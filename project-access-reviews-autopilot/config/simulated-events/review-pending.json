@@ -1,0 +1,19 @@
+{
+  "eventType": "ReviewPending",
+  "correlationId": "ara-sim-pending-001",
+  "definitionId": "00000000-0000-4000-8000-000000000101",
+  "instanceId": "00000000-0000-4000-8000-000000000201",
+  "decisionItemId": "00000000-0000-4000-8000-000000000301",
+  "principalDisplayName": "Alex Reviewer",
+  "principalUpn": "alex.reviewer@contoso.lab",
+  "principalObjectId": "00000000-0000-4000-8000-000000000401",
+  "resourceDisplayName": "Privileged Helpdesk Operators",
+  "resourceType": "group",
+  "resourceId": "00000000-0000-4000-8000-000000000501",
+  "reviewerDisplayName": "Sam Approver",
+  "reviewerUpn": "sam.approver@contoso.lab",
+  "dueDateTime": "2026-09-27T17:00:00Z",
+  "recommendation": "Approve",
+  "accessReviewUrl": "https://myaccess.microsoft.com/@contoso.lab#/AccessReviews",
+  "notes": "Simulated pending decision. No live Entra access review exists."
+}

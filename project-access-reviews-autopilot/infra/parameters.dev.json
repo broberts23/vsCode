@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "deploymentEnvironment": { "value": "dev" },
+    "baseName": { "value": "ara" },
+    "tenantId": { "value": "00000000-0000-0000-0000-000000000000" },
+    "apiClientId": { "value": "" },
+    "spaClientId": { "value": "" },
+    "apiAudience": { "value": "api://access-reviews-autopilot" },
+    "containerImage": { "value": "" }
+  }
+}

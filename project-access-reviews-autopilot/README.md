@@ -1,202 +1,224 @@
-# project-access-reviews-autopilot
+# Access Reviews Autopilot — Slack as the access-review inbox
 
-An “autopilot” pattern for **Microsoft Entra access reviews** that keeps privileged access continuously recertified with minimal manual overhead. This project focuses on:
+Lab pattern: inject **Graph-shaped** access-review events, notify reviewers in **Slack**, apply decisions into **Cosmos** (simulated). A small **Entra OIDC** SPA lists the pending queue.
 
-- defining access reviews as code
-- automating reminders and decision collection workflows
-- applying decisions (where appropriate)
-- exporting auditable history
+This is **not** live Microsoft Graph access-review automation. The Entra tenant is a lab with no production users or recertification telemetry. Every trigger is a fixture. `SimulatedAccessReviewClient` updates Cosmos; `GraphAccessReviewClient` is a stub only.
 
-Access reviews cover principals including **users and service principals**, and resources including **groups, applications (service principals), access packages, and privileged roles**.
+Working blog title: **Stop mailing MyAccess into the void: access reviews that settle in Slack.** See [blog.md](blog.md).
 
-- API overview: https://learn.microsoft.com/en-us/graph/api/resources/accessreviewsv2-overview?view=graph-rest-1.0
+## Architecture
 
-## Goals
+```text
+Simulator (cron / POST /api/simulate)
+        │  fixtures (config/simulated-events)
+        ▼
+Service Bus topic review-work
+   ├─ subscription slack-notify  → worker → Cosmos + Slack Block Kit
+   └─ subscription apply-decision → worker → SimulatedAccessReviewClient + Slack update
+SPA (PKCE) ──OIDC──► API (Container Apps)
+Slack button ───────► API /slack/interactions ──► apply-decision
+```
 
-- Make privileged access recertification **repeatable** and **auditable**.
-- Provide “day-2” automation:
-  - start reviews on schedule
-  - send reminders
-  - apply decisions
-  - export review history for compliance
-- Keep the automation deterministic and idempotent.
+Azure data plane is **managed identity only**: Cosmos `disableLocalAuth`, Service Bus `disableLocalAuth`, ACR admin off. No storage account. No Functions / WebJobs keys.
 
-This project assumes the “autopilot” runs as an **Azure Functions** app (Timer trigger for scheduled runs, HTTP trigger for manual runs), using Microsoft Graph to manage Access Reviews.
-
-## Non-goals
-
-- Replacing human reviewers. This automates orchestration and evidence handling.
-- Building a UI for review decisions (use Entra portal / established reviewer flows).
-
-## Suggested repo layout
+## Repository layout
 
 ```text
 project-access-reviews-autopilot/
-├── README.md
-├── docs/
-│   ├── DESIGN.md                      # deeper design notes (optional)
-│   ├── CONTROLS.md                    # audit controls mapping
-│   └── RUNBOOK.md                     # ops runbook
-├── config/
-│   ├── reviews.json                   # source-of-truth review definitions
-│   ├── reviewers.json                 # reviewer routing rules (optional)
-│   └── scopes.json                    # what to review (roles/groups/apps)
-├── FunctionApp/
-│   ├── host.json
-│   ├── local.settings.json             # local-only (do not commit secrets)
-│   ├── profile.ps1                     # PowerShell worker profile
-│   ├── requirements.psd1               # module dependencies
-│   ├── AccessReviewsAutopilotTimer/
-│   │   ├── function.json               # TimerTrigger schedule
-│   │   └── run.ps1                     # scheduled autopilot run
-│   ├── AccessReviewsAutopilotHttp/
-│   │   ├── function.json               # HttpTrigger (manual run)
-│   │   └── run.ps1
-│   └── Shared/
-│       ├── Invoke-Graph.ps1
-│       ├── Normalize-Definition.ps1
-│       └── New-CorrelationKey.ps1
-├── infra/
-│   ├── main.bicep                     # optional: storage/logs, function/job runner
-│   └── parameters.dev.json
+├── README.md                 ← you are here (local first, then Azure)
+├── blog.md
+├── pyproject.toml
+├── Dockerfile
+├── docker-compose.yml        ← Cosmos + Service Bus emulators
+├── .env.example
+├── config/simulated-events/  ← ReviewPending, Overdue, Reminder, poison
+├── src/ara/                  ← shared library
+├── api/                      ← FastAPI (OIDC + simulate + Slack)
+├── worker/                   ← Service Bus consumers
+├── simulator/                ← fixture publisher
+├── spa/                      ← MSAL.js pending list
+├── infra/main.bicep
 ├── scripts/
-│   ├── Deploy-Infrastructure.ps1       # provisions infra + function app
-│   └── Deploy-FunctionCode.ps1         # publishes function code
-├── tests/
-│   └── Unit/
-│       ├── Compare-AraState.Tests.ps1
-│       └── New-CorrelationKey.Tests.ps1
+├── docs/
+└── tests/
 ```
 
-## High-level design
+***
 
-## How this differs from Entra Access Reviews (MyAccess)
+## 1. Prerequisites
 
-This project does not replace the Entra Access Reviews feature or the MyAccess decisioning experience. It’s an automation layer that helps you run Access Reviews like a continuous control with code, scheduling, drift detection, and evidence packaging.
+* Python 3.11+
+* Docker Desktop
+* PowerShell 7
+* Azure CLI (`az`) for the Azure half only
+* Slack [developer sandbox](https://docs.slack.dev/tools/developer-sandboxes/) (optional for dry-run; without tokens the worker logs Block Kit JSON)
+* Entra lab tenant app registrations for SPA + API when you turn off auth bypass (see [docs/entra-app-registrations.md](docs/entra-app-registrations.md))
 
-- Source of truth
+## 2. Local topology (no Azure deploy)
 
-  - Entra/MyAccess: reviews are configured primarily via portal workflows.
-  - Autopilot: review definitions live as code (for example `config/reviews.json`) so they can be PR-reviewed, versioned, and recreated consistently.
+| Piece | Local stand-in |
+| --- | --- |
+| Cosmos | Emulator (`docker compose`) — **key allowed only here** |
+| Service Bus | Emulator + SQL Edge |
+| API / workers | `uvicorn` / `python -m worker.main` on the host, or compose profile `apps` |
+| Slack interactivity | Socket Mode or dry-run logging |
+| Entra OIDC | Real tenant with `http://localhost` redirects, **or** `ARA_AUTH_BYPASS=true` |
+| Access reviews | Fixtures only — **no Graph** |
 
-- Provisioning + drift control
+Emulator connection strings live in `.env` (gitignored). **Never** copy them into Bicep or Container Apps settings.
 
-  - Entra/MyAccess: doesn’t provide a general “desired state vs current state” drift loop across all your review definitions.
-  - Autopilot: periodically compares “what should exist” vs “what exists”, reports drift, and can optionally remediate by creating/updating definitions.
+## 3. Local test steps (do these before Azure)
 
-- Orchestration at scale (beyond built-in reminders)
+### 3.1 Unit tests
 
-  - Entra/MyAccess: sends reminders within each review; reviewers act in the portal.
-  - Autopilot: orchestrates across many reviews/instances in bulk (for example scheduled runs that ensure required privileged reviews exist and are active).
+```powershell
+cd project-access-reviews-autopilot
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+pytest -q
+```
 
-- Evidence packaging (audit-ready outputs)
+Covers correlation keys, Slack signature HMAC, and fixture → `ReviewWorkMessage` mapping (including poison → `forcePoison` validation failure).
 
-  - Entra/MyAccess: audit history and exports are available, but evidence collection is usually manual when auditors ask.
-  - Autopilot: automatically exports/archives review history (plus run summaries) on a schedule into controlled storage/artifacts.
+### 3.2 Copy env and start emulators
 
-- Guardrails on automation risk
+```powershell
+Copy-Item .env.example .env
+docker compose up -d cosmos sqledge servicebus
+```
 
-  - Entra/MyAccess: supports applying decisions/recommendations where configured.
-  - Autopilot: treats any “auto-apply” as an explicit policy decision (ideally gated/approved) and keeps it off by default.
+Wait until Cosmos explorer responds on `https://localhost:8081` and Service Bus emulator is up (port `5672`). The first Cosmos emulator start can take a few minutes.
 
-- Integration points
-  - Entra/MyAccess: portal-centric workflow.
-  - Autopilot: integrates with CI/CD and operational workflows (issues/tickets/alerts) while still routing humans to MyAccess for decisions.
+### 3.3 Run API + workers on the host
 
-### Desired state and idempotency
+Use the project venv from [3.1](#31-unit-tests) (`.\.venv\Scripts\Activate.ps1`). If `python` still resolves to a global install, call the venv interpreter explicitly:
 
-- `config/reviews.json` is the source of truth.
-- Each review definition is tracked using a **correlation key** (for example, `reviewKey`) stored in:
-  - `displayName` convention (prefix) and/or
-  - `description` metadata block (JSON)
+```powershell
+# terminal 1
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --reload --port 8080
 
-The automation must be able to run repeatedly without creating duplicates:
+# terminal 2
+.\.venv\Scripts\python.exe -m worker.main --mode notify
 
-- if a definition exists → update it
-- if it doesn’t exist → create it
+# terminal 3
+.\.venv\Scripts\python.exe -m worker.main --mode apply
+```
 
-### What the autopilot actually automates
+With `ARA_AUTH_BYPASS=true` (default in `.env.example`) the API accepts calls without a bearer token.
 
-1. **Provision review definitions** (policy-as-code).
-2. **Operational loop**:
-   - find active instances
-   - send reminders (`sendReminder`)
-   - optionally accept/apply recommendations where your governance policy allows
-   - generate audit artifacts (history exports)
+### 3.4 Inject fixtures
 
-In an Azure Functions deployment this loop typically runs from:
+```powershell
+python -m simulator.main
+# or
+curl -X POST http://localhost:8080/api/simulate -H "Content-Type: application/json" -d "{}"
+```
 
-- a **Timer trigger** for scheduled orchestration
-- an **HTTP trigger** for manual/operational runs (for example, “run now” or “export evidence now”)
+Expect worker-notify logs for `ReviewPending`, `ReviewOverdue`, `ReviewReminderDue`. If Slack tokens are empty, cards are logged (dry-run) and Cosmos still gets `notified` rows.
 
-### Recommended operating model
+### 3.5 Approve without Slack (optional)
 
-- Reviewers are still humans.
-- Autopilot reduces toil:
-  - ensures reviews exist for the right privileged surfaces
-  - ensures reviewers get nudged
-  - ensures decisions are applied on time
-  - produces evidence exports for auditors
+Publish an apply message by calling the interactions path with bypass, or insert via a small script. Easiest path with Slack configured: click **Approve** on the card. Cosmos `status` becomes `applied`.
 
-### Graph API usage
+List pending:
 
-The access reviews API provides endpoints to:
+```powershell
+curl http://localhost:8080/api/pending
+```
 
-- create/update/delete review definitions
-- list instances
-- send reminders
-- reset decisions
-- apply decisions
-- bulk record decisions
-- export history via download URIs
+### 3.6 DLQ path
 
-Start with `v1.0` endpoints where possible.
+```powershell
+python -m simulator.main --fixture poison
+```
 
-References:
+Worker-notify should fail validation (`forcePoison`) and abandon the message. After max delivery count, it lands in the subscription DLQ — peek in Service Bus Explorer / emulator tooling.
 
-- Access reviews API overview: https://learn.microsoft.com/en-us/graph/api/resources/accessreviewsv2-overview?view=graph-rest-1.0
+### 3.7 Cosmos failure → retry
 
-PowerShell auth + raw calls:
+Stop the Cosmos container, inject a pending fixture, confirm the worker abandons/retries. Start Cosmos again and confirm eventual success or DLQ depending on delivery count.
 
-- Connect-MgGraph: https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0
-- Invoke-MgGraphRequest: https://learn.microsoft.com/powershell/module/microsoft.graph.authentication/invoke-mggraphrequest?view=graph-powershell-1.0
+### 3.8 SPA (optional)
 
-### Permissions and roles
+Serve `spa/` with any static server (for example `npx --yes serve spa -p 5500`). With `authBypass: true` in `spa/index.html`, click **Sign in** then **Inject fixtures** / **Refresh**.
 
-Access reviews require tenant licensing and appropriate permissions.
-At a minimum, expect:
+***
 
-- Graph application permission in the Access Reviews space (for example `AccessReview.ReadWrite.All` for create/update/delete).
-- If using delegated auth for operators, Entra directory roles may be required (per the API docs).
+## 4. Deploy to Azure (after local green)
 
-See “Role and application permission authorization checks”:
+Hard rules in [infra/main.bicep](infra/main.bicep):
 
-- https://learn.microsoft.com/en-us/graph/api/resources/accessreviewsv2-overview?view=graph-rest-1.0#role-and-application-permission-authorization-checks
+* Cosmos `disableLocalAuth: true`
+* Service Bus `disableLocalAuth: true`
+* ACR `adminUserEnabled: false`
+* App Configuration `disableLocalAuth: true`
+* Key Vault RBAC mode
+* One user-assigned MI: AcrPull, Service Bus Data Owner, Cosmos Data Contributor, Key Vault Secrets User, App Configuration Data Reader
+* **No** Graph `AccessReview.ReadWrite.All`
+* ACA env vars are **endpoints/names only** — Slack secrets retrieved from Key Vault at runtime via MI
 
-### Evidence and audit artifacts
+```powershell
+# 1) Infra without apps (empty image)
+.\scripts\Deploy-Infrastructure.ps1 -ResourceGroup rg-ara-dev -TenantId <tid>
 
-Outputs (recommended):
+# 2) Build image into ACR (no admin user)
+.\scripts\Build-Image.ps1 -AcrName <acrName>
 
-- JSON summary per run (counts, review IDs, status)
-- exported access review history download URIs
-- optional storage of exported CSV/JSON in blob storage
+# 3) Redeploy with image
+.\scripts\Deploy-Infrastructure.ps1 -ResourceGroup rg-ara-dev -TenantId <tid> `
+  -ContainerImage <loginServer>/ara:dev `
+  -ApiClientId <api-app-id> -SpaClientId <spa-app-id>
 
-### Failure handling
+# 4) Secrets (MI reads these — do not paste into ACA settings)
+az keyvault secret set --vault-name <kv> --name slack-signing-secret --value <secret>
+az keyvault secret set --vault-name <kv> --name slack-bot-token --value <xoxb-...>
+```
 
-- Treat Graph calls as retriable for transient failures.
-- Keep a dead-letter list of review IDs that need manual attention.
-- Never auto-apply decisions unless your policy explicitly allows it.
+Register Entra apps per [docs/entra-app-registrations.md](docs/entra-app-registrations.md). Configure Slack per [docs/slack-app.md](docs/slack-app.md). Point Interactivity Request URL to `https://<apiFqdn>/slack/interactions`.
 
-## Local dev loop
+### Azure smoke test
 
-Typical commands:
+1. Portal: Cosmos local auth **Disabled**, Service Bus local auth **Disabled**, ACR admin **Disabled**.
+2. ACA environment variables: **no** `AccountKey`, `SharedAccessKey`, `DefaultEndpointsProtocol`, or Cosmos key settings.
+3. `POST /api/simulate` with a real OIDC token (or temporarily verify with a job run of the simulator).
+4. Slack card appears → Approve → Cosmos document `status=applied` with the same `correlationId`.
+5. SPA pending list updates.
+6. App Insights / Log Analytics: query by `correlationId`.
+7. **Do not** look for a decision in the Entra access-review portal — nothing was written to Graph.
 
-- `pwsh ./scripts/Deploy-Infrastructure.ps1`
-- `pwsh ./scripts/Deploy-FunctionCode.ps1`
-- `func start`
+### Poison / DLQ in Azure
 
-## Security notes
+```powershell
+# from a one-off ACA exec or local machine using MI / Azure creds against the namespace
+python -m simulator.main --fixture poison
+```
 
-- Prefer workload identity (OIDC) for CI.
-- Avoid storing privileged identifiers (role IDs, group IDs) outside the repo unless required; treat config as sensitive.
-- Keep a clear approval step for any automation that applies decisions.
+Peek the `slack-notify` dead-letter subqueue in the portal.
+
+## 5. Configuration reference
+
+| Setting | Local | Azure |
+| --- | --- | --- |
+| `COSMOS_ENDPOINT` | emulator HTTPS | account document endpoint |
+| `COSMOS_KEY` | emulator key only | **unset** (MI) |
+| `SERVICE_BUS_CONNECTION_STRING` | emulator | **unset** |
+| `SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE` | empty | `ns.servicebus.windows.net` |
+| `KEY_VAULT_URI` | empty | vault URI |
+| `ARA_AUTH_BYPASS` | `true` | `false` |
+| Slack tokens | `.env` or empty dry-run | Key Vault via MI |
+
+## 6. Cost notes
+
+* Service Bus **Standard** (topics/subscriptions/DLQ) — intentional small monthly bill
+* ACR **Basic**
+* Cosmos **serverless** + TTL
+* Container Apps Consumption, min replicas **0**
+* App Configuration Free, App Insights 30-day retention
+
+## 7. Non-goals
+
+* Live Graph access-review create/apply
+* Slack workspace SAML SSO
+* Functions / Storage queues / Redis / PostgreSQL
+* Easy Auth as the primary OIDC drill (app-code token validation instead)

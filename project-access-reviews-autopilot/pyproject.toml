@@ -1,0 +1,33 @@
+[project]
+name = "access-reviews-autopilot"
+version = "0.1.0"
+description = "Slack as the access-review inbox (simulated Graph-shaped events)"
+requires-python = ">=3.11"
+dependencies = [
+    "azure-cosmos>=4.7.0",
+    "azure-identity>=1.17.0",
+    "azure-keyvault-secrets>=4.8.0",
+    "azure-servicebus>=7.12.0",
+    "fastapi>=0.111.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

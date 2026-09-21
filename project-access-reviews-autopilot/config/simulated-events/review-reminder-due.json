@@ -1,0 +1,19 @@
+{
+  "eventType": "ReviewReminderDue",
+  "correlationId": "ara-sim-reminder-001",
+  "definitionId": "00000000-0000-4000-8000-000000000103",
+  "instanceId": "00000000-0000-4000-8000-000000000203",
+  "decisionItemId": "00000000-0000-4000-8000-000000000303",
+  "principalDisplayName": "Casey Operator",
+  "principalUpn": "casey.operator@contoso.lab",
+  "principalObjectId": "00000000-0000-4000-8000-000000000403",
+  "resourceDisplayName": "Global Reader (PIM eligible)",
+  "resourceType": "directoryRole",
+  "resourceId": "00000000-0000-4000-8000-000000000503",
+  "reviewerDisplayName": "Sam Approver",
+  "reviewerUpn": "sam.approver@contoso.lab",
+  "dueDateTime": "2026-09-22T17:00:00Z",
+  "recommendation": "Approve",
+  "accessReviewUrl": "https://myaccess.microsoft.com/@contoso.lab#/AccessReviews",
+  "notes": "Simulated reminder nudge for an already-notified reviewer."
+}

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Access Reviews Autopilot</title>
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+  <style>
+    :root { font-family: "Segoe UI", system-ui, sans-serif; color: #1b1b1b; }
+    body { margin: 2rem; max-width: 960px; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+    button { cursor: pointer; padding: 0.5rem 1rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { border-bottom: 1px solid #ddd; text-align: left; padding: 0.5rem; vertical-align: top; }
+    .muted { color: #666; font-size: 0.9rem; }
+    .status { font-weight: 600; }
+    #error { color: #a4262c; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Access Reviews Autopilot</h1>
+      <p class="muted">
+        Simulated Graph-shaped queue. Slack is the decision UI. Entra OIDC signs you in.
+      </p>
+    </div>
+    <div>
+      <button id="signin" type="button">Sign in</button>
+      <button id="signout" type="button" hidden>Sign out</button>
+      <button id="refresh" type="button" hidden>Refresh</button>
+      <button id="simulate" type="button" hidden>Inject fixtures</button>
+    </div>
+  </header>
+
+  <p id="user" class="muted"></p>
+  <p id="error"></p>
+  <table>
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Event</th>
+        <th>Principal</th>
+        <th>Resource</th>
+        <th>Correlation</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script>
+    // Fill these from your Entra app registrations (SPA + API).
+    // Local bypass: set window.ARA_AUTH_BYPASS = true and skip MSAL.
+    window.ARA_CONFIG = window.ARA_CONFIG || {
+      authBypass: true,
+      apiBaseUrl: "http://localhost:8080",
+      tenantId: "YOUR_TENANT_ID",
+      spaClientId: "YOUR_SPA_CLIENT_ID",
+      apiScope: "api://access-reviews-autopilot/access_as_user"
+    };
+
+    const cfg = window.ARA_CONFIG;
+    let msalInstance = null;
+    let accessToken = null;
+
+    function showError(err) {
+      document.getElementById("error").textContent = err ? String(err) : "";
+    }
+
+    async function ensureMsal() {
+      if (cfg.authBypass || msalInstance) return;
+      msalInstance = new msal.PublicClientApplication({
+        auth: {
+          clientId: cfg.spaClientId,
+          authority: `https://login.microsoftonline.com/${cfg.tenantId}`,
+          redirectUri: window.location.origin
+        },
+        cache: { cacheLocation: "sessionStorage" }
+      });
+      await msalInstance.initialize();
+      await msalInstance.handleRedirectPromise();
+    }
+
+    async function getToken() {
+      if (cfg.authBypass) return "bypass";
+      await ensureMsal();
+      const accounts = msalInstance.getAllAccounts();
+      if (!accounts.length) {
+        await msalInstance.loginRedirect({ scopes: [cfg.apiScope] });
+        return null;
+      }
+      try {
+        const result = await msalInstance.acquireTokenSilent({
+          account: accounts[0],
+          scopes: [cfg.apiScope]
+        });
+        return result.accessToken;
+      } catch {
+        await msalInstance.acquireTokenRedirect({ scopes: [cfg.apiScope] });
+        return null;
+      }
+    }
+
+    async function api(path, options = {}) {
+      const token = await getToken();
+      if (!cfg.authBypass && !token) return null;
+      const headers = Object.assign({}, options.headers || {}, {
+        "Content-Type": "application/json"
+      });
+      if (!cfg.authBypass) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${cfg.apiBaseUrl}${path}`, { ...options, headers });
+      if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+      return res.json();
+    }
+
+    function renderRows(items) {
+      const tbody = document.getElementById("rows");
+      tbody.innerHTML = "";
+      for (const item of items || []) {
+        const work = item.review_work || {};
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td class="status">${item.status}</td>
+          <td>${item.event_type || ""}</td>
+          <td>${work.principalDisplayName || ""}<div class="muted">${work.principalUpn || ""}</div></td>
+          <td>${work.resourceDisplayName || ""}<div class="muted">${work.resourceType || ""}</div></td>
+          <td><code>${item.correlation_id}</code></td>`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function refresh() {
+      showError("");
+      try {
+        const data = await api("/api/pending");
+        if (data) renderRows(data.items);
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    async function simulate() {
+      showError("");
+      try {
+        await api("/api/simulate", {
+          method: "POST",
+          body: JSON.stringify({ include_poison: false })
+        });
+        await refresh();
+      } catch (err) {
+        showError(err);
+      }
+    }
+
+    async function signedInUi() {
+      document.getElementById("signin").hidden = true;
+      document.getElementById("signout").hidden = false;
+      document.getElementById("refresh").hidden = false;
+      document.getElementById("simulate").hidden = false;
+      document.getElementById("user").textContent = cfg.authBypass
+        ? "Local bypass (ARA_AUTH_BYPASS / spa authBypass)"
+        : "Signed in with Entra OIDC";
+      await refresh();
+    }
+
+    document.getElementById("signin").onclick = async () => {
+      try {
+        if (cfg.authBypass) {
+          await signedInUi();
+          return;
+        }
+        await ensureMsal();
+        await msalInstance.loginRedirect({ scopes: [cfg.apiScope] });
+      } catch (err) {
+        showError(err);
+      }
+    };
+    document.getElementById("signout").onclick = async () => {
+      if (!cfg.authBypass && msalInstance) {
+        const accounts = msalInstance.getAllAccounts();
+        if (accounts.length) await msalInstance.logoutRedirect({ account: accounts[0] });
+      }
+      location.reload();
+    };
+    document.getElementById("refresh").onclick = refresh;
+    document.getElementById("simulate").onclick = simulate;
+
+    (async () => {
+      try {
+        if (cfg.authBypass) return;
+        await ensureMsal();
+        if (msalInstance.getAllAccounts().length) await signedInUi();
+      } catch (err) {
+        showError(err);
+      }
+    })();
+  </script>
+</body>
+</html>

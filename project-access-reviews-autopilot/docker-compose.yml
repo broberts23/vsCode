@@ -1,0 +1,85 @@
+# Local emulators only. Emulator connection strings stay in .env (gitignored).
+# Never copy those values into Bicep or Container Apps.
+
+services:
+  cosmos:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    platform: linux/amd64
+    mem_limit: 3g
+    ports:
+      - "8081:8081"
+      - "10250-10255:10250-10255"
+    environment:
+      AZURE_COSMOS_EMULATOR_PARTITION_COUNT: 5
+      AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE: "false"
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:8081/_explorer/emulator.pem"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  # Service Bus emulator requires SQL edge as a dependency.
+  # See https://learn.microsoft.com/azure/service-bus-messaging/test-locally-with-service-bus-emulator
+  sqledge:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "ServiceBusEmulator123!"
+    ports:
+      - "1433:1433"
+
+  servicebus:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    depends_on:
+      - sqledge
+    ports:
+      - "5672:5672"
+      - "5300:5300"
+    environment:
+      SQL_SERVER: sqledge
+      MSSQL_SA_PASSWORD: "ServiceBusEmulator123!"
+      ACCEPT_EULA: "Y"
+    volumes:
+      - ./local/servicebus-config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro
+
+  api:
+    build: .
+    profiles: ["apps"]
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      COSMOS_ENDPOINT: https://cosmos:8081
+      SERVICE_BUS_CONNECTION_STRING: Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true
+    depends_on:
+      - cosmos
+      - servicebus
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+
+  worker-notify:
+    build: .
+    profiles: ["apps"]
+    env_file:
+      - .env
+    environment:
+      COSMOS_ENDPOINT: https://cosmos:8081
+      SERVICE_BUS_CONNECTION_STRING: Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true
+    depends_on:
+      - cosmos
+      - servicebus
+    command: ["python", "-m", "worker.main", "--mode", "notify"]
+
+  worker-apply:
+    build: .
+    profiles: ["apps"]
+    env_file:
+      - .env
+    environment:
+      COSMOS_ENDPOINT: https://cosmos:8081
+      SERVICE_BUS_CONNECTION_STRING: Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true
+    depends_on:
+      - cosmos
+      - servicebus
+    command: ["python", "-m", "worker.main", "--mode", "apply"]

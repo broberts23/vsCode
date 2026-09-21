@@ -1,0 +1,19 @@
+{
+  "eventType": "ReviewOverdue",
+  "correlationId": "ara-sim-overdue-001",
+  "definitionId": "00000000-0000-4000-8000-000000000102",
+  "instanceId": "00000000-0000-4000-8000-000000000202",
+  "decisionItemId": "00000000-0000-4000-8000-000000000302",
+  "principalDisplayName": "Jordan Guest",
+  "principalUpn": "jordan.guest@fabrikam.lab",
+  "principalObjectId": "00000000-0000-4000-8000-000000000402",
+  "resourceDisplayName": "Finance Contoso Payroll API",
+  "resourceType": "application",
+  "resourceId": "00000000-0000-4000-8000-000000000502",
+  "reviewerDisplayName": "Sam Approver",
+  "reviewerUpn": "sam.approver@contoso.lab",
+  "dueDateTime": "2026-09-10T17:00:00Z",
+  "recommendation": "Deny",
+  "accessReviewUrl": "https://myaccess.microsoft.com/@contoso.lab#/AccessReviews",
+  "notes": "Simulated overdue review. Injected because the lab tenant has no production recertification traffic."
+}

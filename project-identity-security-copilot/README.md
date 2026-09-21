@@ -37,7 +37,6 @@ The app flow is deliberately simple:
 ```text
 project-identity-security-copilot/
 ├── .gitignore
-├── PYTHON-FOR-POWERSHELL.md
 ├── README.md
 ├── blog.md
 ├── infra/

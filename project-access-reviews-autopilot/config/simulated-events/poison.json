@@ -1,0 +1,20 @@
+{
+  "eventType": "ReviewPending",
+  "correlationId": "ara-sim-poison-001",
+  "definitionId": "00000000-0000-4000-8000-000000000199",
+  "instanceId": "00000000-0000-4000-8000-000000000299",
+  "decisionItemId": "00000000-0000-4000-8000-000000000399",
+  "principalDisplayName": "Poison Principal",
+  "principalUpn": "poison@contoso.lab",
+  "principalObjectId": "00000000-0000-4000-8000-000000000499",
+  "resourceDisplayName": "Poison Resource",
+  "resourceType": "group",
+  "resourceId": "00000000-0000-4000-8000-000000000599",
+  "reviewerDisplayName": "Sam Approver",
+  "reviewerUpn": "sam.approver@contoso.lab",
+  "dueDateTime": "2026-09-20T00:00:00Z",
+  "recommendation": null,
+  "accessReviewUrl": "",
+  "notes": "POISON: forcePoison=true so the worker raises and the message lands in the DLQ after retries.",
+  "forcePoison": true
+}
