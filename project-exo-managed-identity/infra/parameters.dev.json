@@ -1,0 +1,17 @@
+{
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": {
+      "value": "dev"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "baseName": {
+      "value": "exomi"
+    },
+    "exchangeOrganization": {
+      "value": "contoso.onmicrosoft.com"
+    }
+  }
+}

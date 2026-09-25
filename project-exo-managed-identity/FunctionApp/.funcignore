@@ -1,0 +1,7 @@
+# Local settings and Azure Functions Core Tools artifacts
+local.settings.json
+.python_packages/
+__blobstorage__/
+__queuestorage__/
+__azurite_db*__.json
+.vscode/

@@ -1,0 +1,30 @@
+{
+  "version": "2.0",
+  "logging": {
+    "logLevel": {
+      "default": "Information",
+      "Function": "Information",
+      "Host.Aggregator": "Information"
+    },
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "maxTelemetryItemsPerSecond": 20,
+        "excludedTypes": "Request"
+      }
+    }
+  },
+  "extensions": {
+    "http": {
+      "routePrefix": "api"
+    }
+  },
+  "managedDependency": {
+    "enabled": true
+  },
+  "concurrency": {
+    "dynamicConcurrencyEnabled": true,
+    "snapshotPersistenceEnabled": true
+  },
+  "functionTimeout": "00:05:00"
+}

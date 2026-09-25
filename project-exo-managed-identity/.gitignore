@@ -1,0 +1,43 @@
+# Azure Functions artifacts
+obj/
+appsettings.json
+local.settings.json
+
+# Build output
+*.csx
+*.class
+*.exe
+*.pdb
+
+# Allow JWT dependencies in bin folder
+!bin/*.dll
+
+# Azure Functions Core Tools
+.vscode/
+
+# Compiled PowerShell
+*.ps1.bak
+*.psm1.bak
+
+# Test results
+TestResults/
+*.trx
+
+# Pester coverage
+coverage.xml
+
+# Local environment
+.env
+
+# IDE
+.idea/
+.vs/
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Azure
+__blobstorage__
+__queuestorage__
+__azurite_db*__
