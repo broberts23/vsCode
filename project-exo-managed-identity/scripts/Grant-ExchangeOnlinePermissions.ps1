@@ -6,13 +6,18 @@
     Grants Exchange Online permissions to the Function App managed identity.
 
 .DESCRIPTION
-    Idempotently assigns Exchange.ManageAsApp on the Office 365 Exchange Online
-    resource via Microsoft Graph, then registers the identity for Exchange RBAC
-    for Applications and assigns View-Only Configuration (covers Get-AcceptedDomain).
+    Idempotently assigns:
+      1) Exchange.ManageAsApp on Office 365 Exchange Online (Entra app role)
+      2) A supported Microsoft Entra directory role for Exchange Online PowerShell
+         (default: Global Reader — enough for Get-AcceptedDomain)
 
-    Requires:
-    - Azure CLI logged in (az login)
-    - An existing Connect-ExchangeOnline session as an Exchange admin
+    This follows Microsoft's managed-identity Connect-ExchangeOnline guidance.
+    Exchange Online New-ServicePrincipal / RBAC-for-Applications is intentionally
+    not used: those cmdlets can stay blocked by Substrate licensing checks even
+    after Exchange Online Plan 1 is assigned and organization customization is enabled.
+
+    Requires Azure CLI logged in with rights to assign app roles and directory roles
+    (typically Privileged Role Administrator or Global Administrator).
 
 .PARAMETER SubscriptionId
     Azure subscription containing the Function App.
@@ -26,11 +31,11 @@
 .PARAMETER ManagedIdentityPrincipalId
     Optional object ID override. When omitted, resolved from the Function App.
 
-.PARAMETER ExchangeRole
-    Exchange management role to assign. Default: View-Only Configuration.
+.PARAMETER EntraRole
+    Supported Microsoft Entra role for Exchange Online PowerShell managed identity.
+    Default: Global Reader.
 
 .EXAMPLE
-    Connect-ExchangeOnline -Organization contoso.onmicrosoft.com
     ./Grant-ExchangeOnlinePermissions.ps1 `
       -SubscriptionId 00000000-0000-0000-0000-000000000000 `
       -ResourceGroupName rg-exomi-dev `
@@ -38,7 +43,6 @@
 
 .LINK
     https://learn.microsoft.com/powershell/exchange/connect-exo-powershell-managed-identity
-    https://learn.microsoft.com/exchange/permissions-exo/application-rbac
 #>
 
 [CmdletBinding()]
@@ -60,8 +64,17 @@ param(
     [string]$ManagedIdentityPrincipalId,
 
     [Parameter()]
-    [ValidateNotNullOrEmpty()]
-    [string]$ExchangeRole = 'View-Only Configuration',
+    [ValidateSet(
+        'Global Reader',
+        'Exchange Administrator',
+        'Exchange Recipient Administrator',
+        'Compliance Administrator',
+        'Helpdesk Administrator',
+        'Security Administrator',
+        'Security Reader',
+        'Global Administrator'
+    )]
+    [string]$EntraRole = 'Global Reader',
 
     [Parameter()]
     [switch]$AsJson
@@ -95,24 +108,6 @@ function Assert-AzLogin {
     }
 }
 
-function Assert-ExchangeOnlineSession {
-    [CmdletBinding()]
-    param()
-
-    $connection = Get-ConnectionInformation -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $connection) {
-        throw @"
-No active Exchange Online session. Connect as an Exchange admin first, for example:
-
-  Connect-ExchangeOnline -Organization contoso.onmicrosoft.com
-
-Then re-run this script.
-"@
-    }
-
-    Write-Host "Using Exchange Online session for organization: $($connection.Organization)" -ForegroundColor Cyan
-}
-
 function Invoke-AzJson {
     [CmdletBinding()]
     param(
@@ -122,15 +117,18 @@ function Invoke-AzJson {
     )
 
     $raw = & az @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $exitCode = $LASTEXITCODE
+    $rawText = if ($null -eq $raw) { '' } else { ($raw | Out-String) }
+
+    if ($exitCode -ne 0) {
         throw "az command failed: az $($Arguments -join ' ') :: $raw"
     }
 
-    if ([string]::IsNullOrWhiteSpace($raw)) {
+    if ([string]::IsNullOrWhiteSpace($rawText)) {
         return $null
     }
 
-    return ($raw | ConvertFrom-Json -Depth 64)
+    return ($rawText | ConvertFrom-Json -Depth 64)
 }
 
 function Invoke-GraphJson {
@@ -149,23 +147,31 @@ function Invoke-GraphJson {
     )
 
     $args = @('rest', '--method', $Method, '--url', $Url)
-    if (-not [string]::IsNullOrWhiteSpace($BodyJson)) {
-        $args += @('--headers', 'Content-Type=application/json', '--body', $BodyJson)
-    }
+    $bodyFile = $null
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($BodyJson)) {
+            # az.cmd on Windows mangles inline JSON that contains spaces/newlines.
+            $compactBody = ($BodyJson | ConvertFrom-Json -Depth 64 | ConvertTo-Json -Compress -Depth 64)
+            $bodyFile = Join-Path ([System.IO.Path]::GetTempPath()) ("exomi-graph-body-{0}.json" -f [guid]::NewGuid().Guid)
+            [System.IO.File]::WriteAllText($bodyFile, $compactBody, [System.Text.UTF8Encoding]::new($false))
+            $args += @('--headers', 'Content-Type=application/json', '--body', "@$bodyFile")
+        }
 
-    return (Invoke-AzJson -Arguments $args)
+        return (Invoke-AzJson -Arguments $args)
+    }
+    finally {
+        if ($bodyFile -and (Test-Path -LiteralPath $bodyFile)) {
+            Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Assert-AzCliPresent
 Assert-AzLogin
-Assert-ExchangeOnlineSession
 
 $null = Invoke-AzJson -Arguments @('account', 'set', '--subscription', $SubscriptionId, '--only-show-errors')
 
 $miObjectId = $null
-$miAppId = $null
-$miDisplayName = $null
-
 if (-not [string]::IsNullOrWhiteSpace($ManagedIdentityPrincipalId)) {
     $miObjectId = [string]$ManagedIdentityPrincipalId
 }
@@ -198,7 +204,8 @@ Write-Host "Managed identity: $miDisplayName (objectId=$miObjectId, appId=$miApp
 $results = [System.Collections.Generic.List[object]]::new()
 
 # --- Entra: Exchange.ManageAsApp ---
-$exoSp = Invoke-GraphJson -Method GET -Url "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId%20eq%20'$script:ExchangeOnlineAppId'&`$select=id,appId,displayName"
+# Avoid &$select in URLs: az.cmd treats & as a command separator on Windows.
+$exoSp = Invoke-GraphJson -Method GET -Url "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId%20eq%20'$script:ExchangeOnlineAppId'"
 $exoSpId = [string]$exoSp.value[0].id
 if ([string]::IsNullOrWhiteSpace($exoSpId)) {
     throw 'Unable to resolve Office 365 Exchange Online service principal in this tenant.'
@@ -222,7 +229,7 @@ else {
         principalId = $miObjectId
         resourceId  = $exoSpId
         appRoleId   = $script:ExchangeManageAsAppRoleId
-    } | ConvertTo-Json -Depth 8
+    } | ConvertTo-Json -Compress -Depth 8
 
     $assignment = Invoke-GraphJson -Method POST -Url "https://graph.microsoft.com/v1.0/servicePrincipals/$miObjectId/appRoleAssignments" -BodyJson $body
     $results.Add([pscustomobject]@{
@@ -233,44 +240,46 @@ else {
         })
 }
 
-# --- Exchange Online: service principal + View-Only Configuration ---
-$exoServicePrincipal = Get-ServicePrincipal -Identity $miObjectId -ErrorAction SilentlyContinue
-if ($null -eq $exoServicePrincipal) {
-    $exoServicePrincipal = New-ServicePrincipal -AppId $miAppId -ObjectId $miObjectId -DisplayName $miDisplayName
-    $results.Add([pscustomobject]@{
-            step   = 'New-ServicePrincipal'
-            status = 'Created'
-            appId  = $miAppId
-        })
-}
-else {
-    $results.Add([pscustomobject]@{
-            step   = 'New-ServicePrincipal'
-            status = 'AlreadyExists'
-            appId  = $miAppId
-        })
+# --- Entra directory role (official managed-identity EXO path) ---
+$roleFilter = [uri]::EscapeDataString("displayName eq '$EntraRole'")
+$roleDefs = Invoke-GraphJson -Method GET -Url "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$roleFilter"
+$roleDefinitionId = [string](@($roleDefs.value)[0].id)
+if ([string]::IsNullOrWhiteSpace($roleDefinitionId)) {
+    throw "Unable to resolve Microsoft Entra role definition for '$EntraRole'."
 }
 
-$existingRole = Get-ManagementRoleAssignment -RoleAssignee $miObjectId -Role $ExchangeRole -ErrorAction SilentlyContinue |
-    Select-Object -First 1
+$assignmentFilter = [uri]::EscapeDataString("principalId eq '$miObjectId' and roleDefinitionId eq '$roleDefinitionId'")
+$existingRoleAssignments = Invoke-GraphJson -Method GET -Url "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$assignmentFilter"
+$existingRole = @($existingRoleAssignments.value) | Select-Object -First 1
 
 if ($null -ne $existingRole) {
     $results.Add([pscustomobject]@{
-            step   = 'ManagementRoleAssignment'
-            status = 'AlreadyAssigned'
-            role   = $ExchangeRole
-            name   = $existingRole.Name
+            step             = 'EntraDirectoryRole'
+            status           = 'AlreadyAssigned'
+            role             = $EntraRole
+            roleDefinitionId = $roleDefinitionId
+            assignmentId     = $existingRole.id
         })
 }
 else {
-    $roleAssignment = New-ManagementRoleAssignment -App $miObjectId -Role $ExchangeRole
+    $roleBody = [ordered]@{
+        '@odata.type'    = '#microsoft.graph.unifiedRoleAssignment'
+        principalId      = $miObjectId
+        roleDefinitionId = $roleDefinitionId
+        directoryScopeId = '/'
+    } | ConvertTo-Json -Compress -Depth 8
+
+    $roleAssignment = Invoke-GraphJson -Method POST -Url 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments' -BodyJson $roleBody
     $results.Add([pscustomobject]@{
-            step   = 'ManagementRoleAssignment'
-            status = 'Created'
-            role   = $ExchangeRole
-            name   = $roleAssignment.Name
+            step             = 'EntraDirectoryRole'
+            status           = 'Created'
+            role             = $EntraRole
+            roleDefinitionId = $roleDefinitionId
+            assignmentId     = $roleAssignment.id
         })
 }
+
+Write-Host "Assigned Entra role '$EntraRole' for Connect-ExchangeOnline -ManagedIdentity (Microsoft supported path)." -ForegroundColor Green
 
 if ($AsJson.IsPresent) {
     $results | ConvertTo-Json -Depth 16

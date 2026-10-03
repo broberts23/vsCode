@@ -5,8 +5,8 @@ PowerShell 7.6 Azure Function App that opens an Exchange Online managed-identity
 ## Prerequisites
 
 - Azure subscription with rights to deploy Function Apps on **Windows Elastic Premium (EP1)**
-- PowerShell 7.4+ locally for deployment scripts (`Az` modules)
-- Azure CLI (`az`) logged in, for Graph app-role assignment
+- PowerShell 7.4+ locally for deployment scripts
+- Azure CLI (`az`) logged in (`az login`) for infrastructure, Graph app-role assignment, and Function zip deploy
 - An existing Exchange Online PowerShell session as an Exchange admin, for RBAC-for-Applications assignment
 - Tenant `*.onmicrosoft.com` domain for `EXCHANGE_ORGANIZATION`
 
@@ -20,15 +20,16 @@ PowerShell 7.6 on Azure Functions is preview and Windows-only. ExchangeOnlineMan
    ./scripts/Deploy-Infrastructure.ps1 -Environment dev -ResourceGroupName rg-exomi-dev
    ```
 
-2. **Exchange permissions** — grant `Exchange.ManageAsApp` and `View-Only Configuration` to the managed identity (operator must already be connected to Exchange Online):
+2. **Exchange permissions** — grant `Exchange.ManageAsApp` plus a supported Entra role (default **Global Reader**) to the managed identity. No Exchange Online PowerShell session is required:
 
    ```powershell
-   Connect-ExchangeOnline -Organization contoso.onmicrosoft.com
    ./scripts/Grant-ExchangeOnlinePermissions.ps1 `
      -SubscriptionId <sub-id> `
      -ResourceGroupName rg-exomi-dev `
      -FunctionAppName <function-app-name>
    ```
+
+   Use `-EntraRole 'Exchange Administrator'` only if you need broader EXO write cmdlets later.
 
 3. **Function code** — zip-deploy `FunctionApp/`:
 
@@ -45,7 +46,7 @@ PowerShell 7.6 on Azure Functions is preview and Windows-only. ExchangeOnlineMan
 | Step | Who | Rights |
 |------|-----|--------|
 | Deploy-Infrastructure | Azure contributor on the target resource group | Create EP1 plan, Function App, storage, monitoring |
-| Grant-ExchangeOnlinePermissions | Entra + Exchange admin | Assign `Exchange.ManageAsApp`; create Exchange service principal and `View-Only Configuration` role assignment |
+| Grant-ExchangeOnlinePermissions | Entra admin (Privileged Role Administrator or Global Administrator) | Assign `Exchange.ManageAsApp`; assign supported Entra role (default Global Reader) |
 | Deploy-FunctionApp | Azure contributor on the Function App | Zip publish |
 
 ## Project layout
