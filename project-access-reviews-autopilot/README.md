@@ -166,7 +166,8 @@ Configure Slack per [docs/slack-app.md](docs/slack-app.md). Point Interactivity 
 .\scripts\Deploy-Infrastructure.ps1 -ResourceGroup rg-ara-dev -TenantId <tid> `
   -ContainerImage <loginServer>/ara:dev `
   -ApiClientId <api-app-id> `
-  -SlackChannelId <channel-id>
+  -SlackChannelId <channel-id> `
+  -LabIdentityMapSlackUserId <slack-user-id>
 
 # 6) Secrets (MI reads these — do not paste into ACA settings)
 az keyvault secret set --vault-name <kv> --name slack-signing-secret --value <secret>

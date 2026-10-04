@@ -25,6 +25,8 @@ param(
 
     [string]$SlackChannelId = '',
 
+    [string]$LabIdentityMapSlackUserId = '',
+
     [string]$ContainerImage = '',
 
     [string]$BaseName = 'ara',
@@ -47,13 +49,14 @@ if (-not (Get-AzResourceGroup -Name $ResourceGroup -ErrorAction SilentlyContinue
 }
 
 $params = @{
-    deploymentEnvironment = $Environment
-    baseName              = $BaseName
-    tenantId              = $TenantId
-    apiClientId           = $ApiClientId
-    apiAudience           = $ApiAudience
-    slackChannelId        = $SlackChannelId
-    containerImage        = $ContainerImage
+    deploymentEnvironment     = $Environment
+    baseName                  = $BaseName
+    tenantId                  = $TenantId
+    apiClientId               = $ApiClientId
+    apiAudience               = $ApiAudience
+    slackChannelId            = $SlackChannelId
+    labIdentityMapSlackUserId = $LabIdentityMapSlackUserId
+    containerImage            = $ContainerImage
 }
 
 $deployment = New-AzResourceGroupDeployment `
@@ -63,7 +66,7 @@ $deployment = New-AzResourceGroupDeployment `
     -TemplateParameterObject $params `
     -Verbose
 
-$deployment.Outputs | Format-Table Name, Value
+$deployment.Outputs | Format-Table -AutoSize
 
 # New subscriptions auto-create a $Default TrueFilter. Keep only the named SQL
 # filters from Bicep; otherwise apply/notify both receive every message.

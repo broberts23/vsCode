@@ -22,6 +22,9 @@ param apiAudience string = empty(apiClientId) ? '' : 'api://${apiClientId}'
 @description('Slack channel ID for review cards (worker-notify). Not a secret.')
 param slackChannelId string = ''
 
+@description('Lab Identity Map: every Entra Reviewer resolves to this Slack user id.')
+param labIdentityMapSlackUserId string = ''
+
 @description('Container image (ACR). Leave empty to deploy infra only.')
 param containerImage string = ''
 
@@ -364,6 +367,10 @@ var sharedEnv = [
   {
     name: 'ENTRA_TENANT_ID'
     value: tenantId
+  }
+  {
+    name: 'LAB_IDENTITY_MAP_SLACK_USER_ID'
+    value: labIdentityMapSlackUserId
   }
   {
     name: 'ENTRA_API_CLIENT_ID'
