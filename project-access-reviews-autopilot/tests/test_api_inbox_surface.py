@@ -9,6 +9,9 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from ara.models import ReviewWorkMessage
+from ara.settings import Settings
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -39,8 +42,8 @@ def test_health_ok(client: TestClient) -> None:
 def test_simulate_publishes_review_work(client: TestClient) -> None:
     published: list[str] = []
 
-    def fake_publish(_settings: object, work: object) -> None:
-        published.append(work.correlation_id)  # type: ignore[attr-defined]
+    def fake_publish(_settings: Settings, work: ReviewWorkMessage) -> None:
+        published.append(work.correlation_id)
 
     with (
         patch("api.main.ensure_local_entities"),

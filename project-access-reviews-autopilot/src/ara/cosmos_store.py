@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
 
 from azure.cosmos import CosmosClient, PartitionKey
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
@@ -95,11 +94,3 @@ class CosmosCorrelationStore:
         doc.updated_at = datetime.now(timezone.utc)
         self._container.upsert_item(doc.model_dump(mode="json"))
         return doc
-
-    def list_all(self, limit: int = 50) -> list[dict[str, Any]]:
-        items = self._container.query_items(
-            query="SELECT TOP @limit * FROM c ORDER BY c.updated_at DESC",
-            parameters=[{"name": "@limit", "value": limit}],
-            enable_cross_partition_query=True,
-        )
-        return list(items)

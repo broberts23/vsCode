@@ -14,7 +14,6 @@ if _src.is_dir() and str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -38,14 +37,6 @@ app = FastAPI(
         "All review triggers are simulated fixtures — no live Graph polling."
     ),
     version="0.1.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 
