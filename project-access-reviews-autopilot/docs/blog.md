@@ -1,24 +1,24 @@
 # Stop mailing MyAccess into the void: access reviews that settle in Slack
 
-An access review is a one-bit question wrapped in a lot of ceremony. Does this person still need this access, yes or no? Microsoft Entra will happily schedule the review, find the reviewer and send the email, and then the email lands in an inbox that is already on fire. The reminder gets skimmed, the week moves on, and the review instance ages out while nobody opens the MyAccess portal. The control exists on paper. The decision never gets made.
+An Access Review is a one-bit question wrapped in a lot of ceremony. Does this Principal still need this Resource, yes or no? Microsoft Entra will happily schedule the review, find the Reviewer and send the email, and then the email lands in an inbox that is already on fire. The reminder gets skimmed, the week moves on, and the review instance ages out while nobody opens MyAccess. The control exists on paper. The Decision never gets made.
 
-The premise of this project is simple: take the question to where reviewers already spend their day. An access-review event becomes a message on a queue, the queue feeds a worker, the worker posts a Slack card with the principal, the resource, the due date and Approve and Deny buttons, and one click flows back through a signed callback to be recorded against a correlation ID. MyAccess stays the control plane. Slack becomes the inbox.
+The premise of this project is simple: take the question to where Reviewers already spend their day. A Review Event becomes a message on a queue, the queue feeds a worker, the worker posts a Slack card with the Principal, the Resource, the due date and Approve and Deny buttons, and one click flows back through a signed callback to be recorded against a Correlation ID. MyAccess stays the Control Plane. Slack becomes the Inbox, the only surface where Review Work is decided.
 
-There is one catch, and it shapes everything that follows. The Entra tenant behind this build is a lab. It has no production users, no standing recertification program and no real reviewers. So every event you will see in this post was injected on purpose, and every decision lands in Cosmos DB instead of Microsoft Graph. That is not a shortcut. It is a deliberate design choice, and the rest of the post is about making it a good one.
+There is one catch, and it shapes everything that follows. The Entra tenant behind this build is a lab. It has no production users, no standing recertification program and no real Reviewers. So every Review Event you will see in this post was injected on purpose, and every Apply lands in Cosmos DB instead of Microsoft Graph. That is not a shortcut. It is a deliberate design choice, and the rest of the post is about making it a good one.
 
-![Three simulated access review cards in Slack, each with Approve and Deny buttons](images/slack_notification.png)
+![Three simulated Review Work cards in Slack, each with Approve and Deny buttons](images/slack_notification.png)
 
 ## Why the lab runs on fixtures
 
-Real access reviews are expensive to come by. They need Microsoft Entra ID P2 or Entra ID Governance licensing, a review definition scoped to a real group or application, reviewers who actually hold the reviewer role, and a schedule that may only fire once a quarter. You cannot poll for events that a tenant never produces, and you would not want a demo to wait three months for the next instance.
+Real Access Reviews are expensive to come by. They need Microsoft Entra ID P2 or Entra ID Governance licensing, a review definition scoped to a real group or application, Reviewers who actually hold the Reviewer role, and a schedule that may only fire once a quarter. You cannot poll for Review Events that a tenant never produces, and you would not want a demo to wait three months for the next instance.
 
-The second problem is more serious. Applying a real review decision removes real access. A denied guest loses a group membership. An experiment that goes sideways in a production tenant is an incident, and an experiment in an empty lab tenant proves nothing about the thing you are trying to build.
+The second problem is more serious. Applying a real Decision removes real access. A denied guest loses a group membership. An experiment that goes sideways in a production tenant is an incident, and an experiment in an empty lab tenant proves nothing about the thing you are trying to build.
 
-Fixtures solve both problems and add a third benefit. They are deterministic. The same three events arrive every time, the same poison payload fails the same way, and a screenshot taken today matches the one taken next month. The trick is to make the fakes faithful. Each fixture is a JSON document shaped like the data Graph exposes for an access review decision item, so the pipeline never learns that the source is synthetic. Only the edges know: the thing that produces events and the thing that applies decisions.
+Fixtures solve both problems and add a third benefit. They are deterministic. The same three Review Events arrive every time, the same poison payload fails the same way, and a screenshot taken today matches the one taken next month. The trick is to make the fakes faithful. Each fixture is a JSON document shaped like the data Graph exposes for a Decision Item, so the pipeline never learns that the source is synthetic. Only the edges know: the Producer that emits Review Events and the client that Applies Decisions.
 
 ## One pipeline, two subscriptions
 
-The whole system is a single Service Bus topic called `review-work` with two subscriptions. The `slack-notify` subscription carries review events to the notify worker. The `apply-decision` subscription carries clicks back to the apply worker. Both workers run on Azure Container Apps and scale to zero with KEDA, so an idle lab costs close to nothing.
+The whole system is a single Service Bus topic called `review-work` with two subscriptions. The `slack-notify` subscription carries Review Events to the notify worker. The `apply-decision` subscription carries clicks back to the apply worker. Both workers run on Azure Container Apps and scale to zero with KEDA, so an idle lab costs close to nothing.
 
 ```mermaid
 flowchart LR
@@ -26,20 +26,19 @@ flowchart LR
     topic -->|"slack-notify"| nw["Notify worker"]
     topic -->|"apply-decision"| aw["Apply worker"]
     nw --> cosmos[("Cosmos DB<br/>correlation documents")]
-    nw -->|"chat.postMessage"| slack["Slack card"]
+    nw -->|"chat.postMessage"| slack["Slack Inbox card"]
     slack -->|"button click"| api["API<br/>/slack/interactions"]
     api -->|"ApplyDecision"| topic
     aw --> cosmos
     aw -->|"chat.update"| slack
-    spa["SPA<br/>Entra sign-in"] -->|"GET /api/pending"| api
-    api --> cosmos
+    op["Operator<br/>Entra OIDC"] -->|"POST /api/simulate"| api
 ```
 
-Cosmos DB is the memory of the system. Every document is keyed by a correlation ID that follows an event from the moment it is published to the moment a human decides, which is what makes the whole flow traceable later. Documents carry a 30 day TTL, so the lab cleans up after itself.
+Cosmos DB is the memory of the system. Every document is keyed by a Correlation ID that follows Review Work from publish to Decision, which is what makes the whole flow traceable later. Documents carry a 30 day TTL, so the lab cleans up after itself. That TTL is demo hygiene, not a compliance retention policy.
 
 ## A fixture that looks like Graph
 
-The simulator reads its events from `config/simulated-events/`. There is one fixture per scenario the notify path needs to handle: a pending review, an overdue review, a reminder nudge, and a deliberately broken payload for the failure path. Here is the pending one.
+The simulator reads its events from `config/simulated-events/`. There is one fixture per Review Event the notify path needs to handle: Pending, Overdue, ReminderDue, and a deliberately broken payload for the failure path. Here is the Pending one.
 
 ```json
 {
@@ -59,7 +58,7 @@ The simulator reads its events from `config/simulated-events/`. There is one fix
 }
 ```
 
-The three identifiers at the top are the interesting ones. A real access review is addressed by definition, then instance, then decision item, and that triple is exactly what a Graph `PATCH` needs later. The fixtures carry them from day one, which means the day a real tenant arrives, nothing about the message contract has to change. Every fixture also announces what it is in its `notes` field, and that note travels all the way to the Slack card, so nobody can mistake a lab event for a live one.
+The three identifiers at the top are the interesting ones. A real Decision Item is addressed by definition, then instance, then decision item, and that triple is exactly what a Graph `PATCH` needs later. The fixtures carry them from day one, which means the day a real tenant arrives, nothing about the message contract has to change. Every fixture also announces what it is in its `notes` field, and that note travels all the way to the Slack card, so nobody can mistake lab Review Work for a live Access Review.
 
 A Pydantic model validates the shape on the way in, and a second method decides whether the worker should accept it.
 
@@ -77,7 +76,7 @@ Hold on to that `force_poison` flag. It turns up again in the failure path.
 
 ## Injecting the first event
 
-A Container Apps job replays the fixtures every six hours, but nobody wants to wait for cron during a demo. The API exposes `POST /api/simulate`, protected by Entra OIDC, which publishes the fixtures on demand. It accepts an optional fixture name and a flag that decides whether the poison payload comes along.
+A Container Apps job replays the fixtures every six hours, but nobody wants to wait for cron during a demo. The API exposes `POST /api/simulate`, protected by Entra OIDC, which lets an Operator publish fixtures on demand. It accepts an optional fixture name and a flag that decides whether the poison payload comes along. There is no second human UI and no pending-queue API. Operators inspect open Review Work in Cosmos or logs by Correlation ID.
 
 ```powershell
 Invoke-RestMethod -Method POST "https://<api-fqdn>/api/simulate" `
@@ -86,7 +85,7 @@ Invoke-RestMethod -Method POST "https://<api-fqdn>/api/simulate" `
   -Body '{"include_poison": false}'
 ```
 
-The response is the receipt. Three correlation IDs went onto the topic, and the poison fixture stayed home.
+The response is the receipt. Three Correlation IDs went onto the topic, and the poison fixture stayed home.
 
 ![PowerShell terminal showing the simulate endpoint returning three published correlation IDs](images/successfull_endpoint_invocation.png)
 
@@ -104,9 +103,11 @@ for work in load_all_fixtures(settings.fixtures_path):
 
 ## The card in Slack
 
-Within a few seconds the notify worker has validated each message, written a correlation document to Cosmos and posted a Block Kit card to the channel. The card is the whole product. It names the principal and their UPN, the resource and its type, the due date, the system recommendation and the correlation ID, and it ends with two buttons.
+Within a few seconds the notify worker has validated each message, written a correlation document to Cosmos with Review Status Received, posted a Block Kit card to the shared lab channel, and marked the document Notified. The card is the whole product. It names the Principal and their UPN, the Resource and its type, the due date, the Recommendation and the Correlation ID, and it ends with two buttons.
 
-The part worth reading is how the buttons carry their context. Slack will send back whatever string you put in the button `value`, so the value encodes the correlation ID and the decision. No lookup table, no session state.
+The lab posts to a shared `SLACK_CHANNEL_ID`. That is scaffolding. Production intent is Inbox delivery to the Reviewer. The lab also resolves every Entra Reviewer through a Lab Identity Map to the same Slack user id, because the Slack developer sandbox cannot do workspace SSO. Production end-state is SSO Identity, where Slack is SSO'd to Entra so Decider and Reviewer are the same person without a stub map.
+
+The part worth reading is how the buttons carry their context. Slack will send back whatever string you put in the button `value`, so the value encodes the Correlation ID and the Decision. No lookup table, no session state.
 
 ```python
 {
@@ -118,7 +119,9 @@ The part worth reading is how the buttons carry their context. Slack will send b
 },
 ```
 
-Look at the three cards in the screenshot above and you can see the fixtures doing their job. One is a group, one is an application and one is a PIM eligible directory role, so the same card layout is exercised against the resource types a real tenant would throw at it. The recommendations differ too. The overdue card recommends Deny, and that detail pays off in a moment.
+Look at the three cards in the screenshot above and you can see the fixtures doing their job. One is a group, one is an application and one is a PIM eligible directory role, so the same card layout is exercised against the Resource types a real tenant would throw at it. The Recommendations differ too. The overdue card recommends Deny, and that detail pays off in a moment.
+
+When the same open Review Work is republished, the notify path refreshes metadata instead of stacking orphan cards. Overdue and ReminderDue Review Events nudge the existing Inbox card while status is still Notified. Applied Review Work is never reopened.
 
 ## Trusting the button
 
@@ -126,7 +129,7 @@ Clicking Approve makes Slack send an HTTP `POST` to the Request URL configured o
 
 ![Slack app Interactivity and Shortcuts page with the Request URL pointing at the Container Apps endpoint](images/slack_request_url.png)
 
-That endpoint is a public URL that approves access when called, so it cannot take anyone's word for who is calling. Slack signs every request with HMAC-SHA256 over a version prefix, a timestamp and the raw body. The API recomputes the signature with the signing secret from Key Vault and compares in constant time. A stale timestamp is rejected as well, which closes the replay window.
+That endpoint is a public URL that queues an Apply when called, so it cannot take anyone's word for who is calling. Slack signs every request with HMAC-SHA256 over a version prefix, a timestamp and the raw body. The API recomputes the signature with the signing secret from Key Vault and compares in constant time. A stale timestamp is rejected as well, which closes the replay window.
 
 ```python
 basestring = f"v0:{timestamp}:{body_text}".encode("utf-8")
@@ -140,7 +143,7 @@ if not hmac.compare_digest(expected, signature):
     raise SlackSignatureError("Slack signature mismatch")
 ```
 
-Once the signature checks out, the API does something that looks lazy and is actually the whole point. It does not apply anything. Slack expects an acknowledgement within three seconds, and a Cosmos write plus a card update can wander past that on a cold start. So the API publishes an `ApplyDecision` message to the same topic and replies with a short ephemeral note. The slow work happens elsewhere, on its own schedule, with Service Bus retries behind it.
+Once the signature checks out, the API does something that looks lazy and is actually the whole point. It does not Apply anything synchronously. Slack expects an acknowledgement within three seconds, and a Cosmos write plus a card update can wander past that on a cold start. So the API publishes an `ApplyDecision` message (including a lab-stub Justification) to the same topic and replies with a short ephemeral note. The slow work happens elsewhere, on its own schedule, with Service Bus retries behind it.
 
 ```mermaid
 sequenceDiagram
@@ -150,74 +153,78 @@ sequenceDiagram
     participant SB as Service Bus
     participant NW as Notify worker
     participant DB as Cosmos DB
-    participant SL as Slack
-    actor Rev as Reviewer
+    participant SL as Slack Inbox
+    actor Dec as Decider
     participant AW as Apply worker
 
     Op->>API: POST /api/simulate
     API->>SB: publish ReviewPending, correlationId
     SB->>NW: deliver on slack-notify
-    NW->>DB: upsert document, status pending
+    NW->>DB: upsert document, status received
     NW->>SL: chat.postMessage with Approve and Deny
     NW->>DB: mark notified, store channel and message ts
-    Rev->>SL: click Approve
+    Dec->>SL: click Approve
     SL->>API: POST /slack/interactions, signed
     API->>API: verify HMAC signature and timestamp
-    API->>SB: publish ApplyDecision, same correlationId
+    API->>SB: publish ApplyDecision with Justification stub
     API-->>SL: ephemeral acknowledgement
     SB->>AW: deliver on apply-decision
-    AW->>DB: mark applied, decision, decided by
+    AW->>DB: mark applied, decision, decided by, justification
     AW->>SL: chat.update to Applied
 ```
 
 ## Applying the decision without touching Graph
 
-This is the seam where the lab and the real world part ways, and it is a single interface. Everything upstream of it, the queue, the card, the signature check and the correlation ID, is identical in both worlds. Only the implementation behind `apply_decision` differs.
+This is the seam where the lab and the real world part ways, and it is a single interface. Everything upstream of it, the queue, the card, the signature check and the Correlation ID, is identical in both worlds. Only the implementation behind `apply_decision` differs.
 
 ```python
 class IAccessReviewClient(ABC):
     @abstractmethod
     def apply_decision(
-        self, *, correlation_id: str, decision: DecisionAction, decided_by: str
+        self,
+        *,
+        correlation_id: str,
+        decision: DecisionAction,
+        decided_by: str,
+        justification: str,
     ) -> None: ...
 
 
 class SimulatedAccessReviewClient(IAccessReviewClient):
     """Updates Cosmos. Does not call Microsoft Graph."""
 
-    def apply_decision(self, *, correlation_id, decision, decided_by) -> None:
+    def apply_decision(
+        self, *, correlation_id, decision, decided_by, justification
+    ) -> None:
         self._store.mark_applied(
-            correlation_id, decision=decision.value, decided_by=decided_by
+            correlation_id,
+            decision=decision.value,
+            decided_by=decided_by,
+            justification=justification,
         )
 ```
 
-The lab wires up `SimulatedAccessReviewClient`. A `GraphAccessReviewClient` sits beside it as an intentionally unimplemented stub that raises if anyone tries to use it, so the production path is marked on the map without being reachable. When the apply worker finishes, it rewrites the original card so the reviewer sees the outcome where they clicked.
+The lab wires up `SimulatedAccessReviewClient`. A `GraphAccessReviewClient` sits beside it as an intentionally unimplemented stub that raises if anyone tries to use it, so the production path is marked on the map without being reachable. When the apply worker finishes, it rewrites the original card so the Decider sees the outcome where they clicked.
 
 ![Slack showing three Applied cards, each noting the simulated apply and that Graph was not called](images/slack_approved.png)
 
-The footer on each card is the honest part: simulated apply, Cosmos updated, Graph not called. If someone screenshots this channel for a status report, the card itself says what happened and what did not.
+The footer on each card is the honest part: simulated Apply, Cosmos updated, Graph not called. If someone screenshots this channel for a status report, the card itself says what happened and what did not.
 
 The other half of the evidence is in Cosmos. Open the overdue document in Data Explorer and the whole lifecycle is on one page.
 
 ![Cosmos DB Data Explorer showing the ara-sim-overdue-001 document with status applied](images/cosmosdb_data_explorer.png)
 
-The document started life with `status` set to `pending`, picked up a Slack channel and message timestamp when the card was posted, and ended with `status: applied`, a `decision`, a `decided_by` and a `decided_at`. Look closely at the decision. The system recommended Deny for this guest on the payroll API, and the reviewer clicked Approve. That is exactly the kind of override an auditor wants to see preserved, and the data model records it without any special handling because the recommendation and the decision are separate fields.
+The document started life with Review Status `received`, picked up a Slack channel and message timestamp when the card was posted (`notified`), and ended with `applied`, a Decision, a Decider, a Justification stub and a timestamp. Look closely at the Decision. The system Recommendation was Deny for this guest on the payroll API, and the Decider clicked Approve. That is exactly the kind of override an auditor wants to see preserved, and the data model records it without any special handling because Recommendation, Decision and Justification are separate fields.
 
 ## Signing in with real Entra
 
-The Slack path never touches Entra, but the API and the small single page app do, and this is the one place the lab refuses to fake anything. The SPA signs in with authorization code and PKCE, requests the `access_as_user` scope on the API's app registration, and calls the API with the resulting bearer token. The API checks issuer, audience and scope before it serves the pending queue or accepts a simulate request.
+The Slack Inbox path never touches Entra. The Operator API does, and this is the one place the lab refuses to fake anything when bypass is off. An Operator obtains a bearer token for the API's `access_as_user` scope and calls `POST /api/simulate`. The API checks issuer, audience and scope before it accepts the inject.
 
-Two app registrations make that work. The SPA is a public client with redirect URIs for local and deployed hosts and implicit grant switched off. The API exposes the `access_as_user` scope under an application ID URI that must be built from its client ID, because bare strings are rejected by the default tenant policy. Slack is deliberately not part of this. It is an OAuth app with a bot token and a signing secret, not an identity provider, and workspace SSO plays no role.
+One app registration is enough for that story. The API exposes the `access_as_user` scope under an Application ID URI built from its client ID, because bare strings are rejected by the default tenant identifier-URI policy. Slack remains an OAuth app with a bot token and a signing secret, not an identity provider. Workspace SSO is paid SAML and out of reach in the developer sandbox, which is why Lab Identity Map exists and SSO Identity stays the documented production end-state.
 
-<!-- screenshot-todo: images/entra_spa_authentication_redirect_uris.png | Entra SPA app registration, Authentication blade, with the redirect URIs listed -->
+<!-- screenshot-todo: images/entra_api_expose_scope.png | Entra API app registration, Expose an API, showing the access_as_user scope -->
 
-<!-- screenshot-todo: images/entra_api_expose_scope.png | Entra API app registration, Expose an API, showing the access_as_user scope and the authorized SPA client -->
-
-<!-- screenshot-todo: images/entra_aadsts50011_redirect_mismatch.png | Browser showing AADSTS50011 for a redirect URI mismatch, the most common first-run failure -->
-
-<!-- screenshot-todo: images/spa_pending_queue.png | SPA after sign-in listing the pending queue read from Cosmos through GET /api/pending -->
-
-The SPA gives the same inbox a second surface. The pending list it renders comes from the same Cosmos documents the Slack cards are built from, so the portal and the channel can never disagree about what is waiting.
+<!-- screenshot-todo: images/entra_aadsts50011_redirect_mismatch.png | Browser showing AADSTS50011 for a redirect URI mismatch, the most common first-run failure when acquiring Operator tokens -->
 
 ## No keys between Azure resources
 
@@ -245,32 +252,37 @@ The Cosmos store follows the same pattern. Because the code never branches on "a
 
 ## When a message is poison
 
-A pipeline that only handles good input has not been tested. The poison fixture is a payload that parses cleanly but carries `forcePoison: true`, so the notify worker's validation rejects it, and it exists so the dead letter path is something you exercise on purpose instead of discovering at 2 a.m.
+A pipeline that only handles good input has not been tested. The poison fixture is a payload that parses cleanly but carries `forcePoison: true`, so the notify worker's validation rejects it, and it exists so the failure path is something you exercise on purpose instead of discovering at 2 a.m.
 
-The worker's contract is small. Process the message and complete it, or abandon it and let Service Bus decide. After five failed deliveries the topic's `maxDeliveryCount` moves the message to the dead letter queue, where it waits to be peeked.
+The worker's contract is small. Process the message and complete it, or abandon it and let Service Bus retry. When delivery count reaches the configured maximum, the worker marks the Review Work Failed and completes the message so the Correlation ID has a terminal status instead of vanishing into silence.
 
 ```python
 try:
     work = parse_review_work(raw)
-    handle_notify(store, slack, work)
+    handle_notify(store, slack, work, settings)
     receiver.complete_message(message)
 except Exception:
-    logger.exception("Failed processing message; abandoning for retry/DLQ")
-    receiver.abandon_message(message)
+    if should_mark_failed(
+        delivery_count=message.delivery_count,
+        max_delivery_count=settings.service_bus_max_delivery_count,
+    ):
+        record_terminal_failure(store, work=work, correlation_id=correlation_id)
+        receiver.complete_message(message)
+    else:
+        receiver.abandon_message(message)
 ```
 
 ```mermaid
 flowchart TD
     msg["Message on slack-notify"] --> parse{"Parses and passes<br/>validate_for_worker?"}
-    parse -->|"yes"| ok["Cosmos upsert, Slack card, complete"]
-    parse -->|"no"| abandon["Abandon message"]
-    abandon --> count{"Delivery count<br/>reached 5?"}
-    count -->|"no"| msg
-    count -->|"yes"| dlq[("Dead letter queue")]
-    dlq --> peek["Peek, trace by correlationId, fix or discard"]
+    parse -->|"yes"| ok["Cosmos upsert, Slack card or nudge, complete"]
+    parse -->|"no"| retry{"Delivery count<br/>exhausted?"}
+    retry -->|"no"| abandon["Abandon message"]
+    abandon --> msg
+    retry -->|"yes"| failed["Mark Review Status Failed, complete"]
 ```
 
-Because the correlation ID rides on every log line and every message, finding the story of one bad event is a single query against the container logs.
+Because the Correlation ID rides on every log line and every message, finding the story of one bad event is a single query against the container logs.
 
 ```kusto
 ContainerAppConsoleLogs_CL
@@ -279,28 +291,27 @@ ContainerAppConsoleLogs_CL
 | order by TimeGenerated asc
 ```
 
-<!-- screenshot-todo: images/service_bus_topic_subscriptions_dlq.png | Service Bus topic with the slack-notify and apply-decision subscriptions, DLQ depth visible -->
-
-<!-- screenshot-todo: images/service_bus_dlq_peek_poison.png | Peeked dead letter message for the poison fixture, showing the delivery count and dead letter reason -->
+<!-- screenshot-todo: images/service_bus_topic_subscriptions_dlq.png | Service Bus topic with the slack-notify and apply-decision subscriptions -->
 
 <!-- screenshot-todo: images/log_analytics_correlation_trace.png | Log Analytics KQL result tracing one correlation ID across API, notify worker and apply worker -->
 
 ## What carries over to a real tenant
 
-Most of this system is already production-shaped. The topic, the two subscriptions, the retry and dead letter behavior, the Slack card, the signature check, the correlation documents and the managed identity wiring all survive the move to a live tenant untouched. What changes is the producer at one end and the applier at the other, plus one hard constraint that the lab cannot show you.
+Most of this system is already production-shaped. The topic, the two subscriptions, the retry and Failed behavior, the Slack card, the signature check, the correlation documents and the managed identity wiring all survive the move to a live tenant. What changes is the Producer at one end and the applier at the other, plus identity that the lab can only stub.
 
 ```mermaid
 flowchart LR
     fx["Fixture JSON<br/>lab only"] --> core
-    poll["Graph reader<br/>AccessReview.Read.All"]:::real --> core
-    core["ReviewWorkMessage, topic, Slack card,<br/>signed callback, ApplyDecision"] --> sim["SimulatedAccessReviewClient<br/>writes Cosmos"]
-    core --> gr["GraphAccessReviewClient<br/>PATCH decision as the reviewer"]:::real
+    poll["Graph poller<br/>AccessReview.Read.All"]:::real --> core
+    sched["Scheduler<br/>Overdue and ReminderDue"]:::real --> core
+    core["ReviewWorkMessage, topic, Slack Inbox,<br/>signed callback, ApplyDecision"] --> sim["SimulatedAccessReviewClient<br/>writes Cosmos"]
+    core --> gr["GraphAccessReviewClient<br/>delegated PATCH as Reviewer"]:::real
     classDef real stroke-dasharray: 5 5
 ```
 
-On the producer side, the fixture publisher gives way to something that reads real decision items. The access reviews APIs work in an application context, and a service principal with the `AccessReview.Read.All` permission can list review definitions, instances and the decision items inside them. A poller that maps each pending decision item onto `ReviewWorkMessage` replaces the cron job, and because the fixtures already carry the definition, instance and decision item IDs, the mapping is a straight copy rather than a redesign. The reminder and overdue event types become real states of real instances, driven by due dates instead of by a file name.
+On the Producer side, fixtures give way to a Graph poller that lists open Decision Items with application `AccessReview.Read.All`, plus a scheduler that derives Overdue and ReminderDue from due dates. This stays on Access Reviews. It is not Access Package eventing, and it does not assume Microsoft Graph Event Grid partner delivery for Decision Items unless that resource is actually supported later. Because the fixtures already carry the definition, instance and Decision Item IDs, the mapping onto `ReviewWorkMessage` is a straight copy rather than a redesign.
 
-On the applier side, the story is more demanding than the lab suggests. The Graph call that records a decision is a `PATCH` against the decision item under its definition and instance. That endpoint supports delegated permissions only, with no application permission at all, and the caller must be a listed reviewer on the instance. A managed identity cannot approve on a reviewer's behalf. A real `GraphAccessReviewClient` therefore needs to map the Slack user to an Entra user and act with a delegated token for that person, typically through an on-behalf-of flow or a stored consent, and it should send the justification when the review requires one. That identity mapping is the largest piece of genuinely new work, and it is the reason the simulated client is a faithful stand-in for the pipeline but not for the authorization story.
+On the Apply side, the story is more demanding than the lab suggests. The Graph call that records a Decision is a `PATCH` against the Decision Item under its definition and instance. That endpoint supports delegated permissions only, with no application permission at all, and the caller must be a listed Reviewer on the instance. A managed identity cannot Approve on a Reviewer's behalf. A real `GraphAccessReviewClient` therefore needs SSO Identity (or equivalent) so the Decider is the Reviewer, then a delegated token for that person, and it should send the Justification when the Access Review requires one. Lab Identity Map only bridges Reviewer to Slack for lab delivery. It does not authorize Graph Apply.
 
 ```http
 PATCH /identityGovernance/accessReviews/definitions/{definitionId}/instances/{instanceId}/decisions/{decisionItemId}
@@ -309,10 +320,10 @@ Content-Type: application/json
 { "decision": "Approve", "justification": "Still on the payroll team" }
 ```
 
-The remaining differences are smaller but worth naming. Licensing becomes real: access reviews need Entra ID P2 or Entra ID Governance for the people involved. The lab's token check validates issuer, audience and scope on the claims, and production should additionally verify the token signature against the tenant's signing keys. The Cosmos TTL should be revisited, because an audit trail that evaporates after 30 days is a demo feature, not a compliance one. And the "Simulated apply" footer on the Slack card goes away, replaced by the actual outcome that Graph reports back.
+The remaining differences are smaller but worth naming. Licensing becomes real: Access Reviews need Entra ID P2 or Entra ID Governance for the people involved. The lab's token check validates issuer, audience and scope on the claims, and production should additionally verify the token signature against the tenant's signing keys. The Cosmos TTL should be revisited, because an audit trail that evaporates after 30 days is a demo feature, not a compliance one. Shared-channel delivery gives way to Reviewer-targeted Inbox delivery. And the "Simulated apply" footer on the Slack card goes away, replaced by the actual outcome that Graph reports back.
 
-The lab does not prove that access reviews can be automated end to end. It proves something narrower and more useful: that the inbox pattern works. Humans decide where they already live, the bus carries the work, Cosmos remembers the correlation, and managed identity lets every Azure component talk without a shared secret. What remains is replacing two edges with the real thing.
+The lab does not prove that Access Reviews can be automated end to end. It proves something narrower and more useful: that the Inbox pattern works. Humans decide where they already live, the bus carries the Review Work, Cosmos remembers the Correlation ID, and managed identity lets every Azure component talk without a shared secret. What remains is replacing two edges with the real thing.
 
 ## Run it yourself
 
-The local path needs no Azure subscription. Cosmos and Service Bus run as emulators in Docker, the API and workers run on the host, and without a Slack token the worker logs the Block Kit JSON instead of posting it. The step by step instructions, including the dead letter and retry drills, are in the [README](../README.md). Get the local run green first, then deploy.
+The local path needs no Azure subscription. Cosmos and Service Bus run as emulators in Docker, the API and workers run on the host, and without a Slack token the worker logs the Block Kit JSON instead of posting it. The step by step instructions, including the failure and retry drills, are in the [README](../README.md). Get the local run green first, then deploy.

@@ -1,10 +1,10 @@
 # Access Reviews Autopilot — Slack as the access-review inbox
 
-Lab pattern: inject **Graph-shaped** access-review events, notify reviewers in **Slack**, apply decisions into **Cosmos** (simulated). Slack is the only Inbox; Operators inject via the OIDC-protected simulate API or the simulator CLI/job.
+Lab pattern: inject Graph-shaped **Review Events**, notify in **Slack** (the only Inbox), and **Apply** Decisions into **Cosmos** (simulated). Operators inject via the OIDC-protected simulate API or the simulator CLI/job and inspect via Cosmos/logs. See [GLOSSARY.md](GLOSSARY.md) for domain language.
 
-This is **not** live Microsoft Graph access-review automation. The Entra tenant is a lab with no production users or recertification telemetry. Every trigger is a fixture. `SimulatedAccessReviewClient` updates Cosmos; `GraphAccessReviewClient` is a stub only.
+This is **not** live Microsoft Graph Access Review automation. The Entra tenant is a lab with no production users or recertification telemetry. Every trigger is a fixture. `SimulatedAccessReviewClient` updates Cosmos; `GraphAccessReviewClient` is a stub for delegated Reviewer-only Apply later.
 
-Working blog title: **Stop mailing MyAccess into the void: access reviews that settle in Slack.** See [blog.md](blog.md).
+Working blog title: **Stop mailing MyAccess into the void: access reviews that settle in Slack.** See [docs/blog.md](docs/blog.md).
 
 ## Architecture
 
@@ -26,7 +26,8 @@ Azure data plane is **managed identity only**: Cosmos `disableLocalAuth`, Servic
 ```text
 project-access-reviews-autopilot/
 ├── README.md                 ← you are here (local first, then Azure)
-├── blog.md
+├── GLOSSARY.md               ← domain language
+├── docs/blog.md
 ├── pyproject.toml
 ├── Dockerfile
 ├── docker-compose.yml        ← Cosmos + Service Bus emulators
@@ -61,8 +62,9 @@ project-access-reviews-autopilot/
 | Service Bus | Emulator + SQL Edge |
 | API / workers | `uvicorn` / `python -m worker.main` on the host, or compose profile `apps` |
 | Slack interactivity | Socket Mode or dry-run logging |
-| Entra OIDC | Real tenant with `http://localhost` redirects, **or** `ARA_AUTH_BYPASS=true` |
-| Access reviews | Fixtures only — **no Graph** |
+| Entra OIDC | Real tenant tokens for Operator API, **or** `ARA_AUTH_BYPASS=true` |
+| Access Reviews | Fixtures only — **no Graph** |
+| Reviewer → Slack | Lab Identity Map (`LAB_IDENTITY_MAP_SLACK_USER_ID`); shared channel is lab scaffolding |
 
 Emulator connection strings live in `.env` (gitignored). **Never** copy them into Bicep or Container Apps settings.
 
@@ -114,23 +116,23 @@ python -m simulator.main
 curl -X POST http://localhost:8080/api/simulate -H "Content-Type: application/json" -d "{}"
 ```
 
-Expect worker-notify logs for `ReviewPending`, `ReviewOverdue`, `ReviewReminderDue`. If Slack tokens are empty, cards are logged (dry-run) and Cosmos still gets `notified` rows.
+Expect worker-notify logs for `ReviewPending`, `ReviewOverdue`, `ReviewReminderDue`. If Slack tokens are empty, cards are logged (dry-run) and Cosmos documents move `received` → `notified`. Republishing the same Correlation ID refreshes open Review Work; Overdue/ReminderDue nudge the existing card instead of posting a stack of orphans.
 
 ### 3.5 Approve in Slack
 
-With Slack configured, click **Approve** or **Deny** on the card. Cosmos `status` becomes `applied`. Inspect documents in Cosmos or logs by `correlationId` — there is no pending-queue UI.
+With Slack configured, click **Approve** or **Deny** on the card. Cosmos `status` becomes `applied` with Decision, Decider, and lab Justification stub. Inspect documents in Cosmos or logs by `correlationId` — there is no second Inbox UI. Applied Review Work is not reopened if fixtures replay.
 
-### 3.6 DLQ path
+### 3.6 Poison / Failed path
 
 ```powershell
 python -m simulator.main --fixture poison
 ```
 
-Worker-notify should fail validation (`forcePoison`) and abandon the message. After max delivery count, it lands in the subscription DLQ — peek in Service Bus Explorer / emulator tooling.
+Worker-notify should fail validation (`forcePoison`) and abandon the message for retries. When delivery count reaches `SERVICE_BUS_MAX_DELIVERY_COUNT` (default 10), the worker marks Review Status `failed` and completes the message.
 
 ### 3.7 Cosmos failure → retry
 
-Stop the Cosmos container, inject a ReviewPending fixture, confirm the worker abandons/retries. Start Cosmos again and confirm eventual success or DLQ depending on delivery count.
+Stop the Cosmos container, inject a ReviewPending fixture, confirm the worker abandons/retries. Start Cosmos again and confirm eventual success, or Failed after delivery count is exhausted.
 
 ***
 
@@ -178,15 +180,16 @@ az keyvault secret set --vault-name <kv> --name slack-bot-token --value <xoxb-..
 3. `POST /api/simulate` with a real OIDC token (or temporarily verify with a job run of the simulator).
 4. Slack card appears → Approve → Cosmos document `status=applied` with the same `correlationId`.
 5. App Insights / Log Analytics: query by `correlationId`.
-6. **Do not** look for a decision in the Entra access-review portal — nothing was written to Graph.
-### Poison / DLQ in Azure
+6. **Do not** look for a Decision in MyAccess — nothing was written to Graph.
+
+### Poison / Failed in Azure
 
 ```powershell
 # from a one-off ACA exec or local machine using MI / Azure creds against the namespace
 python -m simulator.main --fixture poison
 ```
 
-Peek the `slack-notify` dead-letter subqueue in the portal.
+Confirm retries, then `status=failed` on the correlation document after delivery exhaustion.
 
 ## 5. Configuration reference
 
@@ -198,7 +201,9 @@ Peek the `slack-notify` dead-letter subqueue in the portal.
 | `SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE` | empty | `ns.servicebus.windows.net` |
 | `KEY_VAULT_URI` | empty | vault URI |
 | `ARA_AUTH_BYPASS` | `true` | `false` |
-| `SLACK_CHANNEL_ID` | `.env` | ACA env (`-SlackChannelId`) |
+| `SLACK_CHANNEL_ID` | `.env` (shared channel = lab scaffolding) | ACA env (`-SlackChannelId`) |
+| `LAB_IDENTITY_MAP_SLACK_USER_ID` | lab stub Reviewer→Slack map | same (not SSO Identity) |
+| `LAB_APPLY_JUSTIFICATION` | Apply Justification stub | same until Inbox collects it |
 | Slack tokens | `.env` or empty dry-run | Key Vault via MI |
 | `ENTRA_API_AUDIENCE` | `.env` | `api://{apiClientId}` (Bicep default) |
 
@@ -212,7 +217,11 @@ Peek the `slack-notify` dead-letter subqueue in the portal.
 
 ## 7. Non-goals
 
-* Live Graph access-review create/apply
-* Slack workspace SAML SSO
+* Live Graph Access Review create/Apply (delegated Reviewer-only Apply is future work)
+* Slack workspace SAML / SSO Identity (sandbox cannot; Lab Identity Map is the lab stub)
+* Access Package events or Graph Event Grid partner ingress for Decision Items
+* Second human UI / pending-queue API (Slack is the only Inbox)
 * Functions / Storage queues / Redis / PostgreSQL
 * Easy Auth as the primary OIDC drill (app-code token validation instead)
+
+Production Producer intent (not built here): Graph poller for Pending Decision Items plus a scheduler for Overdue/ReminderDue. See [docs/adr/0004-poller-and-scheduler-producer.md](docs/adr/0004-poller-and-scheduler-producer.md).
