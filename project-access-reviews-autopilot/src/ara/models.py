@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field, field_validator
 class ReviewEventType(str, Enum):
     PENDING = "ReviewPending"
     OVERDUE = "ReviewOverdue"
-    NOT_STARTED = "ReviewNotStarted"
     REMINDER_DUE = "ReviewReminderDue"
 
 
@@ -19,7 +18,7 @@ class DecisionAction(str, Enum):
 
 
 class ReviewStatus(str, Enum):
-    PENDING = "pending"
+    RECEIVED = "received"
     NOTIFIED = "notified"
     APPLIED = "applied"
     FAILED = "failed"
@@ -106,7 +105,7 @@ class CorrelationDocument(BaseModel):
             id=work.correlation_id,
             partition_key=work.correlation_id,
             correlation_id=work.correlation_id,
-            status=ReviewStatus.PENDING,
+            status=ReviewStatus.RECEIVED,
             event_type=work.event_type.value,
             review_work=work.model_dump(by_alias=True, mode="json"),
         )

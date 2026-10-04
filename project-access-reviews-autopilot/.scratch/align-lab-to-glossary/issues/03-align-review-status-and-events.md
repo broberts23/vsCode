@@ -4,11 +4,15 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Review Status enum/document lifecycle uses Received → Notified → Applied | Failed (no `pending` status value)
-- [ ] Creating Review Work from a Review Event yields status Received
-- [ ] Review Event kinds on the supported surface are Pending, Overdue, ReminderDue only
-- [ ] NotStarted is not part of the supported domain surface
-- [ ] Unit/domain tests cover Received on create and the supported event set
-- [ ] Code and test strings that described status `pending` are updated (blog-wide narrative can wait for ticket 06)
+- [x] Review Status enum/document lifecycle uses Received → Notified → Applied | Failed (no `pending` status value)
+- [x] Creating Review Work from a Review Event yields status Received
+- [x] Review Event kinds on the supported surface are Pending, Overdue, ReminderDue only
+- [x] NotStarted is not part of the supported domain surface
+- [x] Unit/domain tests cover Received on create and the supported event set
+- [x] Code and test strings that described status `pending` are updated (blog-wide narrative can wait for ticket 06)
+
+## Answer
+
+`ReviewStatus.RECEIVED` (`received`) replaces `pending`; `ReviewNotStarted` removed from `ReviewEventType`. Domain tests in `tests/test_review_status_and_events.py`. Blog lifecycle wording deferred to ticket 06.

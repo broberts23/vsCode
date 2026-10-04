@@ -130,7 +130,7 @@ Worker-notify should fail validation (`forcePoison`) and abandon the message. Af
 
 ### 3.7 Cosmos failure → retry
 
-Stop the Cosmos container, inject a pending fixture, confirm the worker abandons/retries. Start Cosmos again and confirm eventual success or DLQ depending on delivery count.
+Stop the Cosmos container, inject a ReviewPending fixture, confirm the worker abandons/retries. Start Cosmos again and confirm eventual success or DLQ depending on delivery count.
 
 ***
 
