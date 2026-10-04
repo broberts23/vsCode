@@ -53,6 +53,14 @@ def test_lab_identity_map_resolves_all_reviewers_to_same_slack_id() -> None:
     assert mapper.resolve_slack_user_id("") == "U_LAB_SHARED"
 
 
+def test_lab_identity_map_reads_configurable_settings() -> None:
+    settings = Settings(
+        lab_identity_map_slack_user_id="U_FROM_SETTINGS",
+    )
+    mapper = LabIdentityMap(settings.lab_identity_map_slack_user_id)
+    assert mapper.resolve_slack_user_id("any@contoso.lab") == "U_FROM_SETTINGS"
+
+
 def test_apply_message_includes_justification_distinct_from_decision() -> None:
     apply = ApplyDecisionMessage(
         correlationId="ara-sim-pending-001",

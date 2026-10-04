@@ -14,4 +14,4 @@
 
 ## Answer
 
-Added `justification` on Apply/document paths with lab stub via settings; `LabIdentityMap` in `ara.identity_map`; Graph stub docs match delegated Reviewer-only Apply. Tests in `tests/test_lab_apply_contract.py`.
+Added `justification` on Apply/document paths with lab stub via settings; `LabIdentityMap` in `ara.identity_map` wired on notify (shared-channel delivery still used); Graph stub docs match delegated Reviewer-only Apply. Tests in `tests/test_lab_apply_contract.py`.

@@ -13,6 +13,7 @@ if _src.is_dir() and str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 from ara.cosmos_store import CosmosCorrelationStore
+from ara.identity_map import LabIdentityMap
 from ara.messaging import (
     ensure_local_entities,
     parse_apply_decision,
@@ -22,19 +23,32 @@ from ara.messaging import (
 from ara.models import ReviewWorkMessage
 from ara.review_client import SimulatedAccessReviewClient
 from ara.secrets import resolve_slack_bot_token
-from ara.settings import get_settings
+from ara.settings import Settings, get_settings
 from ara.slack_client import SlackNotifier
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ara.worker")
 
 
-def handle_notify(store: CosmosCorrelationStore, slack: SlackNotifier, work: ReviewWorkMessage) -> None:
+def handle_notify(
+    store: CosmosCorrelationStore,
+    slack: SlackNotifier,
+    work: ReviewWorkMessage,
+    settings: Settings,
+) -> None:
     work.validate_for_worker()
+    mapped_slack_user_id = LabIdentityMap(
+        settings.lab_identity_map_slack_user_id
+    ).resolve_slack_user_id(work.reviewer_upn)
     store.upsert_from_work(work)
     channel_id, message_ts = slack.post_review_card(work)
     store.mark_notified(work.correlation_id, channel_id=channel_id, message_ts=message_ts)
-    logger.info("Notified Slack correlationId=%s", work.correlation_id)
+    logger.info(
+        "Notified Slack correlationId=%s reviewer=%s labMappedSlackUserId=%s",
+        work.correlation_id,
+        work.reviewer_upn,
+        mapped_slack_user_id,
+    )
 
 
 def handle_apply(
@@ -106,7 +120,7 @@ def run_once(mode: str) -> int:
                     raw = _message_body(message)
                     if mode == "notify":
                         work = parse_review_work(raw)
-                        handle_notify(store, slack, work)
+                        handle_notify(store, slack, work, settings)
                     else:
                         handle_apply(store, review_client, slack, raw)
 
