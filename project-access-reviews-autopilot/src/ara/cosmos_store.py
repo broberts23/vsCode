@@ -83,6 +83,7 @@ class CosmosCorrelationStore:
         *,
         decision: str,
         decided_by: str,
+        justification: str,
     ) -> CorrelationDocument:
         doc = self.get(correlation_id)
         if doc is None:
@@ -90,6 +91,7 @@ class CosmosCorrelationStore:
         doc.status = ReviewStatus.APPLIED
         doc.decision = decision
         doc.decided_by = decided_by
+        doc.justification = justification
         doc.decided_at = datetime.now(timezone.utc)
         doc.updated_at = datetime.now(timezone.utc)
         self._container.upsert_item(doc.model_dump(mode="json"))

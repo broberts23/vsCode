@@ -72,6 +72,7 @@ class ApplyDecisionMessage(BaseModel):
     correlation_id: str = Field(alias="correlationId")
     decision: DecisionAction
     decided_by: str = Field(alias="decidedBy")
+    justification: str = Field(alias="justification")
     decided_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         alias="decidedAt",
@@ -94,6 +95,7 @@ class CorrelationDocument(BaseModel):
     slack_message_ts: str | None = None
     decision: str | None = None
     decided_by: str | None = None
+    justification: str | None = None
     decided_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

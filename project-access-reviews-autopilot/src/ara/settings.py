@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     entra_api_audience: str = "api://access-reviews-autopilot"
     entra_required_scope: str = "access_as_user"
 
+    # Lab Identity Map: every Entra Reviewer resolves to this Slack user id.
+    lab_identity_map_slack_user_id: str = "U_LAB_SHARED"
+    # Lab Apply Justification stub (Inbox collection is production work).
+    lab_apply_justification: str = (
+        "Lab simulated apply; Justification stub."
+    )
+
     fixtures_dir: str = "config/simulated-events"
     api_base_url: str = "http://localhost:8080"
     applicationinsights_connection_string: str = ""

@@ -52,6 +52,7 @@ def handle_apply(
         correlation_id=apply.correlation_id,
         decision=apply.decision,
         decided_by=apply.decided_by,
+        justification=apply.justification,
     )
 
     work = ReviewWorkMessage.model_validate(doc.review_work)

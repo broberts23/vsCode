@@ -135,6 +135,7 @@ async def slack_interactions(
         correlationId=correlation_id,
         decision=DecisionAction(decision),
         decidedBy=decided_by,
+        justification=settings.lab_apply_justification,
         slackUserId=user.get("id"),
         slackChannelId=channel.get("id"),
         slackMessageTs=message.get("ts"),
