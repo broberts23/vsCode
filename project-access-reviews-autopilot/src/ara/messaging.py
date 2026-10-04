@@ -102,13 +102,15 @@ def ensure_local_entities(settings: Settings) -> None:
             admin.create_topic(settings.service_bus_topic)
 
         # Emulator validates against BrokeredMessage (Label), not Subject.
-        for name, sql in (
+        for name, rule_name, sql in (
             (
                 settings.service_bus_subscription_notify,
+                "notify-filter",
                 "sys.Label <> 'ApplyDecision'",
             ),
             (
                 settings.service_bus_subscription_apply,
+                "apply-filter",
                 "sys.Label = 'ApplyDecision'",
             ),
         ):
@@ -121,12 +123,16 @@ def ensure_local_entities(settings: Settings) -> None:
             except Exception:
                 pass
             try:
-                admin.get_rule(settings.service_bus_topic, name, "filter")
+                admin.delete_rule(settings.service_bus_topic, name, "filter")
+            except Exception:
+                pass
+            try:
+                admin.get_rule(settings.service_bus_topic, name, rule_name)
             except Exception:
                 admin.create_rule(
                     settings.service_bus_topic,
                     name,
-                    "filter",
+                    rule_name,
                     filter=SqlRuleFilter(sql),
                 )
         admin.close()

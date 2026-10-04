@@ -6,7 +6,8 @@
   1. Deploy infra first with an empty containerImage.
   2. Build/push the image to the output ACR with az acr build (uses MI AcrPush separately or az login).
   3. Redeploy with -ContainerImage <loginServer>/ara:dev
-  4. Store Slack secrets in Key Vault: slack-signing-secret, slack-bot-token (optional channel in App Config later).
+  4. Store Slack secrets in Key Vault: slack-signing-secret, slack-bot-token.
+  5. Pass -SlackChannelId so worker-notify can post cards (not a secret; ACA env var).
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +23,9 @@ param(
 
     [string]$SpaClientId = '',
 
-    [string]$ApiAudience = 'api://access-reviews-autopilot',
+    [string]$ApiAudience = '',
+
+    [string]$SlackChannelId = '',
 
     [string]$ContainerImage = '',
 
@@ -30,6 +33,10 @@ param(
 
     [string]$Environment = 'dev'
 )
+
+if (-not $ApiAudience -and $ApiClientId) {
+    $ApiAudience = "api://$ApiClientId"
+}
 
 $ErrorActionPreference = 'Stop'
 
@@ -48,6 +55,7 @@ $params = @{
     apiClientId           = $ApiClientId
     spaClientId           = $SpaClientId
     apiAudience           = $ApiAudience
+    slackChannelId        = $SlackChannelId
     containerImage        = $ContainerImage
 }
 
@@ -59,10 +67,40 @@ $deployment = New-AzResourceGroupDeployment `
     -Verbose
 
 $deployment.Outputs | Format-Table Name, Value
+
+# New subscriptions auto-create a $Default TrueFilter. Keep only the named SQL
+# filters from Bicep; otherwise apply/notify both receive every message.
+$sbNamespace = $deployment.Outputs.serviceBusNamespace.Value -replace '\.servicebus\.windows\.net$', ''
+if ($sbNamespace) {
+    foreach ($pair in @(
+            @{ Sub = 'slack-notify'; Keep = 'notify-filter' },
+            @{ Sub = 'apply-decision'; Keep = 'apply-filter' }
+        )) {
+        $rules = @(az servicebus topic subscription rule list `
+                --resource-group $ResourceGroup `
+                --namespace-name $sbNamespace `
+                --topic-name review-work `
+                --subscription-name $pair.Sub `
+                --query '[].name' -o tsv 2>$null)
+        foreach ($ruleName in $rules) {
+            if ($ruleName -and $ruleName -ne $pair.Keep) {
+                Write-Host "Removing stray Service Bus rule '$ruleName' on $($pair.Sub)"
+                az servicebus topic subscription rule delete `
+                    --resource-group $ResourceGroup `
+                    --namespace-name $sbNamespace `
+                    --topic-name review-work `
+                    --subscription-name $pair.Sub `
+                    --name $ruleName `
+                    --yes 2>$null | Out-Null
+            }
+        }
+    }
+}
+
 Write-Host @'
 Next steps:
   1. az acr build -r <acrLoginServer> -t ara:dev .
-  2. Re-run this script with -ContainerImage <acrLoginServer>/ara:dev
+  2. Re-run this script with -ContainerImage <acrLoginServer>/ara:dev -ApiClientId ... -SpaClientId ... -SlackChannelId ...
   3. az keyvault secret set --vault-name <kv> --name slack-signing-secret --value <secret>
   4. az keyvault secret set --vault-name <kv> --name slack-bot-token --value <xoxb-...>
   5. Point Slack Request URL to https://<apiFqdn>/slack/interactions

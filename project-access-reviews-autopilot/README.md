@@ -165,17 +165,22 @@ Hard rules in [infra/main.bicep](infra/main.bicep):
 # 2) Build image into ACR (no admin user)
 .\scripts\Build-Image.ps1 -AcrName <acrName>
 
-# 3) Redeploy with image
+# 3) Register Entra apps
+Register Entra apps per [docs/entra-app-registrations.md](docs/entra-app-registrations.md). 
+
+# 4) Configure Slack
+Configure Slack per [docs/slack-app.md](docs/slack-app.md). Point Interactivity Request URL to `https://<apiFqdn>/slack/interactions`.
+
+# 5) Redeploy with image
 .\scripts\Deploy-Infrastructure.ps1 -ResourceGroup rg-ara-dev -TenantId <tid> `
   -ContainerImage <loginServer>/ara:dev `
-  -ApiClientId <api-app-id> -SpaClientId <spa-app-id>
+  -ApiClientId <api-app-id> -SpaClientId <spa-app-id> `
+  -SlackChannelId <channel-id>
 
-# 4) Secrets (MI reads these — do not paste into ACA settings)
+# 6) Secrets (MI reads these — do not paste into ACA settings)
 az keyvault secret set --vault-name <kv> --name slack-signing-secret --value <secret>
 az keyvault secret set --vault-name <kv> --name slack-bot-token --value <xoxb-...>
 ```
-
-Register Entra apps per [docs/entra-app-registrations.md](docs/entra-app-registrations.md). Configure Slack per [docs/slack-app.md](docs/slack-app.md). Point Interactivity Request URL to `https://<apiFqdn>/slack/interactions`.
 
 ### Azure smoke test
 
@@ -206,7 +211,9 @@ Peek the `slack-notify` dead-letter subqueue in the portal.
 | `SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE` | empty | `ns.servicebus.windows.net` |
 | `KEY_VAULT_URI` | empty | vault URI |
 | `ARA_AUTH_BYPASS` | `true` | `false` |
+| `SLACK_CHANNEL_ID` | `.env` | ACA env (`-SlackChannelId`) |
 | Slack tokens | `.env` or empty dry-run | Key Vault via MI |
+| `ENTRA_API_AUDIENCE` | `.env` | `api://{apiClientId}` (Bicep default) |
 
 ## 6. Cost notes
 

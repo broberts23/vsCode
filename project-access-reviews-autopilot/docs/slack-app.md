@@ -11,6 +11,6 @@
 7. Store secrets in Key Vault (Azure) or `.env` (local only):
    - `slack-signing-secret`
    - `slack-bot-token`
-8. Set `SLACK_CHANNEL_ID` to the channel ID where cards should land.
+8. Set `SLACK_CHANNEL_ID` to the channel ID where cards should land (local `.env`, or Azure `-SlackChannelId` on deploy → ACA env).
 
 Slack workspace **login** SSO is SAML and paid. This project does not configure it. Entra OIDC is on the SPA/API.
