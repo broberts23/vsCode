@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
 
 from azure.cosmos import CosmosClient, PartitionKey
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
@@ -47,9 +46,18 @@ class CosmosCorrelationStore:
         )
 
     def upsert_from_work(self, work: ReviewWorkMessage) -> CorrelationDocument:
-        doc = CorrelationDocument.from_work(work)
-        self._container.upsert_item(doc.model_dump(mode="json"))
-        return doc
+        existing = self.get(work.correlation_id)
+        if existing is None:
+            doc = CorrelationDocument.from_work(work)
+            self._container.upsert_item(doc.model_dump(mode="json"))
+            return doc
+        if existing.status in (ReviewStatus.APPLIED, ReviewStatus.FAILED):
+            return existing
+        existing.event_type = work.event_type.value
+        existing.review_work = work.model_dump(by_alias=True, mode="json")
+        existing.updated_at = datetime.now(timezone.utc)
+        self._container.upsert_item(existing.model_dump(mode="json"))
+        return existing
 
     def get(self, correlation_id: str) -> CorrelationDocument | None:
         try:
@@ -67,6 +75,7 @@ class CosmosCorrelationStore:
         *,
         channel_id: str,
         message_ts: str,
+        lab_mapped_slack_user_id: str,
     ) -> CorrelationDocument:
         doc = self.get(correlation_id)
         if doc is None:
@@ -74,6 +83,7 @@ class CosmosCorrelationStore:
         doc.status = ReviewStatus.NOTIFIED
         doc.slack_channel_id = channel_id
         doc.slack_message_ts = message_ts
+        doc.lab_mapped_slack_user_id = lab_mapped_slack_user_id
         doc.updated_at = datetime.now(timezone.utc)
         self._container.upsert_item(doc.model_dump(mode="json"))
         return doc
@@ -84,6 +94,7 @@ class CosmosCorrelationStore:
         *,
         decision: str,
         decided_by: str,
+        justification: str,
     ) -> CorrelationDocument:
         doc = self.get(correlation_id)
         if doc is None:
@@ -91,30 +102,19 @@ class CosmosCorrelationStore:
         doc.status = ReviewStatus.APPLIED
         doc.decision = decision
         doc.decided_by = decided_by
+        doc.justification = justification
         doc.decided_at = datetime.now(timezone.utc)
         doc.updated_at = datetime.now(timezone.utc)
         self._container.upsert_item(doc.model_dump(mode="json"))
         return doc
 
-    def list_pending(self) -> list[CorrelationDocument]:
-        query = (
-            "SELECT * FROM c WHERE c.status = @pending OR c.status = @notified "
-            "ORDER BY c.created_at DESC"
-        )
-        items = self._container.query_items(
-            query=query,
-            parameters=[
-                {"name": "@pending", "value": ReviewStatus.PENDING.value},
-                {"name": "@notified", "value": ReviewStatus.NOTIFIED.value},
-            ],
-            enable_cross_partition_query=True,
-        )
-        return [CorrelationDocument.model_validate(item) for item in items]
-
-    def list_all(self, limit: int = 50) -> list[dict[str, Any]]:
-        items = self._container.query_items(
-            query="SELECT TOP @limit * FROM c ORDER BY c.updated_at DESC",
-            parameters=[{"name": "@limit", "value": limit}],
-            enable_cross_partition_query=True,
-        )
-        return list(items)
+    def mark_failed(self, correlation_id: str) -> CorrelationDocument:
+        doc = self.get(correlation_id)
+        if doc is None:
+            raise KeyError(correlation_id)
+        if doc.status == ReviewStatus.APPLIED:
+            return doc
+        doc.status = ReviewStatus.FAILED
+        doc.updated_at = datetime.now(timezone.utc)
+        self._container.upsert_item(doc.model_dump(mode="json"))
+        return doc

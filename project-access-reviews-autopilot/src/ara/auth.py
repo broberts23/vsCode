@@ -1,4 +1,4 @@
-"""OIDC bearer validation for the SPA/API. Bypass for local emulator runs."""
+"""OIDC bearer validation for the Operator API. Bypass for local emulator runs."""
 
 from __future__ import annotations
 
@@ -26,8 +26,19 @@ def _decode_unverified_payload(token: str) -> dict[str, Any]:
     return json.loads(base64.urlsafe_b64decode(payload + padding))
 
 
-def _issuer(settings: Settings) -> str:
-    return f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0"
+def _allowed_issuers(settings: Settings) -> set[str]:
+    """Accept v2.0 and v1.0 issuers for the configured tenant.
+
+    Azure CLI and apps with accessTokenAcceptedVersion unset often mint
+    ver=1.0 tokens with iss=https://sts.windows.net/{tid}/.
+    """
+    tid = settings.entra_tenant_id
+    if not tid:
+        return set()
+    return {
+        f"https://login.microsoftonline.com/{tid}/v2.0",
+        f"https://sts.windows.net/{tid}/",
+    }
 
 
 def _get_jwks(settings: Settings) -> dict[str, Any]:
@@ -54,8 +65,7 @@ def _validate_token(token: str, settings: Settings) -> dict[str, Any]:
     """
     claims = _decode_unverified_payload(token)
     issuer = claims.get("iss", "")
-    expected_issuer = _issuer(settings)
-    if issuer != expected_issuer and not issuer.endswith(f"/{settings.entra_tenant_id}/v2.0"):
+    if issuer not in _allowed_issuers(settings):
         raise HTTPException(status_code=401, detail="Invalid token issuer")
 
     aud = claims.get("aud")

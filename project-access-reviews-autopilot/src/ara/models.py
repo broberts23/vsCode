@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field, field_validator
 class ReviewEventType(str, Enum):
     PENDING = "ReviewPending"
     OVERDUE = "ReviewOverdue"
-    NOT_STARTED = "ReviewNotStarted"
     REMINDER_DUE = "ReviewReminderDue"
 
 
@@ -19,7 +18,7 @@ class DecisionAction(str, Enum):
 
 
 class ReviewStatus(str, Enum):
-    PENDING = "pending"
+    RECEIVED = "received"
     NOTIFIED = "notified"
     APPLIED = "applied"
     FAILED = "failed"
@@ -58,7 +57,7 @@ class ReviewWorkMessage(BaseModel):
 
     def validate_for_worker(self) -> None:
         if self.force_poison:
-            raise ValueError("forcePoison=true: intentional DLQ fixture")
+            raise ValueError("forcePoison=true: intentional failure fixture")
         if not self.correlation_id.strip():
             raise ValueError("correlationId is required")
         if not self.decision_item_id.strip():
@@ -73,6 +72,7 @@ class ApplyDecisionMessage(BaseModel):
     correlation_id: str = Field(alias="correlationId")
     decision: DecisionAction
     decided_by: str = Field(alias="decidedBy")
+    justification: str = Field(alias="justification")
     decided_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         alias="decidedAt",
@@ -93,8 +93,10 @@ class CorrelationDocument(BaseModel):
     review_work: dict[str, Any]
     slack_channel_id: str | None = None
     slack_message_ts: str | None = None
+    lab_mapped_slack_user_id: str | None = None
     decision: str | None = None
     decided_by: str | None = None
+    justification: str | None = None
     decided_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -106,7 +108,7 @@ class CorrelationDocument(BaseModel):
             id=work.correlation_id,
             partition_key=work.correlation_id,
             correlation_id=work.correlation_id,
-            status=ReviewStatus.PENDING,
+            status=ReviewStatus.RECEIVED,
             event_type=work.event_type.value,
             review_work=work.model_dump(by_alias=True, mode="json"),
         )

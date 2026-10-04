@@ -5,5 +5,5 @@
 # Pin major.minor; managed dependency resolves the latest matching patch.
 
 @{
-    'ExchangeOnlineManagement' = '3.5.*'
+    'ExchangeOnlineManagement' = '3.5.0'
 }

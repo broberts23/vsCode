@@ -11,7 +11,6 @@ COPY api ./api
 COPY worker ./worker
 COPY simulator ./simulator
 COPY config ./config
-COPY spa ./spa
 
 RUN pip install --no-cache-dir .
 

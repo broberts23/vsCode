@@ -10,17 +10,17 @@ param location string = resourceGroup().location
 @description('Base name for resources')
 param baseName string = 'ara'
 
-@description('Microsoft Entra tenant ID (OIDC SPA/API)')
+@description('Microsoft Entra tenant ID (OIDC Operator API)')
 param tenantId string
 
 @description('API app registration client ID (audience validation)')
 param apiClientId string = ''
 
-@description('SPA app registration client ID')
-param spaClientId string = ''
+@description('API audience (Application ID URI). Defaults to api://{apiClientId}.')
+param apiAudience string = empty(apiClientId) ? '' : 'api://${apiClientId}'
 
-@description('API audience, e.g. api://access-reviews-autopilot')
-param apiAudience string = 'api://access-reviews-autopilot'
+@description('Slack channel ID for review cards (worker-notify). Not a secret.')
+param slackChannelId string = ''
 
 @description('Container image (ACR). Leave empty to deploy infra only.')
 param containerImage string = ''
@@ -50,7 +50,7 @@ var simJobName = 'caj-${baseName}-sim-${deploymentEnvironment}-${uniqueSuffix}'
 // Built-in role definition IDs
 var roleAcrPull = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 var roleSbDataOwner = '090c5cfd-751d-490a-894a-3ce6f1109419'
-var roleKvSecretsUser = '4633458b-17de-408a-b874-04405c546301'
+var roleKvSecretsUser = '4633458b-17de-408a-b874-0445c86b69e6'
 var roleAppConfigDataReader = '516239f1-63e1-4d78-a4de-a74fb236a071'
 var roleMonitoringMetricsPublisher = '3913510d-42f4-4e42-8a64-420c390055eb'
 // Cosmos DB Built-in Data Contributor
@@ -198,13 +198,15 @@ resource sbSubNotify 'Microsoft.ServiceBus/namespaces/topics/subscriptions@2026-
   }
 }
 
+// Named rules (not $Default): updating $Default via ARM/CLI can succeed while
+// leaving the subscription with zero rules, so published messages are dropped.
 resource sbSubNotifyRule 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2026-01-01' = {
   parent: sbSubNotify
-  name: '$Default'
+  name: 'notify-filter'
   properties: {
     filterType: 'SqlFilter'
     sqlFilter: {
-      sqlExpression: 'sys.Subject <> \'ApplyDecision\''
+      sqlExpression: 'sys.Label <> \'ApplyDecision\''
     }
   }
 }
@@ -221,11 +223,11 @@ resource sbSubApply 'Microsoft.ServiceBus/namespaces/topics/subscriptions@2026-0
 
 resource sbSubApplyRule 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2026-01-01' = {
   parent: sbSubApply
-  name: '$Default'
+  name: 'apply-filter'
   properties: {
     filterType: 'SqlFilter'
     sqlFilter: {
-      sqlExpression: 'sys.Subject = \'ApplyDecision\''
+      sqlExpression: 'sys.Label = \'ApplyDecision\''
     }
   }
 }
@@ -295,7 +297,7 @@ resource metricsPublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }
 
-resource containerEnv 'Microsoft.App/managedEnvironments@2026-01-01' = {
+resource containerEnv 'Microsoft.App/managedEnvironments@2026-07-01' = {
   name: envName
   location: location
   tags: tags
@@ -356,16 +358,16 @@ var sharedEnv = [
     value: keyVault.properties.vaultUri
   }
   {
+    name: 'SLACK_CHANNEL_ID'
+    value: slackChannelId
+  }
+  {
     name: 'ENTRA_TENANT_ID'
     value: tenantId
   }
   {
     name: 'ENTRA_API_CLIENT_ID'
     value: apiClientId
-  }
-  {
-    name: 'ENTRA_SPA_CLIENT_ID'
-    value: spaClientId
   }
   {
     name: 'ENTRA_API_AUDIENCE'

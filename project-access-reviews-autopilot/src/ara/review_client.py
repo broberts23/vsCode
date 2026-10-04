@@ -23,6 +23,7 @@ class IAccessReviewClient(ABC):
         correlation_id: str,
         decision: DecisionAction,
         decided_by: str,
+        justification: str,
     ) -> None:
         raise NotImplementedError
 
@@ -39,11 +40,13 @@ class SimulatedAccessReviewClient(IAccessReviewClient):
         correlation_id: str,
         decision: DecisionAction,
         decided_by: str,
+        justification: str,
     ) -> None:
         self._store.mark_applied(
             correlation_id,
             decision=decision.value,
             decided_by=decided_by,
+            justification=justification,
         )
         logger.info(
             "Simulated apply correlationId=%s decision=%s by=%s",
@@ -56,10 +59,10 @@ class SimulatedAccessReviewClient(IAccessReviewClient):
 class GraphAccessReviewClient(IAccessReviewClient):
     """Stub only. Not used at runtime in this lab.
 
-    A future implementation would PATCH
-    accessReviewInstanceDecisionItem via Graph with AccessReview.ReadWrite.All
-    on a managed identity, and would require Entra ID P2 plus real review
-    instances. Do not wire this class into DI until those prerequisites exist.
+    A future implementation must PATCH accessReviewInstanceDecisionItem with
+    delegated AccessReview.ReadWrite.All as the Reviewer. Application
+    permissions are not supported for that call. Do not wire this class into
+    DI until SSO Identity (or equivalent) can obtain a Reviewer delegated token.
     """
 
     def apply_decision(
@@ -68,8 +71,10 @@ class GraphAccessReviewClient(IAccessReviewClient):
         correlation_id: str,
         decision: DecisionAction,
         decided_by: str,
+        justification: str,
     ) -> None:
         raise NotImplementedError(
             "GraphAccessReviewClient is intentionally unimplemented. "
-            f"Would apply {decision.value} for {correlation_id} by {decided_by}."
+            f"Would apply {decision.value} for {correlation_id} by {decided_by} "
+            f"with justification={justification!r}."
         )

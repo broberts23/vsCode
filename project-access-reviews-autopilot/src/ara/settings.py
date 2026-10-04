@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     service_bus_topic: str = "review-work"
     service_bus_subscription_notify: str = "slack-notify"
     service_bus_subscription_apply: str = "apply-decision"
+    # Must match infra Service Bus subscription maxDeliveryCount (Failed fires at this count).
+    service_bus_max_delivery_count: int = 5
 
     key_vault_uri: str = ""
     slack_bot_token: str = ""
@@ -47,9 +49,15 @@ class Settings(BaseSettings):
 
     entra_tenant_id: str = ""
     entra_api_client_id: str = ""
-    entra_spa_client_id: str = ""
     entra_api_audience: str = "api://access-reviews-autopilot"
     entra_required_scope: str = "access_as_user"
+
+    # Lab Identity Map: every Entra Reviewer resolves to this Slack user id.
+    lab_identity_map_slack_user_id: str = "U_LAB_SHARED"
+    # Lab Apply Justification stub (Inbox collection is production work).
+    lab_apply_justification: str = (
+        "Lab simulated apply; Justification stub."
+    )
 
     fixtures_dir: str = "config/simulated-events"
     api_base_url: str = "http://localhost:8080"

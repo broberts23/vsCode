@@ -1,4 +1,4 @@
-"""HTTP API: pending list, simulate inject, Slack interactivity."""
+"""HTTP API: Operator simulate inject and Slack Inbox interactivity."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ if _src.is_dir() and str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -40,14 +39,6 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 def settings_dep() -> Settings:
     return get_settings()
@@ -68,20 +59,6 @@ class SimulateRequest(BaseModel):
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/api/pending")
-def list_pending(
-    request: Request,
-    settings: Settings = Depends(settings_dep),
-    store: CosmosCorrelationStore = Depends(store_dep),
-) -> dict[str, Any]:
-    require_oidc(request, settings)
-    items = store.list_pending()
-    return {
-        "count": len(items),
-        "items": [item.model_dump(mode="json") for item in items],
-    }
 
 
 @app.post("/api/simulate")
@@ -158,6 +135,7 @@ async def slack_interactions(
         correlationId=correlation_id,
         decision=DecisionAction(decision),
         decidedBy=decided_by,
+        justification=settings.lab_apply_justification,
         slackUserId=user.get("id"),
         slackChannelId=channel.get("id"),
         slackMessageTs=message.get("ts"),

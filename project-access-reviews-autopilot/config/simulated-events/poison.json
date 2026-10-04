@@ -15,6 +15,6 @@
   "dueDateTime": "2026-09-20T00:00:00Z",
   "recommendation": null,
   "accessReviewUrl": "",
-  "notes": "POISON: forcePoison=true so the worker raises and the message lands in the DLQ after retries.",
+  "notes": "POISON: forcePoison=true so the worker raises; after delivery exhaustion Review Status becomes Failed.",
   "forcePoison": true
 }

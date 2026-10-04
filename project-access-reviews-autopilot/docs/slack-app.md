@@ -1,5 +1,7 @@
 # Slack app (developer sandbox)
 
+Slack is the **Inbox**: the only surface where Review Work is presented for a Decision. A shared channel (`SLACK_CHANNEL_ID`) is lab scaffolding; production intent is delivery to the Reviewer.
+
 1. Create a [Slack developer sandbox](https://docs.slack.dev/tools/developer-sandboxes/) if you do not have a free workspace.
 2. Create an app from scratch.
 3. **OAuth & Permissions** bot scopes: `chat:write`, `chat:write.public` (or invite the bot to a channel).
@@ -11,6 +13,7 @@
 7. Store secrets in Key Vault (Azure) or `.env` (local only):
    - `slack-signing-secret`
    - `slack-bot-token`
-8. Set `SLACK_CHANNEL_ID` to the channel ID where cards should land.
+8. Set `SLACK_CHANNEL_ID` to the channel ID where cards should land (local `.env`, or Azure `-SlackChannelId` on deploy → ACA env).
+9. Set `LAB_IDENTITY_MAP_SLACK_USER_ID` to the sandbox Slack user id every Entra Reviewer resolves to (Lab Identity Map).
 
-Slack workspace **login** SSO is SAML and paid. This project does not configure it. Entra OIDC is on the SPA/API.
+Slack workspace **login** SSO is SAML and paid. This project does not configure it. Production end-state is **SSO Identity** (Decider ≡ Reviewer). Entra OIDC protects the Operator API (`POST /api/simulate`) only.

@@ -7,12 +7,14 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 _src = Path(__file__).resolve().parents[1] / "src"
 if _src.is_dir() and str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 from ara.cosmos_store import CosmosCorrelationStore
+from ara.lifecycle import process_review_event, record_terminal_failure, should_mark_failed
 from ara.messaging import (
     ensure_local_entities,
     parse_apply_decision,
@@ -22,19 +24,20 @@ from ara.messaging import (
 from ara.models import ReviewWorkMessage
 from ara.review_client import SimulatedAccessReviewClient
 from ara.secrets import resolve_slack_bot_token
-from ara.settings import get_settings
+from ara.settings import Settings, get_settings
 from ara.slack_client import SlackNotifier
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ara.worker")
 
 
-def handle_notify(store: CosmosCorrelationStore, slack: SlackNotifier, work: ReviewWorkMessage) -> None:
-    work.validate_for_worker()
-    store.upsert_from_work(work)
-    channel_id, message_ts = slack.post_review_card(work)
-    store.mark_notified(work.correlation_id, channel_id=channel_id, message_ts=message_ts)
-    logger.info("Notified Slack correlationId=%s", work.correlation_id)
+def handle_notify(
+    store: CosmosCorrelationStore,
+    slack: SlackNotifier,
+    work: ReviewWorkMessage,
+    settings: Settings,
+) -> None:
+    process_review_event(store, slack, work, settings)
 
 
 def handle_apply(
@@ -52,6 +55,7 @@ def handle_apply(
         correlation_id=apply.correlation_id,
         decision=apply.decision,
         decided_by=apply.decided_by,
+        justification=apply.justification,
     )
 
     work = ReviewWorkMessage.model_validate(doc.review_work)
@@ -67,13 +71,20 @@ def handle_apply(
     logger.info("Applied decision correlationId=%s", apply.correlation_id)
 
 
-def _message_body(message) -> bytes:
+def _message_body(message: Any) -> bytes:
     body = message.body
     if isinstance(body, (bytes, bytearray)):
         return bytes(body)
     if isinstance(body, str):
         return body.encode("utf-8")
     return b"".join(bytes(chunk) for chunk in body)
+
+
+def _delivery_count(message: Any) -> int:
+    count = getattr(message, "delivery_count", None)
+    if count is None:
+        return 1
+    return int(count)
 
 
 def run_once(mode: str) -> int:
@@ -101,19 +112,44 @@ def run_once(mode: str) -> int:
         )
         with receiver:
             for message in receiver:
+                correlation_id: str | None = None
+                notify_work: ReviewWorkMessage | None = None
                 try:
                     raw = _message_body(message)
                     if mode == "notify":
-                        work = parse_review_work(raw)
-                        handle_notify(store, slack, work)
+                        notify_work = parse_review_work(raw)
+                        correlation_id = notify_work.correlation_id
+                        handle_notify(store, slack, notify_work, settings)
                     else:
+                        apply = parse_apply_decision(raw)
+                        correlation_id = apply.correlation_id
                         handle_apply(store, review_client, slack, raw)
 
                     receiver.complete_message(message)
                     processed += 1
                 except Exception:
-                    logger.exception("Failed processing message; abandoning for retry/DLQ")
-                    receiver.abandon_message(message)
+                    terminal = should_mark_failed(
+                        delivery_count=_delivery_count(message),
+                        max_delivery_count=settings.service_bus_max_delivery_count,
+                    )
+                    logger.exception(
+                        "Failed processing message; terminal=%s",
+                        terminal,
+                    )
+                    if terminal:
+                        marked = record_terminal_failure(
+                            store,
+                            work=notify_work,
+                            correlation_id=correlation_id,
+                        )
+                        logger.info(
+                            "Terminal failure correlationId=%s markedFailed=%s",
+                            correlation_id,
+                            marked,
+                        )
+                        receiver.complete_message(message)
+                    else:
+                        receiver.abandon_message(message)
     return processed
 
 

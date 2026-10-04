@@ -14,14 +14,28 @@ from ara.settings import Settings
 logger = logging.getLogger(__name__)
 
 
-def build_review_blocks(work: ReviewWorkMessage) -> list[dict[str, Any]]:
+def build_review_blocks(
+    work: ReviewWorkMessage,
+    *,
+    reviewer_slack_user_id: str,
+) -> list[dict[str, Any]]:
     due = work.due_date_time.isoformat()
     return [
         {
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Access review: {work.event_type.value}",
+                "text": f"Review Work: {work.event_type.value}",
+            },
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"*Reviewer*\n<@{reviewer_slack_user_id}> "
+                    "_(Lab Identity Map)_"
+                ),
             },
         },
         {
@@ -105,19 +119,32 @@ class SlackNotifier:
     def enabled(self) -> bool:
         return bool(self._settings.slack_bot_token and self._settings.slack_channel_id)
 
-    def post_review_card(self, work: ReviewWorkMessage) -> tuple[str, str]:
-        blocks = build_review_blocks(work)
+    def post_review_card(
+        self,
+        work: ReviewWorkMessage,
+        *,
+        reviewer_slack_user_id: str,
+    ) -> tuple[str, str]:
+        blocks = build_review_blocks(
+            work,
+            reviewer_slack_user_id=reviewer_slack_user_id,
+        )
         if not self.enabled:
             logger.info(
-                "Slack dry-run (no bot token/channel). correlationId=%s blocks=%s",
+                "Slack dry-run (no bot token/channel). correlationId=%s "
+                "reviewerSlackUserId=%s blocks=%s",
                 work.correlation_id,
+                reviewer_slack_user_id,
                 blocks,
             )
             return ("dry-run", f"local-{work.correlation_id}")
 
         payload = {
             "channel": self._settings.slack_channel_id,
-            "text": f"Access review {work.event_type.value}: {work.principal_display_name}",
+            "text": (
+                f"Review Work {work.event_type.value}: "
+                f"{work.principal_display_name} (<@{reviewer_slack_user_id}>)"
+            ),
             "blocks": blocks,
         }
         with httpx.Client(timeout=30.0) as client:
@@ -135,6 +162,33 @@ class SlackNotifier:
             raise RuntimeError(f"Slack chat.postMessage failed: {data.get('error')}")
         return str(data["channel"]), str(data["ts"])
 
+    def nudge_review_card(
+        self,
+        *,
+        channel_id: str,
+        message_ts: str,
+        work: ReviewWorkMessage,
+        reviewer_slack_user_id: str,
+    ) -> None:
+        blocks = build_review_blocks(
+            work,
+            reviewer_slack_user_id=reviewer_slack_user_id,
+        )
+        self._chat_update(
+            channel_id=channel_id,
+            message_ts=message_ts,
+            text=(
+                f"Review Work {work.event_type.value}: "
+                f"{work.principal_display_name} (<@{reviewer_slack_user_id}>)"
+            ),
+            blocks=blocks,
+            dry_run_message=(
+                f"Slack dry-run nudge correlationId={work.correlation_id} "
+                f"event={work.event_type.value} "
+                f"reviewerSlackUserId={reviewer_slack_user_id}"
+            ),
+        )
+
     def update_review_card(
         self,
         *,
@@ -145,18 +199,34 @@ class SlackNotifier:
         decided_by: str,
     ) -> None:
         blocks = build_applied_blocks(work, decision=decision, decided_by=decided_by)
+        self._chat_update(
+            channel_id=channel_id,
+            message_ts=message_ts,
+            text=f"Applied {decision} for {work.correlation_id}",
+            blocks=blocks,
+            dry_run_message=(
+                f"Slack dry-run update correlationId={work.correlation_id} "
+                f"decision={decision}"
+            ),
+        )
+
+    def _chat_update(
+        self,
+        *,
+        channel_id: str,
+        message_ts: str,
+        text: str,
+        blocks: list[dict[str, Any]],
+        dry_run_message: str,
+    ) -> None:
         if not self.enabled or channel_id == "dry-run":
-            logger.info(
-                "Slack dry-run update correlationId=%s decision=%s",
-                work.correlation_id,
-                decision,
-            )
+            logger.info(dry_run_message)
             return
 
         payload = {
             "channel": channel_id,
             "ts": message_ts,
-            "text": f"Applied {decision} for {work.correlation_id}",
+            "text": text,
             "blocks": blocks,
         }
         with httpx.Client(timeout=30.0) as client:
