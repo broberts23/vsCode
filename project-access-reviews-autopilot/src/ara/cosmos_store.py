@@ -46,9 +46,18 @@ class CosmosCorrelationStore:
         )
 
     def upsert_from_work(self, work: ReviewWorkMessage) -> CorrelationDocument:
-        doc = CorrelationDocument.from_work(work)
-        self._container.upsert_item(doc.model_dump(mode="json"))
-        return doc
+        existing = self.get(work.correlation_id)
+        if existing is None:
+            doc = CorrelationDocument.from_work(work)
+            self._container.upsert_item(doc.model_dump(mode="json"))
+            return doc
+        if existing.status in (ReviewStatus.APPLIED, ReviewStatus.FAILED):
+            return existing
+        existing.event_type = work.event_type.value
+        existing.review_work = work.model_dump(by_alias=True, mode="json")
+        existing.updated_at = datetime.now(timezone.utc)
+        self._container.upsert_item(existing.model_dump(mode="json"))
+        return existing
 
     def get(self, correlation_id: str) -> CorrelationDocument | None:
         try:
@@ -93,6 +102,17 @@ class CosmosCorrelationStore:
         doc.decided_by = decided_by
         doc.justification = justification
         doc.decided_at = datetime.now(timezone.utc)
+        doc.updated_at = datetime.now(timezone.utc)
+        self._container.upsert_item(doc.model_dump(mode="json"))
+        return doc
+
+    def mark_failed(self, correlation_id: str) -> CorrelationDocument:
+        doc = self.get(correlation_id)
+        if doc is None:
+            raise KeyError(correlation_id)
+        if doc.status == ReviewStatus.APPLIED:
+            return doc
+        doc.status = ReviewStatus.FAILED
         doc.updated_at = datetime.now(timezone.utc)
         self._container.upsert_item(doc.model_dump(mode="json"))
         return doc

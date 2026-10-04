@@ -4,11 +4,15 @@
 
 **Blocked by:** 03 (Align Review Status and Review Events)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Idempotent upsert for open Review Work (same Correlation ID) refreshes metadata without creating duplicates
-- [ ] Overdue/ReminderDue while Notified updates/nudges the existing Inbox card (no stack of orphan cards required)
-- [ ] Review Events against Applied work do not reopen or re-Inbox the decision
-- [ ] Failed is set when notify/apply/validation terminates after retries are exhausted (including poison)
-- [ ] Poison fixtures remain opt-in on simulate
-- [ ] Domain/worker behavior tests cover idempotency, no-reopen, nudge-while-open, and Failed
+- [x] Idempotent upsert for open Review Work (same Correlation ID) refreshes metadata without creating duplicates
+- [x] Overdue/ReminderDue while Notified updates/nudges the existing Inbox card (no stack of orphan cards required)
+- [x] Review Events against Applied work do not reopen or re-Inbox the decision
+- [x] Failed is set when notify/apply/validation terminates after retries are exhausted (including poison)
+- [x] Poison fixtures remain opt-in on simulate
+- [x] Domain/worker behavior tests cover idempotency, no-reopen, nudge-while-open, and Failed
+
+## Answer
+
+Added `ara.lifecycle.process_review_event` (post/nudge/refresh/skip), smart Cosmos upsert, `nudge_review_card`, `mark_failed` on terminal delivery count, and tests in `tests/test_lifecycle_integrity.py`.

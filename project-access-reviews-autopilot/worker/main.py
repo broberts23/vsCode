@@ -13,7 +13,7 @@ if _src.is_dir() and str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 from ara.cosmos_store import CosmosCorrelationStore
-from ara.identity_map import LabIdentityMap
+from ara.lifecycle import process_review_event, should_mark_failed
 from ara.messaging import (
     ensure_local_entities,
     parse_apply_decision,
@@ -36,19 +36,7 @@ def handle_notify(
     work: ReviewWorkMessage,
     settings: Settings,
 ) -> None:
-    work.validate_for_worker()
-    mapped_slack_user_id = LabIdentityMap(
-        settings.lab_identity_map_slack_user_id
-    ).resolve_slack_user_id(work.reviewer_upn)
-    store.upsert_from_work(work)
-    channel_id, message_ts = slack.post_review_card(work)
-    store.mark_notified(work.correlation_id, channel_id=channel_id, message_ts=message_ts)
-    logger.info(
-        "Notified Slack correlationId=%s reviewer=%s labMappedSlackUserId=%s",
-        work.correlation_id,
-        work.reviewer_upn,
-        mapped_slack_user_id,
-    )
+    process_review_event(store, slack, work, settings)
 
 
 def handle_apply(
@@ -91,6 +79,33 @@ def _message_body(message) -> bytes:
     return b"".join(bytes(chunk) for chunk in body)
 
 
+def _delivery_count(message) -> int:
+    count = getattr(message, "delivery_count", None)
+    if count is None:
+        return 1
+    return int(count)
+
+
+def _try_mark_failed(
+    store: CosmosCorrelationStore,
+    *,
+    work: ReviewWorkMessage | None,
+    correlation_id: str | None,
+) -> None:
+    if not correlation_id:
+        return
+    try:
+        if store.get(correlation_id) is None and work is not None:
+            store.upsert_from_work(work)
+        store.mark_failed(correlation_id)
+        logger.info("Marked Review Work Failed correlationId=%s", correlation_id)
+    except KeyError:
+        logger.warning(
+            "Could not mark Failed; no correlation document correlationId=%s",
+            correlation_id,
+        )
+
+
 def run_once(mode: str) -> int:
     settings = get_settings()
     if settings.slack_bot_token == "" and settings.key_vault_uri:
@@ -116,19 +131,39 @@ def run_once(mode: str) -> int:
         )
         with receiver:
             for message in receiver:
+                correlation_id: str | None = None
+                notify_work: ReviewWorkMessage | None = None
                 try:
                     raw = _message_body(message)
                     if mode == "notify":
-                        work = parse_review_work(raw)
-                        handle_notify(store, slack, work, settings)
+                        notify_work = parse_review_work(raw)
+                        correlation_id = notify_work.correlation_id
+                        handle_notify(store, slack, notify_work, settings)
                     else:
+                        apply = parse_apply_decision(raw)
+                        correlation_id = apply.correlation_id
                         handle_apply(store, review_client, slack, raw)
 
                     receiver.complete_message(message)
                     processed += 1
                 except Exception:
-                    logger.exception("Failed processing message; abandoning for retry/DLQ")
-                    receiver.abandon_message(message)
+                    terminal = should_mark_failed(
+                        delivery_count=_delivery_count(message),
+                        max_delivery_count=settings.service_bus_max_delivery_count,
+                    )
+                    logger.exception(
+                        "Failed processing message; terminal=%s",
+                        terminal,
+                    )
+                    if terminal:
+                        _try_mark_failed(
+                            store,
+                            work=notify_work,
+                            correlation_id=correlation_id,
+                        )
+                        receiver.complete_message(message)
+                    else:
+                        receiver.abandon_message(message)
     return processed
 
 

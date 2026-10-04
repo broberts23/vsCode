@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     service_bus_topic: str = "review-work"
     service_bus_subscription_notify: str = "slack-notify"
     service_bus_subscription_apply: str = "apply-decision"
+    service_bus_max_delivery_count: int = 10
 
     key_vault_uri: str = ""
     slack_bot_token: str = ""
