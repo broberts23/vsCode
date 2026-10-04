@@ -7,13 +7,14 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 _src = Path(__file__).resolve().parents[1] / "src"
 if _src.is_dir() and str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 from ara.cosmos_store import CosmosCorrelationStore
-from ara.lifecycle import process_review_event, should_mark_failed
+from ara.lifecycle import process_review_event, record_terminal_failure, should_mark_failed
 from ara.messaging import (
     ensure_local_entities,
     parse_apply_decision,
@@ -70,7 +71,7 @@ def handle_apply(
     logger.info("Applied decision correlationId=%s", apply.correlation_id)
 
 
-def _message_body(message) -> bytes:
+def _message_body(message: Any) -> bytes:
     body = message.body
     if isinstance(body, (bytes, bytearray)):
         return bytes(body)
@@ -79,31 +80,11 @@ def _message_body(message) -> bytes:
     return b"".join(bytes(chunk) for chunk in body)
 
 
-def _delivery_count(message) -> int:
+def _delivery_count(message: Any) -> int:
     count = getattr(message, "delivery_count", None)
     if count is None:
         return 1
     return int(count)
-
-
-def _try_mark_failed(
-    store: CosmosCorrelationStore,
-    *,
-    work: ReviewWorkMessage | None,
-    correlation_id: str | None,
-) -> None:
-    if not correlation_id:
-        return
-    try:
-        if store.get(correlation_id) is None and work is not None:
-            store.upsert_from_work(work)
-        store.mark_failed(correlation_id)
-        logger.info("Marked Review Work Failed correlationId=%s", correlation_id)
-    except KeyError:
-        logger.warning(
-            "Could not mark Failed; no correlation document correlationId=%s",
-            correlation_id,
-        )
 
 
 def run_once(mode: str) -> int:
@@ -156,10 +137,15 @@ def run_once(mode: str) -> int:
                         terminal,
                     )
                     if terminal:
-                        _try_mark_failed(
+                        marked = record_terminal_failure(
                             store,
                             work=notify_work,
                             correlation_id=correlation_id,
+                        )
+                        logger.info(
+                            "Terminal failure correlationId=%s markedFailed=%s",
+                            correlation_id,
+                            marked,
                         )
                         receiver.complete_message(message)
                     else:

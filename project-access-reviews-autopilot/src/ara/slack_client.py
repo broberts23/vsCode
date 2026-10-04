@@ -21,7 +21,7 @@ def build_review_blocks(work: ReviewWorkMessage) -> list[dict[str, Any]]:
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"Access review: {work.event_type.value}",
+                "text": f"Review Work: {work.event_type.value}",
             },
         },
         {
@@ -117,7 +117,7 @@ class SlackNotifier:
 
         payload = {
             "channel": self._settings.slack_channel_id,
-            "text": f"Access review {work.event_type.value}: {work.principal_display_name}",
+            "text": f"Review Work {work.event_type.value}: {work.principal_display_name}",
             "blocks": blocks,
         }
         with httpx.Client(timeout=30.0) as client:
@@ -146,7 +146,7 @@ class SlackNotifier:
         self._chat_update(
             channel_id=channel_id,
             message_ts=message_ts,
-            text=f"Access review {work.event_type.value}: {work.principal_display_name}",
+            text=f"Review Work {work.event_type.value}: {work.principal_display_name}",
             blocks=blocks,
             dry_run_message=(
                 f"Slack dry-run nudge correlationId={work.correlation_id} "

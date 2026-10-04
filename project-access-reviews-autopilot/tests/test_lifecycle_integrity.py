@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from ara.fixtures import load_fixture_by_stem
-from ara.lifecycle import process_review_event, should_mark_failed
+from ara.lifecycle import process_review_event, record_terminal_failure, should_mark_failed
 from ara.models import CorrelationDocument, ReviewStatus, ReviewWorkMessage
 from ara.settings import Settings
 
@@ -109,7 +109,6 @@ def test_overdue_while_notified_nudges_existing_card() -> None:
     process_review_event(store, slack, pending, _settings())
     slack.reset_mock()
     overdue = load_fixture_by_stem(FIXTURES, "review-overdue")
-    # Same Correlation ID as pending for this scenario
     overdue = overdue.model_copy(update={"correlation_id": pending.correlation_id})
     outcome = process_review_event(store, slack, overdue, _settings())
     assert outcome == "nudged"
@@ -119,6 +118,20 @@ def test_overdue_while_notified_nudges_existing_card() -> None:
     args = slack.nudge_review_card.call_args.kwargs
     assert args["channel_id"] == "C_LAB"
     assert args["message_ts"] == "111.222"
+
+
+def test_reminder_due_while_notified_nudges_existing_card() -> None:
+    store = FakeStore()
+    slack = _slack()
+    pending = load_fixture_by_stem(FIXTURES, "review-pending")
+    process_review_event(store, slack, pending, _settings())
+    slack.reset_mock()
+    reminder = load_fixture_by_stem(FIXTURES, "review-reminder-due")
+    reminder = reminder.model_copy(update={"correlation_id": pending.correlation_id})
+    outcome = process_review_event(store, slack, reminder, _settings())
+    assert outcome == "nudged"
+    assert store.docs[pending.correlation_id].event_type == "ReviewReminderDue"
+    slack.nudge_review_card.assert_called_once()
 
 
 def test_applied_work_does_not_reopen() -> None:
@@ -146,6 +159,19 @@ def test_mark_failed_sets_failed_status() -> None:
     store.upsert_from_work(work)
     store.mark_failed(work.correlation_id)
     assert store.docs[work.correlation_id].status == ReviewStatus.FAILED
+
+
+def test_record_terminal_failure_for_poison_creates_failed_document() -> None:
+    store = FakeStore()
+    poison = load_fixture_by_stem(FIXTURES, "poison")
+    assert should_mark_failed(delivery_count=10, max_delivery_count=10)
+    marked = record_terminal_failure(
+        store,
+        work=poison,
+        correlation_id=poison.correlation_id,
+    )
+    assert marked is True
+    assert store.docs[poison.correlation_id].status == ReviewStatus.FAILED
 
 
 def test_should_mark_failed_when_delivery_exhausted() -> None:

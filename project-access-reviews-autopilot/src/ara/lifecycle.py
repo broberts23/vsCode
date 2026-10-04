@@ -46,6 +46,25 @@ def should_mark_failed(*, delivery_count: int, max_delivery_count: int) -> bool:
     return delivery_count >= max_delivery_count
 
 
+def record_terminal_failure(
+    store: CorrelationStore,
+    *,
+    work: ReviewWorkMessage | None,
+    correlation_id: str | None,
+) -> bool:
+    """Persist Failed for exhausted retries. Returns True if status is Failed."""
+    if not correlation_id:
+        return False
+    existing = store.get(correlation_id)
+    if existing is None:
+        if work is None:
+            return False
+        store.upsert_from_work(work)
+    store.mark_failed(correlation_id)
+    doc = store.get(correlation_id)
+    return doc is not None and doc.status == ReviewStatus.FAILED
+
+
 def process_review_event(
     store: CorrelationStore,
     slack: ReviewInbox,
