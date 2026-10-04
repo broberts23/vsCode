@@ -65,7 +65,7 @@ A Pydantic model validates the shape on the way in, and a second method decides 
 ```python
 def validate_for_worker(self) -> None:
     if self.force_poison:
-        raise ValueError("forcePoison=true: intentional DLQ fixture")
+        raise ValueError("forcePoison=true: intentional failure fixture")
     if not self.correlation_id.strip():
         raise ValueError("correlationId is required")
     if not self.decision_item_id.strip():
@@ -173,7 +173,7 @@ sequenceDiagram
     AW->>SL: chat.update to Applied
 ```
 
-## Applying the decision without touching Graph
+## Applying the Decision without touching Graph
 
 This is the seam where the lab and the real world part ways, and it is a single interface. Everything upstream of it, the queue, the card, the signature check and the Correlation ID, is identical in both worlds. Only the implementation behind `apply_decision` differs.
 
@@ -254,7 +254,7 @@ The Cosmos store follows the same pattern. Because the code never branches on "a
 
 A pipeline that only handles good input has not been tested. The poison fixture is a payload that parses cleanly but carries `forcePoison: true`, so the notify worker's validation rejects it, and it exists so the failure path is something you exercise on purpose instead of discovering at 2 a.m.
 
-The worker's contract is small. Process the message and complete it, or abandon it and let Service Bus retry. When delivery count reaches the configured maximum, the worker marks the Review Work Failed and completes the message so the Correlation ID has a terminal status instead of vanishing into silence.
+The worker's contract is small. Process the message and complete it, or abandon it and let Service Bus retry. When delivery count reaches the configured maximum, the worker marks Review Status Failed and completes the message so the Correlation ID has a terminal Review Status instead of vanishing into silence.
 
 ```python
 try:
@@ -297,7 +297,7 @@ ContainerAppConsoleLogs_CL
 
 ## What carries over to a real tenant
 
-Most of this system is already production-shaped. The topic, the two subscriptions, the retry and Failed behavior, the Slack card, the signature check, the correlation documents and the managed identity wiring all survive the move to a live tenant. What changes is the Producer at one end and the applier at the other, plus identity that the lab can only stub.
+Most of this system is already production-shaped. The topic, the two subscriptions, the retry and Failed behavior, the Slack card, the signature check, the correlation documents and the managed identity wiring all survive the move to a live tenant. What changes is the Producer at one end and the Apply edge at the other, plus identity that the lab can only stub.
 
 ```mermaid
 flowchart LR

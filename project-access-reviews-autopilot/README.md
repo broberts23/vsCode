@@ -1,4 +1,4 @@
-# Access Reviews Autopilot — Slack as the access-review inbox
+# Access Reviews Autopilot — Slack as the Access Review Inbox
 
 Lab pattern: inject Graph-shaped **Review Events**, notify in **Slack** (the only Inbox), and **Apply** Decisions into **Cosmos** (simulated). Operators inject via the OIDC-protected simulate API or the simulator CLI/job and inspect via Cosmos/logs. See [GLOSSARY.md](GLOSSARY.md) for domain language.
 
@@ -32,7 +32,7 @@ project-access-reviews-autopilot/
 ├── Dockerfile
 ├── docker-compose.yml        ← Cosmos + Service Bus emulators
 ├── .env.example
-├── config/simulated-events/  ← ReviewPending, Overdue, Reminder, poison
+├── config/simulated-events/  ← ReviewPending, Overdue, ReminderDue, poison
 ├── src/ara/                  ← shared library
 ├── api/                      ← FastAPI (OIDC simulate + Slack interactivity)
 ├── worker/                   ← Service Bus consumers

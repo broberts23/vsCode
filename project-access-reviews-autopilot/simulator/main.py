@@ -30,7 +30,7 @@ def main() -> None:
     parser.add_argument(
         "--include-poison",
         action="store_true",
-        help="Also publish the poison DLQ fixture when selecting all.",
+        help="Also publish the poison failure fixture when selecting all.",
     )
     args = parser.parse_args()
 

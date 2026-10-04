@@ -57,7 +57,7 @@ class ReviewWorkMessage(BaseModel):
 
     def validate_for_worker(self) -> None:
         if self.force_poison:
-            raise ValueError("forcePoison=true: intentional DLQ fixture")
+            raise ValueError("forcePoison=true: intentional failure fixture")
         if not self.correlation_id.strip():
             raise ValueError("correlationId is required")
         if not self.decision_item_id.strip():
