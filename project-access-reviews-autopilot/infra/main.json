@@ -38,7 +38,7 @@
     "tenantId": {
       "type": "string",
       "metadata": {
-        "description": "Microsoft Entra tenant ID (OIDC SPA/API)"
+        "description": "Microsoft Entra tenant ID (OIDC Operator API)"
       }
     },
     "apiClientId": {
@@ -46,13 +46,6 @@
       "defaultValue": "",
       "metadata": {
         "description": "API app registration client ID (audience validation)"
-      }
-    },
-    "spaClientId": {
-      "type": "string",
-      "defaultValue": "",
-      "metadata": {
-        "description": "SPA app registration client ID"
       }
     },
     "apiAudience": {
@@ -547,10 +540,6 @@
                   "value": "[parameters('apiClientId')]"
                 },
                 {
-                  "name": "ENTRA_SPA_CLIENT_ID",
-                  "value": "[parameters('spaClientId')]"
-                },
-                {
                   "name": "ENTRA_API_AUDIENCE",
                   "value": "[parameters('apiAudience')]"
                 },
@@ -697,10 +686,6 @@
                 {
                   "name": "ENTRA_API_CLIENT_ID",
                   "value": "[parameters('apiClientId')]"
-                },
-                {
-                  "name": "ENTRA_SPA_CLIENT_ID",
-                  "value": "[parameters('spaClientId')]"
                 },
                 {
                   "name": "ENTRA_API_AUDIENCE",
@@ -850,10 +835,6 @@
                   "value": "[parameters('apiClientId')]"
                 },
                 {
-                  "name": "ENTRA_SPA_CLIENT_ID",
-                  "value": "[parameters('spaClientId')]"
-                },
-                {
                   "name": "ENTRA_API_AUDIENCE",
                   "value": "[parameters('apiAudience')]"
                 },
@@ -987,10 +968,6 @@
                 {
                   "name": "ENTRA_API_CLIENT_ID",
                   "value": "[parameters('apiClientId')]"
-                },
-                {
-                  "name": "ENTRA_SPA_CLIENT_ID",
-                  "value": "[parameters('spaClientId')]"
                 },
                 {
                   "name": "ENTRA_API_AUDIENCE",

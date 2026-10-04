@@ -96,21 +96,6 @@ class CosmosCorrelationStore:
         self._container.upsert_item(doc.model_dump(mode="json"))
         return doc
 
-    def list_pending(self) -> list[CorrelationDocument]:
-        query = (
-            "SELECT * FROM c WHERE c.status = @pending OR c.status = @notified "
-            "ORDER BY c.created_at DESC"
-        )
-        items = self._container.query_items(
-            query=query,
-            parameters=[
-                {"name": "@pending", "value": ReviewStatus.PENDING.value},
-                {"name": "@notified", "value": ReviewStatus.NOTIFIED.value},
-            ],
-            enable_cross_partition_query=True,
-        )
-        return [CorrelationDocument.model_validate(item) for item in items]
-
     def list_all(self, limit: int = 50) -> list[dict[str, Any]]:
         items = self._container.query_items(
             query="SELECT TOP @limit * FROM c ORDER BY c.updated_at DESC",

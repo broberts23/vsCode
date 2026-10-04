@@ -47,7 +47,6 @@ class Settings(BaseSettings):
 
     entra_tenant_id: str = ""
     entra_api_client_id: str = ""
-    entra_spa_client_id: str = ""
     entra_api_audience: str = "api://access-reviews-autopilot"
     entra_required_scope: str = "access_as_user"
 

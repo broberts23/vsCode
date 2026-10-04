@@ -6,7 +6,6 @@
     "baseName": { "value": "ara" },
     "tenantId": { "value": "00000000-0000-0000-0000-000000000000" },
     "apiClientId": { "value": "" },
-    "spaClientId": { "value": "" },
     "apiAudience": { "value": "" },
     "slackChannelId": { "value": "" },
     "containerImage": { "value": "" }

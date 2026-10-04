@@ -1,4 +1,4 @@
-"""HTTP API: pending list, simulate inject, Slack interactivity."""
+"""HTTP API: Operator simulate inject and Slack Inbox interactivity."""
 
 from __future__ import annotations
 
@@ -68,20 +68,6 @@ class SimulateRequest(BaseModel):
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/api/pending")
-def list_pending(
-    request: Request,
-    settings: Settings = Depends(settings_dep),
-    store: CosmosCorrelationStore = Depends(store_dep),
-) -> dict[str, Any]:
-    require_oidc(request, settings)
-    items = store.list_pending()
-    return {
-        "count": len(items),
-        "items": [item.model_dump(mode="json") for item in items],
-    }
 
 
 @app.post("/api/simulate")

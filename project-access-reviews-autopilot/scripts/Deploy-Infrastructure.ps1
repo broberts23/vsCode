@@ -21,8 +21,6 @@ param(
 
     [string]$ApiClientId = '',
 
-    [string]$SpaClientId = '',
-
     [string]$ApiAudience = '',
 
     [string]$SlackChannelId = '',
@@ -53,7 +51,6 @@ $params = @{
     baseName              = $BaseName
     tenantId              = $TenantId
     apiClientId           = $ApiClientId
-    spaClientId           = $SpaClientId
     apiAudience           = $ApiAudience
     slackChannelId        = $SlackChannelId
     containerImage        = $ContainerImage
@@ -100,7 +97,7 @@ if ($sbNamespace) {
 Write-Host @'
 Next steps:
   1. az acr build -r <acrLoginServer> -t ara:dev .
-  2. Re-run this script with -ContainerImage <acrLoginServer>/ara:dev -ApiClientId ... -SpaClientId ... -SlackChannelId ...
+  2. Re-run this script with -ContainerImage <acrLoginServer>/ara:dev -ApiClientId ... -SlackChannelId ...
   3. az keyvault secret set --vault-name <kv> --name slack-signing-secret --value <secret>
   4. az keyvault secret set --vault-name <kv> --name slack-bot-token --value <xoxb-...>
   5. Point Slack Request URL to https://<apiFqdn>/slack/interactions

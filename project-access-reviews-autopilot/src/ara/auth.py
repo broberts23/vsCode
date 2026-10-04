@@ -1,4 +1,4 @@
-"""OIDC bearer validation for the SPA/API. Bypass for local emulator runs."""
+"""OIDC bearer validation for the Operator API. Bypass for local emulator runs."""
 
 from __future__ import annotations
 

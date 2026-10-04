@@ -10,14 +10,11 @@ param location string = resourceGroup().location
 @description('Base name for resources')
 param baseName string = 'ara'
 
-@description('Microsoft Entra tenant ID (OIDC SPA/API)')
+@description('Microsoft Entra tenant ID (OIDC Operator API)')
 param tenantId string
 
 @description('API app registration client ID (audience validation)')
 param apiClientId string = ''
-
-@description('SPA app registration client ID')
-param spaClientId string = ''
 
 @description('API audience (Application ID URI). Defaults to api://{apiClientId}.')
 param apiAudience string = empty(apiClientId) ? '' : 'api://${apiClientId}'
@@ -371,10 +368,6 @@ var sharedEnv = [
   {
     name: 'ENTRA_API_CLIENT_ID'
     value: apiClientId
-  }
-  {
-    name: 'ENTRA_SPA_CLIENT_ID'
-    value: spaClientId
   }
   {
     name: 'ENTRA_API_AUDIENCE'
