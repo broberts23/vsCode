@@ -75,6 +75,7 @@ class CosmosCorrelationStore:
         *,
         channel_id: str,
         message_ts: str,
+        lab_mapped_slack_user_id: str,
     ) -> CorrelationDocument:
         doc = self.get(correlation_id)
         if doc is None:
@@ -82,6 +83,7 @@ class CosmosCorrelationStore:
         doc.status = ReviewStatus.NOTIFIED
         doc.slack_channel_id = channel_id
         doc.slack_message_ts = message_ts
+        doc.lab_mapped_slack_user_id = lab_mapped_slack_user_id
         doc.updated_at = datetime.now(timezone.utc)
         self._container.upsert_item(doc.model_dump(mode="json"))
         return doc

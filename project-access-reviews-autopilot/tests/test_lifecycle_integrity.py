@@ -44,11 +44,13 @@ class FakeStore:
         *,
         channel_id: str,
         message_ts: str,
+        lab_mapped_slack_user_id: str,
     ) -> CorrelationDocument:
         doc = self.docs[correlation_id]
         doc.status = ReviewStatus.NOTIFIED
         doc.slack_channel_id = channel_id
         doc.slack_message_ts = message_ts
+        doc.lab_mapped_slack_user_id = lab_mapped_slack_user_id
         doc.updated_at = datetime.now(timezone.utc)
         return doc
 
@@ -74,6 +76,10 @@ def _slack() -> MagicMock:
     return slack
 
 
+def test_default_max_delivery_count_matches_service_bus_subscription() -> None:
+    assert Settings().service_bus_max_delivery_count == 5
+
+
 def test_first_event_posts_and_marks_notified() -> None:
     store = FakeStore()
     slack = _slack()
@@ -81,7 +87,10 @@ def test_first_event_posts_and_marks_notified() -> None:
     outcome = process_review_event(store, slack, work, _settings())
     assert outcome == "posted"
     assert store.docs[work.correlation_id].status == ReviewStatus.NOTIFIED
+    assert store.docs[work.correlation_id].lab_mapped_slack_user_id == "U_LAB_SHARED"
     slack.post_review_card.assert_called_once()
+    kwargs = slack.post_review_card.call_args.kwargs
+    assert kwargs["reviewer_slack_user_id"] == "U_LAB_SHARED"
     slack.nudge_review_card.assert_not_called()
 
 
@@ -118,6 +127,7 @@ def test_overdue_while_notified_nudges_existing_card() -> None:
     args = slack.nudge_review_card.call_args.kwargs
     assert args["channel_id"] == "C_LAB"
     assert args["message_ts"] == "111.222"
+    assert args["reviewer_slack_user_id"] == "U_LAB_SHARED"
 
 
 def test_reminder_due_while_notified_nudges_existing_card() -> None:
@@ -164,7 +174,7 @@ def test_mark_failed_sets_failed_status() -> None:
 def test_record_terminal_failure_for_poison_creates_failed_document() -> None:
     store = FakeStore()
     poison = load_fixture_by_stem(FIXTURES, "poison")
-    assert should_mark_failed(delivery_count=10, max_delivery_count=10)
+    assert should_mark_failed(delivery_count=5, max_delivery_count=5)
     marked = record_terminal_failure(
         store,
         work=poison,
@@ -175,9 +185,9 @@ def test_record_terminal_failure_for_poison_creates_failed_document() -> None:
 
 
 def test_should_mark_failed_when_delivery_exhausted() -> None:
-    assert should_mark_failed(delivery_count=10, max_delivery_count=10) is True
-    assert should_mark_failed(delivery_count=9, max_delivery_count=10) is False
-    assert should_mark_failed(delivery_count=1, max_delivery_count=10) is False
+    assert should_mark_failed(delivery_count=5, max_delivery_count=5) is True
+    assert should_mark_failed(delivery_count=4, max_delivery_count=5) is False
+    assert should_mark_failed(delivery_count=1, max_delivery_count=5) is False
 
 
 def test_poison_still_opt_in_on_simulate(monkeypatch: pytest.MonkeyPatch) -> None:

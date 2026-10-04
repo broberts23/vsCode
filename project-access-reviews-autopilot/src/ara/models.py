@@ -93,6 +93,7 @@ class CorrelationDocument(BaseModel):
     review_work: dict[str, Any]
     slack_channel_id: str | None = None
     slack_message_ts: str | None = None
+    lab_mapped_slack_user_id: str | None = None
     decision: str | None = None
     decided_by: str | None = None
     justification: str | None = None

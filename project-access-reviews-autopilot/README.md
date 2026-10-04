@@ -128,7 +128,7 @@ With Slack configured, click **Approve** or **Deny** on the card. Cosmos `status
 python -m simulator.main --fixture poison
 ```
 
-Worker-notify should fail validation (`forcePoison`) and abandon the message for retries. When delivery count reaches `SERVICE_BUS_MAX_DELIVERY_COUNT` (default 10), the worker marks Review Status `failed` and completes the message.
+Worker-notify should fail validation (`forcePoison`) and abandon the message for retries. When delivery count reaches `SERVICE_BUS_MAX_DELIVERY_COUNT` (default 5, matching Bicep `maxDeliveryCount`), the worker marks Review Status `failed` and completes the message.
 
 ### 3.7 Cosmos failure → retry
 

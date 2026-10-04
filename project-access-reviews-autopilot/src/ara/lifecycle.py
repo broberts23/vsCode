@@ -25,13 +25,19 @@ class CorrelationStore(Protocol):
         *,
         channel_id: str,
         message_ts: str,
+        lab_mapped_slack_user_id: str,
     ) -> CorrelationDocument: ...
 
     def mark_failed(self, correlation_id: str) -> CorrelationDocument: ...
 
 
 class ReviewInbox(Protocol):
-    def post_review_card(self, work: ReviewWorkMessage) -> tuple[str, str]: ...
+    def post_review_card(
+        self,
+        work: ReviewWorkMessage,
+        *,
+        reviewer_slack_user_id: str,
+    ) -> tuple[str, str]: ...
 
     def nudge_review_card(
         self,
@@ -39,6 +45,7 @@ class ReviewInbox(Protocol):
         channel_id: str,
         message_ts: str,
         work: ReviewWorkMessage,
+        reviewer_slack_user_id: str,
     ) -> None: ...
 
 
@@ -96,6 +103,7 @@ def process_review_event(
                 channel_id=doc.slack_channel_id,
                 message_ts=doc.slack_message_ts,
                 work=work,
+                reviewer_slack_user_id=mapped_slack_user_id,
             )
             logger.info(
                 "Nudged Inbox correlationId=%s event=%s labMappedSlackUserId=%s",
@@ -111,11 +119,15 @@ def process_review_event(
         )
         return "refreshed"
 
-    channel_id, message_ts = slack.post_review_card(work)
+    channel_id, message_ts = slack.post_review_card(
+        work,
+        reviewer_slack_user_id=mapped_slack_user_id,
+    )
     store.mark_notified(
         work.correlation_id,
         channel_id=channel_id,
         message_ts=message_ts,
+        lab_mapped_slack_user_id=mapped_slack_user_id,
     )
     logger.info(
         "Notified Slack correlationId=%s reviewer=%s labMappedSlackUserId=%s",

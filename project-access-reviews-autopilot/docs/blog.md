@@ -105,7 +105,7 @@ for work in load_all_fixtures(settings.fixtures_path):
 
 Within a few seconds the notify worker has validated each message, written a correlation document to Cosmos with Review Status Received, posted a Block Kit card to the shared lab channel, and marked the document Notified. The card is the whole product. It names the Principal and their UPN, the Resource and its type, the due date, the Recommendation and the Correlation ID, and it ends with two buttons.
 
-The lab posts to a shared `SLACK_CHANNEL_ID`. That is scaffolding. Production intent is Inbox delivery to the Reviewer. The lab also resolves every Entra Reviewer through a Lab Identity Map to the same Slack user id, because the Slack developer sandbox cannot do workspace SSO. Production end-state is SSO Identity, where Slack is SSO'd to Entra so Decider and Reviewer are the same person without a stub map.
+The lab posts to a shared `SLACK_CHANNEL_ID`. That is scaffolding. Production intent is Inbox delivery to the Reviewer. The lab also resolves every Entra Reviewer through a Lab Identity Map to the same Slack user id, mentions that id on the card, and persists it on the correlation document, because the Slack developer sandbox cannot do workspace SSO. Production end-state is SSO Identity, where Slack is SSO'd to Entra so Decider and Reviewer are the same person without a stub map.
 
 The part worth reading is how the buttons carry their context. Slack will send back whatever string you put in the button `value`, so the value encodes the Correlation ID and the Decision. No lookup table, no session state.
 
@@ -254,7 +254,7 @@ The Cosmos store follows the same pattern. Because the code never branches on "a
 
 A pipeline that only handles good input has not been tested. The poison fixture is a payload that parses cleanly but carries `forcePoison: true`, so the notify worker's validation rejects it, and it exists so the failure path is something you exercise on purpose instead of discovering at 2 a.m.
 
-The worker's contract is small. Process the message and complete it, or abandon it and let Service Bus retry. When delivery count reaches the configured maximum, the worker marks Review Status Failed and completes the message so the Correlation ID has a terminal Review Status instead of vanishing into silence.
+The worker's contract is small. Process the message and complete it, or abandon it and let Service Bus retry. When delivery count reaches the configured maximum (aligned with the subscription `maxDeliveryCount` so the Failed path can run before dead-lettering), the worker marks Review Status Failed and completes the message so the Correlation ID has a terminal Review Status instead of vanishing into silence.
 
 ```python
 try:
