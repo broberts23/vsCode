@@ -4,7 +4,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class Identity(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # ignore Cosmos system properties (_rid, _etag, _ts, ...) on read
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     id: str = Field(min_length=1, description="Document id and Cosmos partition key value")
     display_name: str | None = Field(default=None, alias="displayName")

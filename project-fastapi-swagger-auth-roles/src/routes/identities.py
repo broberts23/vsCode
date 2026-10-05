@@ -1,7 +1,10 @@
 """HTTP routes for mock identity documents."""
 
+from typing import Annotated, Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from src.auth import get_current_principal
 from src.cosmos.identities import IdentityStore, get_identity_store
 from src.models.identity import Identity, IdentityPatch
 
@@ -15,7 +18,8 @@ def identity_store() -> IdentityStore:
 @router.get("/{identity_id}", response_model=Identity)
 def get_identity(
     identity_id: str,
-    store: IdentityStore = Depends(identity_store),
+    store: Annotated[IdentityStore, Depends(identity_store)],
+    _: Annotated[dict[str, Any], Depends(get_current_principal)],
 ) -> Identity:
     identity = store.get(identity_id)
     if identity is None:
@@ -30,7 +34,8 @@ def get_identity(
 def put_identity(
     identity_id: str,
     body: Identity,
-    store: IdentityStore = Depends(identity_store),
+    store: Annotated[IdentityStore, Depends(identity_store)],
+    _: Annotated[dict[str, Any], Depends(get_current_principal)],
 ) -> Identity:
     if body.id != identity_id:
         raise HTTPException(
@@ -44,7 +49,8 @@ def put_identity(
 def patch_identity(
     identity_id: str,
     body: IdentityPatch,
-    store: IdentityStore = Depends(identity_store),
+    store: Annotated[IdentityStore, Depends(identity_store)],
+    _: Annotated[dict[str, Any], Depends(get_current_principal)],
 ) -> Identity:
     updated = store.patch(identity_id, body)
     if updated is None:
