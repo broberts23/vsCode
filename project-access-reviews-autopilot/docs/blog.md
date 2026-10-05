@@ -222,7 +222,7 @@ While Slack interactions rely on HMAC signatures rather than user authentication
 
 A single Entra application registration accommodates this requirement. The API publishes the `access_as_user` scope using an Application ID URI derived from its client ID, complying with default Entra tenant policies that disallow arbitrary domain strings. Slack operates independently as a bot application using its own credentials, rather than serving as an identity provider. Because SAML single sign-on is typically unavailable in free developer workspaces, the lab identity map provides a practical bridge during development while keeping full SSO integration as the intended production standard.
 
-![Entra API app registration, Expose an API, showing the access\_as\_user scope](images/entra_api_expose_scope.png)
+![Entra API app registration, Expose an API, showing the access_as_user scope](images/entra_api_expose_scope.png)
 
 ## No keys between Azure resources
 
@@ -320,9 +320,7 @@ Content-Type: application/json
 
 Moving to a live environment also introduces organizational and operational considerations. Licensing requirements come into play, requiring Entra ID P2 or Governance licenses for participating users. Token validation on administrative endpoints should expand to verify signature authenticity against tenant keys in addition to checking claims. The database TTL policy would need adjustment to satisfy organizational compliance and record retention guidelines, and notifications would move from shared channels to targeted direct messages.
 
-While this lab implementation focuses on a simulated foundation, it demonstrates that meeting reviewers within their primary collaboration tools provides a practical, low-friction approach to identity governance.
-
-Taking this architecture into production follows a distinct four-part progression. First, the simulator retires in favor of an ingestion poller that queries active decision items from Microsoft Graph under `AccessReview.Read.All`, paired with a scheduler that derives reminder and overdue notices from review deadlines. Second, the workspace enables enterprise single sign-on between Slack and Microsoft Entra ID. This allows the lab identity map to be removed entirely, shifting notifications from a shared channel to private direct messages sent straight to the assigned Reviewer. Third, the apply worker implements `GraphAccessReviewClient` using *delegated user tokens* acquired for that authenticated Reviewer, prompting for and attaching justifications whenever an Access Review definition demands them. Finally, operational baselines shift to enterprise standards: assigning Entra ID P2 or Governance licenses to participating users, expanding token validation on management endpoints to cryptographically verify tenant signing keys, and replacing the thirty-day demonstration TTL in Cosmos DB with an immutable compliance retention policy.
+While this lab implementation focuses on a simulated foundation, it demonstrates that meeting reviewers within their primary collaboration tools provides a practical, low-friction approach to identity governance. Closing the remaining gap simply comes down to connecting the pipeline's edges to live Microsoft Graph services and dropping the slack identity map in favor of SSO Identity.
 
 ## Run it yourself
 
