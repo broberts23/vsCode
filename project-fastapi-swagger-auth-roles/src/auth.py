@@ -45,17 +45,6 @@ def _get_jwks_client(settings: Settings) -> PyJWKClient:
     return _jwks_client
 
 
-def _unverified_claims(token: str) -> dict[str, Any]:
-    try:
-        claims = jwt.decode(
-            token,
-            options={"verify_signature": False, "verify_aud": False, "verify_exp": False},
-        )
-        return claims if isinstance(claims, dict) else {}
-    except jwt.PyJWTError:
-        return {}
-
-
 def decode_access_token(token: str, settings: Settings) -> dict[str, Any]:
     settings.require_entra()
     try:
@@ -69,22 +58,10 @@ def decode_access_token(token: str, settings: Settings) -> dict[str, Any]:
             options={"require": ["exp", "iss", "aud"]},
         )
     except Exception as exc:
-        preview = _unverified_claims(token)
-        logger.warning(
-            "Access token validation failed: %s (token iss=%r aud=%r ver=%r; expected issuer=%r)",
-            exc,
-            preview.get("iss"),
-            preview.get("aud"),
-            preview.get("ver"),
-            settings.issuer,
-        )
+        logger.warning("Access token validation failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=(
-                f"Invalid or expired access token: {exc} "
-                f"(token iss={preview.get('iss')!r}, aud={preview.get('aud')!r}, "
-                f"ver={preview.get('ver')!r}; expected issuer={settings.issuer!r})"
-            ),
+            detail="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
