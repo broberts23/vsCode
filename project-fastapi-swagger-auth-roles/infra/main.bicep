@@ -8,7 +8,7 @@ param deploymentEnvironment string = 'dev'
 param location string = resourceGroup().location
 
 @description('Base name for resources')
-param baseName string = 'fastapi-swagger'
+param baseName string = 'fsa'
 
 @description('Optional ACR name. Leave empty to generate a unique name.')
 param acrName string = ''

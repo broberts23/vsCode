@@ -27,7 +27,7 @@ param(
 
   [string]$AcrName = '',
 
-  [string]$BaseName = 'fastapi-swagger',
+  [string]$BaseName = 'fsa',
 
   [ValidateSet('dev', 'test', 'prod')]
   [string]$Environment = 'dev',
