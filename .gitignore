@@ -146,3 +146,4 @@ __azurite_db*__.json
 # IDE exclusions
 .kilo
 .vscode
+.vibe-wise
