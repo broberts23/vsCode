@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>On-prem lab app</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>On-prem lab app</h1>
+      <p>
+        Static site for the Entra Application Proxy lab. Host facts are available
+        from <code>GET /api/host</code>.
+      </p>
+      <button type="button" id="load-host">Load host info</button>
+      <pre id="host-output">Click the button to call /api/host.</pre>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
