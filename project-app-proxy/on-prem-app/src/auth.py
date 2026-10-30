@@ -32,15 +32,20 @@ def _jwks_client(tenant_id: str) -> PyJWKClient:
     return _jwks_clients[tenant_id]
 
 
-def extract_bearer_token(
+def extract_access_token(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None,
+    settings: Settings,
 ) -> str | None:
+    """Prefer Authorization Bearer; fall back to the App Proxy–safe custom header."""
     if credentials is not None and credentials.scheme.lower() == "bearer":
         return credentials.credentials
     authorization = request.headers.get("Authorization")
     if authorization and authorization.lower().startswith("bearer "):
         return authorization.split(" ", 1)[1].strip()
+    custom = request.headers.get(settings.access_token_header)
+    if custom:
+        return custom.strip()
     return None
 
 
@@ -99,11 +104,14 @@ async def require_tenant_user(
     if settings.local_debug:
         return None
 
-    token = extract_bearer_token(request, credentials)
+    token = extract_access_token(request, credentials, settings)
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Bearer token required.",
+            detail=(
+                "Access token required "
+                f"(Authorization Bearer or {settings.access_token_header})."
+            ),
             headers={"WWW-Authenticate": "Bearer"},
         )
     return validate_tenant_token(token, settings)

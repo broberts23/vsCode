@@ -31,6 +31,13 @@ class Settings(BaseSettings):
         default="Api.Read",
         description="App role claim required for /api routes when auth is enabled.",
     )
+    access_token_header: str = Field(
+        default="X-OnPrem-Access-Token",
+        description=(
+            "Custom header that carries the Entra access token when App Proxy "
+            "strips Authorization after Entra pre-authentication."
+        ),
+    )
     host: str = "0.0.0.0"
     port: int = 8000
 

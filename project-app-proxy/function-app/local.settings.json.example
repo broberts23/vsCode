@@ -1,0 +1,10 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AzureWebJobsStorage": "",
+    "AzureWebJobsFeatureFlags": "EnableWorkerIndexing",
+    "ON_PREM_API_BASE_URL": "https://projectfastapi-benrobertsio.msappproxy.net",
+    "ON_PREM_API_SCOPE": "https://projectfastapi-benrobertsio.msappproxy.net/access_as_user"
+  }
+}
