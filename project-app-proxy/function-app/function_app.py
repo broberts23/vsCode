@@ -14,7 +14,7 @@ from azure.identity import DefaultAzureCredential
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 DEFAULT_BASE_URL = "https://projectfastapi-benrobertsio.msappproxy.net"
-DEFAULT_SCOPE = "https://projectfastapi-benrobertsio.msappproxy.net/access_as_user"
+DEFAULT_SCOPE = "https://projectfastapi-benrobertsio.msappproxy.net/.default"
 HOST_PATH = "/api/host"
 # App Proxy Entra pre-auth consumes Authorization; backend reads this copy.
 ON_PREM_ACCESS_TOKEN_HEADER = "X-OnPrem-Access-Token"

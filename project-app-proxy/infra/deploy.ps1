@@ -25,10 +25,11 @@ param(
     [string]$OnPremApiAppId = '8f99f135-63dd-4679-88b7-32ad6ebf4219',
 
     [Parameter()]
-    [string]$OnPremApiScope = 'api://8f99f135-63dd-4679-88b7-32ad6ebf4219/.default',
+    # App Proxy validates aud against the external URL identifier URI (not api://guid).
+    [string]$OnPremApiScope = 'https://projectfastapi-benrobertsio.msappproxy.net/.default',
 
     [Parameter()]
-    [string]$OnPremAppRoleValue = 'Api.Read',
+    [string]$OnPremAppRoleValue = 'api.read',
 
     # Azure CLI first-party app — pre-authorized so `az account get-access-token` works for Easy Auth curls.
     [Parameter()]

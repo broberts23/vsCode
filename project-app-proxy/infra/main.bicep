@@ -127,6 +127,8 @@ resource functionApp 'Microsoft.Web/sites@2025-03-01' = {
       FUNCTIONS_EXTENSION_VERSION: '~4'
       ON_PREM_API_BASE_URL: onPremApiBaseUrl
       ON_PREM_API_SCOPE: onPremApiScope
+      TENANT_ID: tenantId
+      API_AUTH_AUDIENCE: easyAuthClientId
     }
   }
 

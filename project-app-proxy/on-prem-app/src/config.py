@@ -28,7 +28,7 @@ class Settings(BaseSettings):
         description="Expected access-token audience (app client ID or Application ID URI).",
     )
     required_api_role: str = Field(
-        default="Api.Read",
+        default="api.read",
         description="App role claim required for /api routes when auth is enabled.",
     )
     access_token_header: str = Field(

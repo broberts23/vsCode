@@ -19,15 +19,18 @@ _bearer_scheme = HTTPBearer(auto_error=False)
 _jwks_clients: dict[str, PyJWKClient] = {}
 
 
-def _issuer_for_tenant(tenant_id: str) -> str:
-    return f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+def _accepted_issuers(tenant_id: str) -> list[str]:
+    """v1 (sts.windows.net) and v2 issuers — App Proxy–oriented scopes often mint v1."""
+    return [
+        f"https://sts.windows.net/{tenant_id}/",
+        f"https://login.microsoftonline.com/{tenant_id}/v2.0",
+    ]
 
 
 def _jwks_client(tenant_id: str) -> PyJWKClient:
     if tenant_id not in _jwks_clients:
-        jwks_uri = (
-            f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
-        )
+        # Common keys endpoint serves both v1 and v2 signing keys for the tenant.
+        jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
         _jwks_clients[tenant_id] = PyJWKClient(jwks_uri)
     return _jwks_clients[tenant_id]
 
@@ -66,7 +69,7 @@ def validate_tenant_token(token: str, settings: Settings) -> dict[str, Any]:
             signing_key.key,
             algorithms=["RS256"],
             audience=settings.api_audience,
-            issuer=_issuer_for_tenant(settings.tenant_id),
+            issuer=_accepted_issuers(settings.tenant_id),
             options={"require": ["exp", "iss", "aud"]},
         )
     except httpx.HTTPError as exc:
