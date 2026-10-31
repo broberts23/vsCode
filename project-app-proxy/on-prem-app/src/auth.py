@@ -98,6 +98,36 @@ def _roles_from_claims(claims: dict[str, Any]) -> set[str]:
     return set()
 
 
+def _authorized_party(claims: dict[str, Any]) -> str | None:
+    """Caller app id: prefer azp (v2), fall back to appid (common on v1 app-only)."""
+    for claim in ("azp", "appid"):
+        value = claims.get(claim)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def require_allowed_azp(claims: dict[str, Any], settings: Settings) -> None:
+    """Restrict /api callers to the configured managed-identity application id."""
+    if not settings.allowed_azp:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Auth is enabled but ALLOWED_AZP is not configured.",
+        )
+
+    party = _authorized_party(claims)
+    if party != settings.allowed_azp:
+        logger.info(
+            "Authorized-party mismatch: got %r, expected %r",
+            party,
+            settings.allowed_azp,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Caller is not an allowed authorized party.",
+        )
+
+
 async def require_tenant_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
@@ -124,11 +154,12 @@ async def require_api_role(
     claims: dict[str, Any] | None = Depends(require_tenant_user),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any] | None:
-    """Require the configured app role in addition to a valid tenant token."""
+    """Require app role and allowed azp/appid in addition to a valid tenant token."""
     if settings.local_debug:
         return None
 
     assert claims is not None
+    require_allowed_azp(claims, settings)
     if settings.required_api_role not in _roles_from_claims(claims):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -38,6 +38,14 @@ class Settings(BaseSettings):
             "strips Authorization after Entra pre-authentication."
         ),
     )
+    allowed_azp: str = Field(
+        default="",
+        description=(
+            "Application (client) ID of the only authorized caller "
+            "(Function system-assigned managed identity). Compared to token "
+            "azp, with appid as fallback for v1 app-only tokens."
+        ),
+    )
     host: str = "0.0.0.0"
     port: int = 8000
 
