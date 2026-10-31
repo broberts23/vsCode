@@ -1,0 +1,49 @@
+{
+  "displayName": "proxylab ca app proxy mfa baseline",
+  "description": "Lab Policy A: Require MFA for App Proxy FastAPI access, plus time-based sign-in frequency. Function MI path is unaffected (user CA). Note: Conditional Access sign-in frequency supports Hours/Days only (not minutes); 1 hour is the shortest Graph-supported interval near a 30-minute goal.",
+  "resources": [
+    {
+      "displayName": "CA-Lab-AppProxy-RequireMFA",
+      "resourceType": "microsoft.entra.conditionalAccessPolicy",
+      "properties": {
+        "DisplayName": "CA-Lab-AppProxy-RequireMFA",
+        "Ensure": "Present",
+        "State": "enabledForReportingButNotEnforced",
+        "IncludeApplications": [
+          "{{AppProxyApplicationId}}"
+        ],
+        "ExcludeApplications": [],
+        "IncludeUsers": [
+          "All"
+        ],
+        "ExcludeUsers": [
+          "{{BreakGlassUserId}}"
+        ],
+        "IncludeGroups": [],
+        "ExcludeGroups": [],
+        "IncludeRoles": [],
+        "ExcludeRoles": [],
+        "IncludePlatforms": [],
+        "ExcludePlatforms": [],
+        "IncludeLocations": [],
+        "ExcludeLocations": [],
+        "ClientAppTypes": [
+          "all"
+        ],
+        "UserRiskLevels": [],
+        "SignInRiskLevels": [],
+        "GrantControlOperator": "OR",
+        "BuiltInControls": [
+          "mfa"
+        ],
+        "ApplicationEnforcedRestrictionsIsEnabled": false,
+        "CloudAppSecurityIsEnabled": false,
+        "SignInFrequencyIsEnabled": true,
+        "SignInFrequencyInterval": "timeBased",
+        "SignInFrequencyValue": 1,
+        "SignInFrequencyType": "Hours",
+        "PersistentBrowserIsEnabled": false
+      }
+    }
+  ]
+}
